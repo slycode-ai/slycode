@@ -1,0 +1,31 @@
+{
+  "name": "messaging-service",
+  "version": "0.2.0",
+  "license": "BUSL-1.1",
+  "description": "Multi-channel messaging service for remote Claude session interaction",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "messaging-cli": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-transcribe-streaming": "^3.1012.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.78.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.12.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+**/dist/
+**/.next/
+
+# Exception: packages/slycode/dist/ is a self-contained runtime bundle that
+# intentionally includes node_modules/, .next/, and compiled output.
+# These negations must come AFTER the ignore rules above.
+!packages/slycode/dist/
+!packages/slycode/dist/**
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
+nohup.out
+
+# Runtime state
+bridge-sessions.json
+bridge-config.json
+messaging-state.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

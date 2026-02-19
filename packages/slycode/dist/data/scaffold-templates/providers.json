@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "claude": {
+      "id": "claude",
+      "displayName": "Claude Code",
+      "command": "claude",
+      "install": "npm i -g @anthropic-ai/claude-code",
+      "instructionFile": "CLAUDE.md",
+      "permissions": {
+        "flag": "--dangerously-skip-permissions",
+        "label": "Skip permissions",
+        "default": true
+      },
+      "resume": {
+        "supported": true,
+        "type": "flag",
+        "flag": "--resume",
+        "detectSession": true,
+        "sessionDir": "~/.claude/projects/"
+      },
+      "prompt": {
+        "type": "positional"
+      }
+    },
+    "codex": {
+      "id": "codex",
+      "displayName": "Codex CLI",
+      "command": "codex",
+      "install": "npm i -g @openai/codex",
+      "instructionFile": "AGENTS.md",
+      "altInstructionFile": "CODEX.md",
+      "permissions": {
+        "flag": "--yolo",
+        "label": "YOLO mode",
+        "default": true
+      },
+      "resume": {
+        "supported": true,
+        "type": "subcommand",
+        "subcommand": "resume",
+        "lastFlag": "--last",
+        "detectSession": true
+      },
+      "prompt": {
+        "type": "positional"
+      }
+    },
+    "gemini": {
+      "id": "gemini",
+      "displayName": "Gemini CLI",
+      "command": "gemini",
+      "install": "npm i -g @google/gemini-cli",
+      "instructionFile": "GEMINI.md",
+      "altInstructionFile": "AGENTS.md",
+      "permissions": {
+        "flag": "--yolo",
+        "label": "YOLO mode",
+        "default": true
+      },
+      "resume": {
+        "supported": true,
+        "type": "flag",
+        "flag": "--resume",
+        "detectSession": true
+      },
+      "prompt": {
+        "type": "flag",
+        "interactive": "-i",
+        "nonInteractive": "-p"
+      }
+    }
+  },
+  "defaults": {
+    "stages": {
+      "backlog": {
+        "provider": "claude",
+        "skipPermissions": true
+      },
+      "design": {
+        "provider": "claude",
+        "skipPermissions": true
+      },
+      "implementation": {
+        "provider": "claude",
+        "skipPermissions": true
+      },
+      "testing": {
+        "provider": "claude",
+        "skipPermissions": true
+      },
+      "done": {
+        "provider": "claude",
+        "skipPermissions": true
+      },
+      "automation": {
+        "provider": "claude",
+        "skipPermissions": true
+      }
+    },
+    "global": {
+      "provider": "claude",
+      "skipPermissions": true
+    },
+    "projects": {}
+  }
+}

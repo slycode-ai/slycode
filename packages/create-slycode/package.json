@@ -1,0 +1,44 @@
+{
+  "name": "@slycode/create-slycode",
+  "version": "0.2.6",
+  "description": "Create a new SlyCode workspace",
+  "bin": {
+    "create-slycode": "./bin/create-slycode.js"
+  },
+  "main": "./lib/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "bin/",
+    "lib/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "slycode",
+    "create",
+    "scaffold",
+    "workspace"
+  ],
+  "author": "Greg Atkins <support@slycode.ai> (https://github.com/slycode-ai)",
+  "license": "BUSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/slycode-ai/slycode.git",
+    "directory": "packages/create-slycode"
+  },
+  "homepage": "https://github.com/slycode-ai/slycode#readme",
+  "bugs": {
+    "url": "https://github.com/slycode-ai/slycode/issues"
+  },
+  "dependencies": {
+    "@slycode/slycode": "^0.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "@slycode/slycode",
+  "version": "0.2.6",
+  "description": "AI-powered development workspace with kanban, terminal bridge, and skill management",
+  "bin": {
+    "slycode": "bin/slycode.js",
+    "sly-kanban": "bin/sly-kanban.js",
+    "sly-messaging": "bin/sly-messaging.js",
+    "sly-scaffold": "bin/sly-scaffold.js"
+  },
+  "main": "./lib/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "bin/",
+    "data/",
+    "lib/",
+    "dist/",
+    "templates/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "slycode",
+    "claude",
+    "ai",
+    "development",
+    "workspace",
+    "kanban",
+    "terminal"
+  ],
+  "author": "Greg Atkins <support@slycode.ai> (https://github.com/slycode-ai)",
+  "license": "BUSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/slycode-ai/slycode.git"
+  },
+  "homepage": "https://github.com/slycode-ai/slycode#readme",
+  "bugs": {
+    "url": "https://github.com/slycode-ai/slycode/issues"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "node-pty": "^1.0.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.78.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  }
+}

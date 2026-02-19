@@ -1,0 +1,590 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@source "../**/*.tsx";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f0f1f4;
+  --foreground: #08090b;
+  --neon-blue: #00bfff;
+  --neon-orange: #ff8c00;
+  --shadow-surface: 0 1px 4px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1);
+  --shadow-card: 0 6px 16px -2px rgba(0,0,0,0.14), 0 3px 6px -1px rgba(0,0,0,0.08);
+  --shadow-overlay: 0 24px 64px rgba(0,0,0,0.45), 0 8px 24px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Neon Blue scale */
+  --color-neon-blue-50: #e6f9ff;
+  --color-neon-blue-100: #b3edff;
+  --color-neon-blue-200: #66daff;
+  --color-neon-blue-300: #33cdff;
+  --color-neon-blue-400: #00bfff;
+  --color-neon-blue-500: #00a3d9;
+  --color-neon-blue-600: #0088b3;
+  --color-neon-blue-700: #006d8f;
+  --color-neon-blue-800: #00526b;
+  --color-neon-blue-900: #003d52;
+  --color-neon-blue-950: #001f2b;
+
+  /* Neon Orange scale */
+  --color-neon-orange-50: #fff4e6;
+  --color-neon-orange-100: #ffddb3;
+  --color-neon-orange-200: #ffbe66;
+  --color-neon-orange-300: #ffa533;
+  --color-neon-orange-400: #ff8c00;
+  --color-neon-orange-500: #d97700;
+  --color-neon-orange-600: #b36200;
+  --color-neon-orange-700: #8f4e00;
+  --color-neon-orange-800: #6b3a00;
+  --color-neon-orange-900: #522d00;
+  --color-neon-orange-950: #2b1700;
+
+  /* Void neutral scale (cool blue bias) */
+  --color-void-50: #f0f1f4;
+  --color-void-100: #dfe1e7;
+  --color-void-200: #b8bcc6;
+  --color-void-300: #9096a3;
+  --color-void-400: #6b7080;
+  --color-void-500: #4a4f5c;
+  --color-void-600: #363a45;
+  --color-void-700: #252830;
+  --color-void-800: #1a1d24;
+  --color-void-850: #12151a;
+  --color-void-900: #0d0f13;
+  --color-void-950: #08090b;
+}
+
+.dark {
+  --background: #08090b;
+  --foreground: #dfe1e7;
+  --shadow-surface: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+  --shadow-card: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 30px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,191,255,0.06);
+  --shadow-overlay: 0 32px 80px rgba(0,0,0,0.9), 0 12px 32px rgba(0,0,0,0.6), 0 0 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,191,255,0.1);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ========== Neon Selection & Focus ========== */
+
+::selection {
+  background: rgba(0, 191, 255, 0.3);
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(0, 191, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.context-menu-no-ring,
+.context-menu-no-ring:focus,
+.context-menu-no-ring:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+/* Stage-aware input focus — uses --focus-rgb CSS variable set by CardModal */
+.stage-focus:focus,
+.stage-focus:focus-visible {
+  outline: none !important;
+  border-color: rgb(var(--focus-rgb));
+  box-shadow: 0 0 0 1px rgba(var(--focus-rgb), 0.3);
+}
+
+/* ========== Neon Scrollbars ========== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 191, 255, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 191, 255, 0.4);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 191, 255, 0.2) transparent;
+}
+
+/* ========== Gradient Texture & Depth ========== */
+
+/* Fine grain — high-frequency film noise */
+.grain {
+  position: relative;
+  isolation: isolate;
+}
+
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+:root:where(.dark) .grain::after {
+  opacity: 0.2;
+}
+
+/* Softer grain for lighter surfaces */
+.grain-soft::after {
+  opacity: 0.25;
+}
+
+:root:where(.dark) .grain-soft::after {
+  opacity: 0.2;
+}
+
+/* Light mode: suppress texture on headers */
+:root:not(.dark) .light-clean.grain::after,
+:root:not(.dark) .light-clean.depth-glow::before {
+  display: none;
+}
+
+/* Large-scale perlin noise — low-frequency organic texture for depth */
+.depth-glow {
+  position: relative;
+}
+
+.depth-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.55;
+  background:
+    radial-gradient(ellipse 80% 100% at 25% 0%, rgba(255, 255, 255, 0.25) 0%, transparent 60%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.015' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
+  background-size: 100% 100%, 400px 400px;
+  mask-image: linear-gradient(to right, black, transparent 85%);
+  -webkit-mask-image: linear-gradient(to right, black, transparent 85%);
+}
+
+:root:where(.dark) .depth-glow::before {
+  opacity: 0.14;
+  background:
+    radial-gradient(ellipse 80% 100% at 25% 0%, rgba(255, 255, 255, 0.1) 0%, transparent 60%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
+  background-size: 100% 100%, 400px 400px;
+}
+
+/* ========== Lane Textures ========== */
+
+/* Lane grid texture — 18px squares */
+.lane-texture {
+  background-image:
+    linear-gradient(rgba(40,80,200,0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40,80,200,0.12) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+:root:where(.dark) .lane-texture {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+}
+
+/* ========== Terminal Texture ========== */
+
+.terminal-texture {
+  --terminal-tint: transparent;
+  background:
+    /* Colored edge glow from lane */
+    radial-gradient(ellipse 120% 80% at 0% 50%, var(--terminal-tint), transparent 60%),
+    /* Subtle full tint wash — colors the grain */
+    linear-gradient(to right, var(--terminal-tint), transparent 70%),
+    /* Vignette — darkens edges for depth */
+    radial-gradient(ellipse 90% 80% at 50% 50%, transparent 50%, rgba(0, 0, 0, 0.15) 100%),
+    /* Fine grain — grayscale CRT-like noise (desaturated so only lane tint provides color) */
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='t'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23t)'/%3E%3C/svg%3E");
+  background-size: 100% 100%, 100% 100%, 100% 100%, 150px 150px;
+  mix-blend-mode: soft-light;
+  opacity: 0.3;
+  mask-image:
+    linear-gradient(to right, black, transparent 20%, transparent 80%, black),
+    linear-gradient(to bottom, black, transparent 20%, transparent 80%, black);
+  -webkit-mask-image:
+    linear-gradient(to right, black, transparent 20%, transparent 80%, black),
+    linear-gradient(to bottom, black, transparent 20%, transparent 80%, black);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+:root:where(.dark) .terminal-texture {
+  mix-blend-mode: screen;
+  opacity: 0.15;
+  mask-image:
+    linear-gradient(to right, black, transparent 20%, transparent 80%, black),
+    linear-gradient(to bottom, black, transparent 20%, transparent 80%, black);
+  -webkit-mask-image:
+    linear-gradient(to right, black, transparent 20%, transparent 80%, black),
+    linear-gradient(to bottom, black, transparent 20%, transparent 80%, black);
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+/* ========== Logo Animations ========== */
+
+.logo-breathe {
+  /* Glow disabled — logos have opaque backgrounds that cause rectangular drop-shadow artifacts with mix-blend-mode */
+}
+
+.logo-nav {
+  transition: transform 200ms ease-out;
+}
+
+.logo-nav:hover {
+  transform: scale(1.08);
+}
+
+.logo-nav:active {
+  transform: scale(0.95);
+}
+
+/* ========== Active Session Glows ========== */
+
+/* Card session glow - uses --glow-color from priority stripe */
+/* Previous blue values (for revert): outline rgba(0,191,255,0.7), glow rgba(0,191,255,0.35-0.55), light rgba(0,160,220) */
+.active-glow-card {
+  --glow-color: 0, 191, 255; /* fallback blue if no inline --glow-color */
+  animation: neon-pulse-priority 2s ease-in-out infinite;
+  outline: 2px solid rgba(var(--glow-color), 0.7);
+  outline-offset: 1px;
+}
+
+:root:not(.dark) .active-glow-card {
+  animation: neon-pulse-priority-light 2s ease-in-out infinite;
+  outline: 2px solid rgba(var(--glow-color), 0.55);
+  outline-offset: 1px;
+}
+
+@keyframes neon-pulse-priority {
+  0%, 100% {
+    outline-color: rgba(var(--glow-color), 0.5);
+    box-shadow: var(--shadow-card), 0 0 8px 2px rgba(var(--glow-color), 0.35);
+  }
+  50% {
+    outline-color: rgba(var(--glow-color), 0.9);
+    box-shadow: var(--shadow-card), 0 0 12px 3px rgba(var(--glow-color), 0.5);
+  }
+}
+
+@keyframes neon-pulse-priority-light {
+  0%, 100% {
+    outline-color: rgba(var(--glow-color), 0.4);
+    box-shadow: var(--shadow-card), 0 0 8px 2px rgba(var(--glow-color), 0.2);
+  }
+  50% {
+    outline-color: rgba(var(--glow-color), 0.7);
+    box-shadow: var(--shadow-card), 0 0 14px 4px rgba(var(--glow-color), 0.35);
+  }
+}
+
+/* Automation card session glow - neon orange pulse */
+.active-glow-automation {
+  animation: neon-pulse-card-orange 2s ease-in-out infinite;
+  outline: 2px solid rgba(249, 115, 22, 0.7);
+  outline-offset: 1px;
+}
+
+/* Light mode: darker orange with stronger glow */
+:root:not(.dark) .active-glow-automation {
+  animation: neon-pulse-card-orange-light 2s ease-in-out infinite;
+  outline: 2px solid rgba(179, 98, 0, 0.8);
+  outline-offset: 1px;
+}
+
+@keyframes neon-pulse-card-orange {
+  0%, 100% {
+    outline-color: rgba(249, 115, 22, 0.5);
+    box-shadow: var(--shadow-card), 0 0 8px 2px rgba(249, 115, 22, 0.3);
+  }
+  50% {
+    outline-color: rgba(249, 115, 22, 0.9);
+    box-shadow: var(--shadow-card), 0 0 16px 4px rgba(249, 115, 22, 0.5);
+  }
+}
+
+@keyframes neon-pulse-card-orange-light {
+  0%, 100% {
+    outline-color: rgba(179, 98, 0, 0.6);
+    box-shadow: var(--shadow-card), 0 0 10px 3px rgba(179, 98, 0, 0.25);
+  }
+  50% {
+    outline-color: rgba(179, 98, 0, 0.95);
+    box-shadow: var(--shadow-card), 0 0 18px 5px rgba(179, 98, 0, 0.4);
+  }
+}
+
+/* Global terminal glow - neon blue pulse with white highlight */
+.active-glow-global {
+  animation: neon-pulse-global-blue 2s ease-in-out infinite;
+}
+
+/* Light mode: deeper blue for global terminal */
+:root:not(.dark) .active-glow-global {
+  animation: neon-pulse-global-blue-light 2s ease-in-out infinite;
+}
+
+@keyframes neon-pulse-global-blue {
+  0%, 100% {
+    box-shadow: var(--shadow-surface), 0 0 8px 2px rgba(0, 191, 255, 0.35);
+    filter: brightness(1.05);
+  }
+  50% {
+    box-shadow: var(--shadow-surface), 0 0 14px 3px rgba(0, 191, 255, 0.55);
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes neon-pulse-global-blue-light {
+  0%, 100% {
+    box-shadow: var(--shadow-surface), 0 0 14px 4px rgba(10, 60, 100, 0.6);
+  }
+  50% {
+    box-shadow: var(--shadow-surface), 0 0 24px 6px rgba(10, 60, 100, 0.8);
+  }
+}
+
+/* Automation button glow - orange box-shadow pulse (smaller than global) */
+.active-glow-automation-btn {
+  animation: neon-pulse-automation-btn 2s ease-in-out infinite;
+}
+
+/* Light mode: darker orange for automation button */
+:root:not(.dark) .active-glow-automation-btn {
+  animation: neon-pulse-automation-btn-light 2s ease-in-out infinite;
+}
+
+@keyframes neon-pulse-automation-btn {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(249, 115, 22, 0.4), 0 0 16px 4px rgba(249, 115, 22, 0.15);
+    filter: brightness(1.05);
+  }
+  50% {
+    box-shadow: 0 0 14px 4px rgba(249, 115, 22, 0.6), 0 0 28px 8px rgba(249, 115, 22, 0.3);
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes neon-pulse-automation-btn-light {
+  0%, 100% {
+    box-shadow: 0 0 10px 4px rgba(179, 98, 0, 0.45), 0 0 18px 6px rgba(179, 98, 0, 0.2);
+    filter: brightness(1.0);
+  }
+  50% {
+    box-shadow: 0 0 16px 6px rgba(179, 98, 0, 0.65), 0 0 30px 10px rgba(179, 98, 0, 0.35);
+    filter: brightness(1.1);
+  }
+}
+
+/* Global terminal left border glow */
+.active-glow-border-left {
+  animation: neon-border-left 2s ease-in-out infinite;
+}
+
+/* Light mode: deeper blue for border glow */
+:root:not(.dark) .active-glow-border-left {
+  animation: neon-border-left-light 2s ease-in-out infinite;
+}
+
+@keyframes neon-border-left {
+  0%, 100% {
+    box-shadow: inset 3px 0 8px -2px rgba(0, 191, 255, 0.4);
+  }
+  50% {
+    box-shadow: inset 4px 0 16px -2px rgba(0, 191, 255, 0.7);
+  }
+}
+
+@keyframes neon-border-left-light {
+  0%, 100% {
+    box-shadow: inset 4px 0 10px -1px rgba(36, 144, 181, 0.5);
+  }
+  50% {
+    box-shadow: inset 5px 0 18px -1px rgba(36, 144, 181, 0.75);
+  }
+}
+
+/* ========== Content Transitions ========== */
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-in {
+  animation: fadeSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ========== Neon Header Border ========== */
+
+.neon-header-border::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 191, 255, 0.3) 20%, rgba(0, 191, 255, 0.5) 50%, rgba(255, 140, 0, 0.3) 80%, transparent 100%);
+}
+
+/* ========== Automation Card Textures ========== */
+
+/* Chevron arrow background — right-pointing arrows fading left to right
+   Filled polygon approach (no stroke/miter issues). 3 copies per tile for seamless wrap.
+   Math: 90° tip angle at H≈78px, thick interlocking arms, W=50px tile.
+   travel=78vb (39px), arm=44vb (22px), gap=56vb (28px). Tips overlap into next chevron. */
+.automation-chevron {
+  position: relative;
+}
+
+.automation-chevron::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M-56 0L22 50L-56 100L-100 100L-22 50L-100 0Z M44 0L122 50L44 100L0 100L78 50L0 0Z M144 0L222 50L144 100L100 100L178 50L100 0Z' fill='%23f97316' /%3E%3C/svg%3E");
+  background-size: 50px 100%;
+  background-repeat: repeat-x;
+  opacity: 0.15;
+  mask-image: linear-gradient(to right, black 10%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to right, black 10%, transparent 70%);
+}
+
+:root:where(.dark) .automation-chevron::before {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 100' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M-56 0L22 50L-56 100L-100 100L-22 50L-100 0Z M44 0L122 50L44 100L0 100L78 50L0 0Z M144 0L222 50L144 100L100 100L178 50L100 0Z' fill='%23ffffff' /%3E%3C/svg%3E");
+  opacity: 0.08;
+}
+
+/* Animated chevron scroll for active/running automation cards */
+.automation-chevron-active::before {
+  animation: chevron-scroll 3s linear infinite;
+}
+
+@keyframes chevron-scroll {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 50px;
+  }
+}
+
+/* Muted chevron for disabled automation cards */
+.automation-chevron-muted::before {
+  opacity: 0.02 !important;
+}
+
+/* Hazard stripe — industrial diagonal bar */
+.hazard-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    #f59e0b,
+    #f59e0b 8px,
+    #1a1d24 8px,
+    #1a1d24 16px
+  );
+}
+
+:root:where(.dark) .hazard-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 140, 0, 0.65),
+    rgba(255, 140, 0, 0.65) 8px,
+    rgba(13, 15, 19, 0.8) 8px,
+    rgba(13, 15, 19, 0.8) 16px
+  );
+}
+
+/* Muted hazard stripe for disabled cards */
+.hazard-stripe-muted {
+  background: repeating-linear-gradient(
+    -45deg,
+    #9096a3,
+    #9096a3 8px,
+    #dfe1e7 8px,
+    #dfe1e7 16px
+  ) !important;
+  opacity: 0.3;
+}
+
+:root:where(.dark) .hazard-stripe-muted {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(107, 112, 128, 0.4),
+    rgba(107, 112, 128, 0.4) 8px,
+    rgba(13, 15, 19, 0.5) 8px,
+    rgba(13, 15, 19, 0.5) 16px
+  ) !important;
+  opacity: 0.4;
+}
+
+/* ========== Scrollbar Hide ========== */
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ========== Reduced Motion ========== */
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-breathe,
+  .active-glow-card,
+  .active-glow-automation,
+  .active-glow-global,
+  .active-glow-automation-btn,
+  .active-glow-border-left,
+  .fade-slide-in,
+  .automation-chevron-active::before {
+    animation: none;
+  }
+
+  .logo-nav {
+    transition: none;
+  }
+
+  .logo-nav:hover {
+    transform: none;
+  }
+}

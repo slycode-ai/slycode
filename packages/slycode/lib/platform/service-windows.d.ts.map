@@ -1,0 +1,1 @@
+{"version":3,"file":"service-windows.d.ts","sourceRoot":"","sources":["../../src/platform/service-windows.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,kBAAkB,CAAC;AAoJtD,wBAAsB,cAAc,CAClC,MAAM,EAAE,SAAS,GAAG,QAAQ,GAAG,QAAQ,EACvC,SAAS,EAAE,MAAM,EACjB,MAAM,EAAE,aAAa,GACpB,OAAO,CAAC,IAAI,CAAC,CAMf"}

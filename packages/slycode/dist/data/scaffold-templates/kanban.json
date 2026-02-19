@@ -1,0 +1,11 @@
+{
+  "project_id": "{{PROJECT_ID}}",
+  "stages": {
+    "backlog": [],
+    "design": [],
+    "implementation": [],
+    "testing": [],
+    "done": []
+  },
+  "last_updated": "{{TIMESTAMP}}"
+}

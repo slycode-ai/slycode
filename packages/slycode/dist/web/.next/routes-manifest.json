@@ -1,0 +1,261 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/bridge/[...path]",
+      "regex": "^/api/bridge/(.+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPpath": "nxtPpath"
+      },
+      "namedRegex": "^/api/bridge/(?<nxtPpath>.+?)(?:/)?$"
+    },
+    {
+      "page": "/api/projects/[id]",
+      "regex": "^/api/projects/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/project/[id]",
+      "regex": "^/project/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/project/(?<nxtPid>[^/]+?)(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/areas",
+      "regex": "^/api/areas(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/areas(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets",
+      "regex": "^/api/cli\\-assets(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/assistant",
+      "regex": "^/api/cli\\-assets/assistant(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/assistant(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/fix",
+      "regex": "^/api/cli\\-assets/fix(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/fix(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/import",
+      "regex": "^/api/cli\\-assets/import(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/import(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/store",
+      "regex": "^/api/cli\\-assets/store(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/store(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/store/preview",
+      "regex": "^/api/cli\\-assets/store/preview(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/store/preview(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/sync",
+      "regex": "^/api/cli\\-assets/sync(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/sync(?:/)?$"
+    },
+    {
+      "page": "/api/cli-assets/updates",
+      "regex": "^/api/cli\\-assets/updates(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/updates(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard",
+      "regex": "^/api/dashboard(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard(?:/)?$"
+    },
+    {
+      "page": "/api/events",
+      "regex": "^/api/events(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/events(?:/)?$"
+    },
+    {
+      "page": "/api/file",
+      "regex": "^/api/file(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/file(?:/)?$"
+    },
+    {
+      "page": "/api/git-status",
+      "regex": "^/api/git\\-status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/git\\-status(?:/)?$"
+    },
+    {
+      "page": "/api/kanban",
+      "regex": "^/api/kanban(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/kanban(?:/)?$"
+    },
+    {
+      "page": "/api/kanban/stream",
+      "regex": "^/api/kanban/stream(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/kanban/stream(?:/)?$"
+    },
+    {
+      "page": "/api/projects",
+      "regex": "^/api/projects(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/projects(?:/)?$"
+    },
+    {
+      "page": "/api/projects/analyze",
+      "regex": "^/api/projects/analyze(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/projects/analyze(?:/)?$"
+    },
+    {
+      "page": "/api/projects/reorder",
+      "regex": "^/api/projects/reorder(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/projects/reorder(?:/)?$"
+    },
+    {
+      "page": "/api/providers",
+      "regex": "^/api/providers(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/providers(?:/)?$"
+    },
+    {
+      "page": "/api/scheduler",
+      "regex": "^/api/scheduler(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/scheduler(?:/)?$"
+    },
+    {
+      "page": "/api/search",
+      "regex": "^/api/search(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/search(?:/)?$"
+    },
+    {
+      "page": "/api/settings",
+      "regex": "^/api/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/settings(?:/)?$"
+    },
+    {
+      "page": "/api/sly-actions",
+      "regex": "^/api/sly\\-actions(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/sly\\-actions(?:/)?$"
+    },
+    {
+      "page": "/api/sly-actions/invalidate",
+      "regex": "^/api/sly\\-actions/invalidate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/sly\\-actions/invalidate(?:/)?$"
+    },
+    {
+      "page": "/api/sly-actions/stream",
+      "regex": "^/api/sly\\-actions/stream(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/sly\\-actions/stream(?:/)?$"
+    },
+    {
+      "page": "/api/system-stats",
+      "regex": "^/api/system\\-stats(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/system\\-stats(?:/)?$"
+    },
+    {
+      "page": "/api/terminal-classes",
+      "regex": "^/api/terminal\\-classes(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/terminal\\-classes(?:/)?$"
+    },
+    {
+      "page": "/api/transcribe",
+      "regex": "^/api/transcribe(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/transcribe(?:/)?$"
+    },
+    {
+      "page": "/api/version-check",
+      "regex": "^/api/version\\-check(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/version\\-check(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

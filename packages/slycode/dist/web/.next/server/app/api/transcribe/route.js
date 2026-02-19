@@ -1,0 +1,11 @@
+var R=require("../../../chunks/[turbopack]_runtime.js")("server/app/api/transcribe/route.js")
+R.c("server/chunks/[root-of-the-server]__0f8687da._.js")
+R.c("server/chunks/node_modules_next_1402a1da._.js")
+R.c("server/chunks/[root-of-the-server]__403750fd._.js")
+R.c("server/chunks/[root-of-the-server]__3998d59e._.js")
+R.c("server/chunks/[root-of-the-server]__8f5ebbc3._.js")
+R.c("server/chunks/node_modules_ec9ae6c4._.js")
+R.c("server/chunks/a9bf9_@aws-sdk_core_dist-es_submodules_protocols_json_AwsRestJsonProtocol_764d7a83.js")
+R.c("server/chunks/_next-internal_server_app_api_transcribe_route_actions_4742f5c6.js")
+R.m(99567)
+module.exports=R.m(99567).exports

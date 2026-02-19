@@ -1,0 +1,147 @@
+import { NextResponse } from 'next/server';
+import { loadRegistry, saveRegistry } from '@/lib/registry';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import os from 'os';
+import { getSlycodeRoot, getPackageDir } from '@/lib/paths';
+
+const execFileAsync = promisify(execFile);
+
+export const dynamic = 'force-dynamic';
+
+function expandTilde(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    return p.replace(/^~/, os.homedir());
+  }
+  return p;
+}
+
+function toKebabCase(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * GET /api/projects - List all projects
+ */
+export async function GET() {
+  try {
+    const registry = await loadRegistry();
+    return NextResponse.json(registry.projects);
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+    return NextResponse.json(
+      { error: 'Failed to load projects' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/projects - Create a new project with scaffolding
+ */
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { name, description, path: projectPath, tags, scaffoldConfig, providers } = body;
+
+    if (!name || !projectPath) {
+      return NextResponse.json(
+        { error: 'name and path are required' },
+        { status: 400 }
+      );
+    }
+
+    // Resolve tilde and make absolute
+    const resolvedPath = path.resolve(expandTilde(projectPath));
+
+    const registry = await loadRegistry();
+    const projectId = toKebabCase(name);
+
+    // Check for duplicate by ID or path
+    if (registry.projects.some((p) => p.id === projectId)) {
+      return NextResponse.json(
+        { error: `Project with id '${projectId}' already exists` },
+        { status: 409 }
+      );
+    }
+    if (registry.projects.some((p) => p.path === resolvedPath)) {
+      const existing = registry.projects.find((p) => p.path === resolvedPath);
+      return NextResponse.json(
+        { error: `This directory is already registered as '${existing?.name}'` },
+        { status: 409 }
+      );
+    }
+
+    // Run scaffold script
+    const scaffoldScript = path.join(getPackageDir(), 'scripts', 'scaffold.js');
+    const args = [
+      scaffoldScript,
+      'create',
+      '--path', resolvedPath,
+      '--name', name,
+      '--id', projectId,
+    ];
+    if (description) {
+      args.push('--description', description);
+    }
+    if (providers && Array.isArray(providers) && providers.length > 0) {
+      args.push('--providers', providers.join(','));
+    }
+    if (scaffoldConfig) {
+      args.push('--config', JSON.stringify(scaffoldConfig));
+    }
+
+    const { stdout, stderr } = await execFileAsync('node', args, {
+      timeout: 30000,
+      windowsHide: true,
+    });
+
+    let scaffoldResult;
+    try {
+      scaffoldResult = JSON.parse(stdout);
+    } catch {
+      return NextResponse.json(
+        { error: 'Scaffold script returned invalid output', details: stdout, stderr },
+        { status: 500 }
+      );
+    }
+
+    if (!scaffoldResult.success) {
+      return NextResponse.json(
+        { error: 'Scaffolding failed', details: scaffoldResult },
+        { status: 500 }
+      );
+    }
+
+    // Add to registry
+    const newProject = {
+      id: projectId,
+      name,
+      description: description || '',
+      path: resolvedPath,
+      hasClaudeMd: true,
+      masterCompliant: true,
+      areas: [] as string[],
+      tags: tags || [],
+    };
+
+    registry.projects.push(newProject);
+    registry.lastUpdated = new Date().toISOString();
+    await saveRegistry(registry);
+
+    return NextResponse.json({
+      project: newProject,
+      scaffold: scaffoldResult,
+    }, { status: 201 });
+  } catch (error) {
+    console.error('Failed to create project:', error);
+    return NextResponse.json(
+      { error: 'Failed to create project', details: String(error) },
+      { status: 500 }
+    );
+  }
+}
