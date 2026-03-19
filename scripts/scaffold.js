@@ -554,8 +554,9 @@ function runCreate(args) {
           continue;
         }
 
-        // Never overwrite existing skills — updates are handled via CLI assets management
-        if (dirExists(destSkill)) {
+        // Skip if skill is already populated — updates are handled via CLI assets management
+        // Check for SKILL.md specifically, not just directory existence (empty dirs from failed copies don't count)
+        if (fileExists(path.join(destSkill, 'SKILL.md'))) {
           skippedSkills.push(skill.name);
           continue;
         }

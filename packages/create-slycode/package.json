@@ -1,6 +1,6 @@
 {
   "name": "@slycode/create-slycode",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Create a new SlyCode workspace",
   "bin": {
     "create-slycode": "./bin/create-slycode.js"

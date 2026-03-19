@@ -17,36 +17,6 @@ function getStorePath(): string {
   return path.join(getSlycodeRoot(), 'store');
 }
 
-/** Load manifest lists. Returns null if manifest not found. */
-function loadManifest(): { skills: string[]; actions: string[]; agents: string[]; mcp: string[] } | null {
-  // Try multiple locations: dev repo, then package dist
-  const candidates = [
-    path.join(getSlycodeRoot(), 'build', 'store-manifest.js'),
-    path.join(getSlycodeRoot(), 'node_modules', '@slycode', 'slycode', 'build', 'store-manifest.js'),
-  ];
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) {
-        // Use dynamic import workaround — read and parse manually to avoid require()
-        const content = fs.readFileSync(p, 'utf-8');
-        const mod: Record<string, unknown> = {};
-        const fn = new Function('module', 'exports', content);
-        fn(mod, mod);
-        const result = (mod as { exports?: { skills?: string[]; actions?: string[]; agents?: string[]; mcp?: string[] } }).exports;
-        if (result?.skills) return {
-          skills: result.skills,
-          actions: result.actions || [],
-          agents: result.agents || [],
-          mcp: result.mcp || [],
-        };
-      }
-    } catch {
-      // Try next candidate
-    }
-  }
-  return null;
-}
-
 // ============================================================================
 // Store Directory Scanning
 // ============================================================================
@@ -154,56 +124,25 @@ function scanStoreMcp(storePath: string): StoreAssetInfo[] {
 // ============================================================================
 
 /**
- * Full store scan — returns only manifest-approved assets.
+ * Full store scan — returns all assets in the store.
+ * The manifest is only used by the build pipeline (build-package.ts) to control
+ * what ships in the npm package. The store UI shows everything.
  */
 export function scanStore(): StoreData {
   const storePath = getStorePath();
-  const manifest = loadManifest();
-
-  let skills = scanStoreAssetDir(storePath, 'skill');
-  let agents = scanStoreAssetDir(storePath, 'agent');
-  let mcp = scanStoreMcp(storePath);
-
-  if (manifest) {
-    if (manifest.skills) {
-      const allowed = new Set(manifest.skills);
-      skills = skills.filter(s => allowed.has(s.name));
-    }
-    if (manifest.agents) {
-      const allowed = new Set(manifest.agents);
-      agents = agents.filter(a => allowed.has(a.name));
-    }
-    if (manifest.mcp) {
-      const allowed = new Set(manifest.mcp);
-      mcp = mcp.filter(m => allowed.has(m.name));
-    }
-  }
-
+  const skills = scanStoreAssetDir(storePath, 'skill');
+  const agents = scanStoreAssetDir(storePath, 'agent');
+  const mcp = scanStoreMcp(storePath);
   return { skills, agents, mcp };
 }
 
 /**
  * Get flat list of all store assets (skills + agents).
  * Used as the master source for project matrix comparison.
- * Skills are filtered by manifest.
  */
 export function getStoreAssets(): StoreAssetInfo[] {
   const storePath = getStorePath();
-  const manifest = loadManifest();
-
-  let skills = scanStoreAssetDir(storePath, 'skill');
-  let agents = scanStoreAssetDir(storePath, 'agent');
-
-  if (manifest) {
-    if (manifest.skills) {
-      const allowed = new Set(manifest.skills);
-      skills = skills.filter(s => allowed.has(s.name));
-    }
-    if (manifest.agents) {
-      const allowed = new Set(manifest.agents);
-      agents = agents.filter(a => allowed.has(a.name));
-    }
-  }
-
+  const skills = scanStoreAssetDir(storePath, 'skill');
+  const agents = scanStoreAssetDir(storePath, 'agent');
   return [...skills, ...agents];
 }
