@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-03-20
+
+### Added
+- Restart CLI command
+
+### Changed
+- Service management updates for Linux/macOS
+- Build pipeline: dist/store filtered to manifest skills/actions only
+
+### Fixed
+- Voice recorder hook
+
 ## [0.1.0] - 2026-02-19
 
 ### Added

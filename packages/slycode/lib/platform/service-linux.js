@@ -90,8 +90,8 @@ function loadEnvFile(workspace) {
 function resolveWrapperScript(workspace) {
     const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
     const wrapperPath = packageDir
-        ? path.join(packageDir, 'templates', 'slycode-env-wrapper.sh')
-        : path.join(workspace, 'packages', 'slycode', 'templates', 'slycode-env-wrapper.sh');
+        ? path.join(packageDir, 'dist', 'scripts', 'slycode-env-wrapper.sh')
+        : path.join(workspace, 'packages', 'slycode', 'src', 'platform', 'slycode-env-wrapper.sh');
     return wrapperPath;
 }
 function generateUnit(service, workspace, config) {

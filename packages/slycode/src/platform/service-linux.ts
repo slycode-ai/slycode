@@ -57,8 +57,8 @@ function loadEnvFile(workspace: string): Record<string, string> {
 function resolveWrapperScript(workspace: string): string {
   const packageDir = resolvePackageDir(workspace);
   const wrapperPath = packageDir
-    ? path.join(packageDir, 'templates', 'slycode-env-wrapper.sh')
-    : path.join(workspace, 'packages', 'slycode', 'templates', 'slycode-env-wrapper.sh');
+    ? path.join(packageDir, 'dist', 'scripts', 'slycode-env-wrapper.sh')
+    : path.join(workspace, 'packages', 'slycode', 'src', 'platform', 'slycode-env-wrapper.sh');
   return wrapperPath;
 }
 

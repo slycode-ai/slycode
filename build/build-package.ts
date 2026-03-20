@@ -11,7 +11,6 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import * as os from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -25,9 +24,8 @@ const ROOT = path.resolve(__dirname, '..');
 const PKG_DIR = path.join(ROOT, 'packages', 'slycode');
 const DIST_DIR = path.join(PKG_DIR, 'dist');
 const TEMPLATES_DIR = path.join(PKG_DIR, 'templates');
-const TUTORIAL_TEMPLATE_DIR = path.join(TEMPLATES_DIR, 'tutorial-project');
-
-let preservedTutorialTemplateDir: string | null = null;
+const TUTORIAL_TEMPLATE_SRC = path.join(ROOT, 'data', 'scaffold-templates', 'tutorial-project');
+const TUTORIAL_TEMPLATE_DEST = path.join(TEMPLATES_DIR, 'tutorial-project');
 
 function run(cmd: string, cwd: string, label: string): void {
   console.log(`  Building ${label}...`);
@@ -60,15 +58,6 @@ function copyDirRecursive(src: string, dest: string, opts?: { includeAll?: boole
 
 function clean(): void {
   console.log('Cleaning previous build...');
-
-  // Preserve tutorial template source before templates/ is wiped.
-  if (fs.existsSync(TUTORIAL_TEMPLATE_DIR)) {
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slycode-tutorial-template-'));
-    preservedTutorialTemplateDir = path.join(tmpRoot, 'tutorial-project');
-    copyDirRecursive(TUTORIAL_TEMPLATE_DIR, preservedTutorialTemplateDir, { includeAll: true });
-  } else {
-    preservedTutorialTemplateDir = null;
-  }
 
   if (fs.existsSync(DIST_DIR)) {
     fs.rmSync(DIST_DIR, { recursive: true, force: true });
@@ -224,11 +213,11 @@ function copyTemplates(): void {
   copyStoreActions();
 
   // Tutorial project template (full standalone project, includes dot-directories)
-  if (preservedTutorialTemplateDir && fs.existsSync(preservedTutorialTemplateDir)) {
-    copyDirRecursive(preservedTutorialTemplateDir, TUTORIAL_TEMPLATE_DIR, { includeAll: true });
+  if (fs.existsSync(TUTORIAL_TEMPLATE_SRC)) {
+    copyDirRecursive(TUTORIAL_TEMPLATE_SRC, TUTORIAL_TEMPLATE_DEST, { includeAll: true });
     console.log('  \u2713 tutorial-project');
   } else {
-    console.warn('  ! tutorial-project not found — skipping');
+    console.warn('  ! tutorial-project not found at data/scaffold-templates/ — skipping');
   }
 
   // Updates folder (flat canonical updates/skills/ → templates/updates/skills/)
@@ -290,7 +279,7 @@ function copyTemplates(): void {
     console.warn('  ! CLAUDE.release.md not found — skipping');
   }
 
-  // Scripts (kanban.js, scaffold.js)
+  // Scripts (kanban.js, scaffold.js, env wrapper)
   const scriptsDir = path.join(DIST_DIR, 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
   const scriptsToCopy = ['kanban.js', 'scaffold.js'];
@@ -300,6 +289,16 @@ function copyTemplates(): void {
       fs.copyFileSync(srcPath, path.join(scriptsDir, script));
     }
   }
+
+  // Service env wrapper (sources .env before exec'ing node — used by systemd/launchd)
+  const wrapperSrc = path.join(PKG_DIR, 'src', 'platform', 'slycode-env-wrapper.sh');
+  if (fs.existsSync(wrapperSrc)) {
+    fs.copyFileSync(wrapperSrc, path.join(scriptsDir, 'slycode-env-wrapper.sh'));
+    fs.chmodSync(path.join(scriptsDir, 'slycode-env-wrapper.sh'), 0o755);
+  } else {
+    console.warn('  ! slycode-env-wrapper.sh not found — service install will fail');
+  }
+
   console.log('  \u2713 Scripts');
 
   // Scaffold templates (used by scaffold.js at runtime)

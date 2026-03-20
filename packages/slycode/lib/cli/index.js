@@ -53,6 +53,7 @@ Usage: slycode <command> [options]
 Getting Started:
   start                Start all services
   stop                 Stop all services
+  restart [service]    Restart all or a specific service (e.g. restart web)
   doctor               Check your environment is healthy
 
 Service Management:
@@ -108,6 +109,11 @@ async function main(args) {
         case 'stop': {
             const { stop } = await Promise.resolve().then(() => __importStar(require('./stop')));
             await stop(subArgs);
+            break;
+        }
+        case 'restart': {
+            const { restart } = await Promise.resolve().then(() => __importStar(require('./restart')));
+            await restart(subArgs);
             break;
         }
         case 'service': {
