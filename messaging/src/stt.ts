@@ -2,15 +2,16 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import {
-  TranscribeStreamingClient,
-  StartStreamTranscriptionCommand,
-  AudioStream,
-  LanguageCode,
-  MediaEncoding,
-} from '@aws-sdk/client-transcribe-streaming';
+  TranscribeClient,
+  StartTranscriptionJobCommand,
+  GetTranscriptionJobCommand,
+  type LanguageCode,
+} from '@aws-sdk/client-transcribe';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 let openaiClient: OpenAI | null = null;
-let transcribeClient: TranscribeStreamingClient | null = null;
+let transcribeClient: TranscribeClient | null = null;
+let s3Client: S3Client | null = null;
 
 function getClient(apiKey: string): OpenAI {
   if (!openaiClient) {
@@ -19,11 +20,18 @@ function getClient(apiKey: string): OpenAI {
   return openaiClient;
 }
 
-function getTranscribeClient(region?: string): TranscribeStreamingClient {
+function getTranscribeClient(region?: string): TranscribeClient {
   if (!transcribeClient) {
-    transcribeClient = new TranscribeStreamingClient(region ? { region } : {});
+    transcribeClient = new TranscribeClient(region ? { region } : {});
   }
   return transcribeClient;
+}
+
+function getS3Client(region?: string): S3Client {
+  if (!s3Client) {
+    s3Client = new S3Client(region ? { region } : {});
+  }
+  return s3Client;
 }
 
 async function transcribeOpenAI(filePath: string, apiKey: string): Promise<string> {
@@ -66,69 +74,78 @@ function transcribeLocal(filePath: string, cliPath: string, modelPath: string): 
   }
 }
 
-async function transcribeAwsStreaming(filePath: string, region: string, language: string): Promise<string> {
-  const client = getTranscribeClient(region || undefined);
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function transcribeAwsBatch(
+  filePath: string,
+  region: string,
+  language: string,
+  s3Bucket: string,
+): Promise<string> {
+  const transcribe = getTranscribeClient(region || undefined);
+  const s3 = getS3Client(region || undefined);
+
+  const ext = filePath.split('.').pop()?.toLowerCase() || 'ogg';
+  const mediaFormat = (ext === 'oga' || ext === 'ogg') ? 'ogg' : ext === 'mp4' ? 'mp4' : 'webm';
+  const jobName = `stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const s3Key = `stt-temp/${jobName}.${ext}`;
+
+  // Upload audio to S3
   const audioData = fs.readFileSync(filePath);
-
-  // Determine format from file extension
-  const ext = filePath.split('.').pop()?.toLowerCase();
-  const isOgg = ext === 'oga' || ext === 'ogg';
-
-  const mediaEncoding: MediaEncoding = isOgg ? 'ogg-opus' : 'pcm';
-  const sampleRate = isOgg ? 48000 : 16000;
-
-  // For non-OGG formats, convert to PCM via ffmpeg
-  let audioBuffer: Buffer;
-  let pcmPath: string | null = null;
-  if (isOgg) {
-    audioBuffer = audioData;
-  } else {
-    pcmPath = filePath.replace(/\.[^.]+$/, '.pcm');
-    try {
-      execFileSync('ffmpeg', [
-        '-i', filePath, '-ar', '16000', '-ac', '1', '-f', 's16le', '-y', pcmPath,
-      ], { stdio: 'pipe' });
-      audioBuffer = fs.readFileSync(pcmPath);
-    } catch (err) {
-      throw new Error(`ffmpeg conversion to PCM failed. Is ffmpeg installed? ${(err as Error).message}`);
-    }
-  }
-
-  // Stream audio in chunks
-  const chunkSize = 4096;
-  async function* audioStream(): AsyncGenerator<AudioStream> {
-    for (let offset = 0; offset < audioBuffer.length; offset += chunkSize) {
-      yield { AudioEvent: { AudioChunk: audioBuffer.subarray(offset, offset + chunkSize) } };
-    }
-  }
+  await s3.send(new PutObjectCommand({
+    Bucket: s3Bucket,
+    Key: s3Key,
+    Body: audioData,
+  }));
 
   try {
-    const response = await client.send(new StartStreamTranscriptionCommand({
+    // Start transcription job
+    await transcribe.send(new StartTranscriptionJobCommand({
+      TranscriptionJobName: jobName,
       LanguageCode: language as LanguageCode,
-      MediaEncoding: mediaEncoding,
-      MediaSampleRateHertz: sampleRate,
-      AudioStream: audioStream(),
+      MediaFormat: mediaFormat,
+      Media: { MediaFileUri: `s3://${s3Bucket}/${s3Key}` },
     }));
 
-    // Collect final transcript from the stream
-    const parts: string[] = [];
-    if (response.TranscriptResultStream) {
-      for await (const event of response.TranscriptResultStream) {
-        if (event.TranscriptEvent?.Transcript?.Results) {
-          for (const result of event.TranscriptEvent.Transcript.Results) {
-            if (!result.IsPartial && result.Alternatives?.[0]?.Transcript) {
-              parts.push(result.Alternatives[0].Transcript);
-            }
-          }
-        }
+    // Poll for completion
+    let status = 'IN_PROGRESS';
+    let resultUri = '';
+    while (status === 'IN_PROGRESS' || status === 'QUEUED') {
+      await sleep(1500);
+      const result = await transcribe.send(new GetTranscriptionJobCommand({
+        TranscriptionJobName: jobName,
+      }));
+      status = result.TranscriptionJob?.TranscriptionJobStatus || 'FAILED';
+      if (status === 'COMPLETED') {
+        resultUri = result.TranscriptionJob?.Transcript?.TranscriptFileUri || '';
+      }
+      if (status === 'FAILED') {
+        const reason = result.TranscriptionJob?.FailureReason || 'Unknown error';
+        throw new Error(`AWS Transcribe job failed: ${reason}`);
       }
     }
 
-    return parts.join(' ').trim();
-  } finally {
-    if (pcmPath) {
-      try { fs.unlinkSync(pcmPath); } catch { /* ignore */ }
+    if (!resultUri) {
+      throw new Error('AWS Transcribe completed but no transcript URI returned');
     }
+
+    // Fetch transcript JSON from the presigned URI
+    const response = await fetch(resultUri);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch transcript: ${response.status} ${response.statusText}`);
+    }
+    const data = await response.json() as {
+      results?: { transcripts?: Array<{ transcript?: string }> };
+    };
+    const transcript = data.results?.transcripts?.[0]?.transcript || '';
+    return transcript.trim();
+  } finally {
+    // Clean up S3 object
+    try {
+      await s3.send(new DeleteObjectCommand({ Bucket: s3Bucket, Key: s3Key }));
+    } catch { /* ignore cleanup errors */ }
   }
 }
 
@@ -139,6 +156,7 @@ export interface SttConfig {
   whisperModelPath: string;
   awsTranscribeRegion: string;
   awsTranscribeLanguage: string;
+  awsTranscribeS3Bucket: string;
 }
 
 export function validateSttConfig(config: SttConfig): string | null {
@@ -149,8 +167,9 @@ export function validateSttConfig(config: SttConfig): string | null {
     if (!config.whisperModelPath) return 'STT backend is "local" but WHISPER_MODEL_PATH is not set.';
     if (!fs.existsSync(config.whisperCliPath)) return `whisper-cli not found at: ${config.whisperCliPath}`;
     if (!fs.existsSync(config.whisperModelPath)) return `Whisper model not found at: ${config.whisperModelPath}`;
+  } else if (config.backend === 'aws-transcribe') {
+    if (!config.awsTranscribeS3Bucket) return 'STT backend is "aws-transcribe" but AWS_TRANSCRIBE_S3_BUCKET is not set.';
   }
-  // aws-transcribe: no local config to validate — IAM role checked at runtime
   return null;
 }
 
@@ -159,7 +178,12 @@ export async function transcribeAudio(filePath: string, config: SttConfig): Prom
     if (config.backend === 'local') {
       return transcribeLocal(filePath, config.whisperCliPath, config.whisperModelPath);
     } else if (config.backend === 'aws-transcribe') {
-      return await transcribeAwsStreaming(filePath, config.awsTranscribeRegion, config.awsTranscribeLanguage || 'en-AU');
+      return await transcribeAwsBatch(
+        filePath,
+        config.awsTranscribeRegion,
+        config.awsTranscribeLanguage || 'en-AU',
+        config.awsTranscribeS3Bucket,
+      );
     } else {
       return await transcribeOpenAI(filePath, config.openaiApiKey);
     }

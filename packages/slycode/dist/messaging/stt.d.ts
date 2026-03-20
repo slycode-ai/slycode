@@ -5,6 +5,7 @@ export interface SttConfig {
     whisperModelPath: string;
     awsTranscribeRegion: string;
     awsTranscribeLanguage: string;
+    awsTranscribeS3Bucket: string;
 }
 export declare function validateSttConfig(config: SttConfig): string | null;
 export declare function transcribeAudio(filePath: string, config: SttConfig): Promise<string>;

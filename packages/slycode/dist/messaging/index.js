@@ -155,6 +155,7 @@ function loadConfig(bridgeUrl) {
             whisperModelPath: process.env.WHISPER_MODEL_PATH || '',
             awsTranscribeRegion: process.env.AWS_TRANSCRIBE_REGION || '',
             awsTranscribeLanguage: process.env.AWS_TRANSCRIBE_LANGUAGE || 'en-AU',
+            awsTranscribeS3Bucket: process.env.AWS_TRANSCRIBE_S3_BUCKET || '',
             elevenlabsApiKey: process.env.ELEVENLABS_API_KEY || '',
             elevenlabsVoiceId: process.env.ELEVENLABS_VOICE_ID || '',
             elevenlabsSpeed: parseFloat(process.env.ELEVENLABS_SPEED || '1.0'),
@@ -176,11 +177,11 @@ function logConfigStatus(channel, voiceConfig, bridgeUrl) {
     console.log('Messaging service starting...');
     console.log(`  Telegram: ${channel ? 'configured' : 'not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID in .env'}`);
     if (voiceConfig.sttBackend === 'local') {
-        const sttValid = !validateSttConfig({ backend: 'local', openaiApiKey: '', whisperCliPath: voiceConfig.whisperCliPath, whisperModelPath: voiceConfig.whisperModelPath, awsTranscribeRegion: '', awsTranscribeLanguage: '' });
+        const sttValid = !validateSttConfig({ backend: 'local', openaiApiKey: '', whisperCliPath: voiceConfig.whisperCliPath, whisperModelPath: voiceConfig.whisperModelPath, awsTranscribeRegion: '', awsTranscribeLanguage: '', awsTranscribeS3Bucket: '' });
         console.log(`  STT (local whisper.cpp): ${sttValid ? 'configured' : 'not configured — check WHISPER_CLI_PATH and WHISPER_MODEL_PATH'}`);
     }
     else if (voiceConfig.sttBackend === 'aws-transcribe') {
-        console.log(`  STT (AWS Transcribe): configured — region: ${voiceConfig.awsTranscribeRegion || 'default'}, language: ${voiceConfig.awsTranscribeLanguage}`);
+        console.log(`  STT (AWS Transcribe): configured — region: ${voiceConfig.awsTranscribeRegion || 'default'}, language: ${voiceConfig.awsTranscribeLanguage}, bucket: ${voiceConfig.awsTranscribeS3Bucket}`);
     }
     else {
         console.log(`  STT (OpenAI): ${voiceConfig.openaiApiKey ? 'configured' : 'not configured — voice transcription unavailable'}`);
@@ -1024,6 +1025,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             whisperModelPath: voiceConfig.whisperModelPath,
             awsTranscribeRegion: voiceConfig.awsTranscribeRegion,
             awsTranscribeLanguage: voiceConfig.awsTranscribeLanguage,
+            awsTranscribeS3Bucket: voiceConfig.awsTranscribeS3Bucket,
         };
         const sttError = validateSttConfig(sttConfig);
         if (sttError) {

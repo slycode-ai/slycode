@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-03-20
+
+### Fixed
+- Build pipeline: handle symlinks in Next.js standalone output
+
+### Changed
+- Messaging STT and types updates
+- Scaffold and transcribe route updates
+- Dependency updates
+
 ## [0.2.11] - 2026-03-20
 
 ### Changed

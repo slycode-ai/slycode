@@ -84,6 +84,7 @@ export interface VoiceConfig {
   whisperModelPath: string;
   awsTranscribeRegion: string;
   awsTranscribeLanguage: string;
+  awsTranscribeS3Bucket: string;
   elevenlabsApiKey: string;
   elevenlabsVoiceId: string;
   elevenlabsSpeed: number;

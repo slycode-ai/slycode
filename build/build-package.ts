@@ -45,6 +45,25 @@ function copyDirRecursive(src: string, dest: string, opts?: { includeAll?: boole
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
+
+    // Resolve symlinks to determine if target is a file or directory
+    if (entry.isSymbolicLink()) {
+      try {
+        const realStat = fs.statSync(srcPath);
+        if (realStat.isDirectory()) {
+          if (!opts?.includeAll) {
+            if (entry.name === '.next' || entry.name === 'node_modules') continue;
+          }
+          copyDirRecursive(srcPath, destPath, opts);
+        } else {
+          fs.copyFileSync(srcPath, destPath);
+        }
+      } catch {
+        // Broken symlink — skip
+      }
+      continue;
+    }
+
     if (entry.isDirectory()) {
       if (!opts?.includeAll) {
         if (entry.name === '.next' || entry.name === 'node_modules') continue;
