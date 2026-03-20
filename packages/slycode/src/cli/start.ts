@@ -1,9 +1,11 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as net from 'net';
+import * as os from 'os';
 import { spawn, execSync } from 'child_process';
 import { resolveWorkspaceOrExit, resolveConfig, ensureStateDir, getStateDir, resolvePackageDir } from './workspace';
 import { refreshUpdates } from './sync';
+import { SERVICES, detectInstalledServiceManager, ensureXdgRuntime } from '../platform/service-detect';
 
 interface ServiceState {
   pid: number;
@@ -111,6 +113,117 @@ export async function start(_args: string[]): Promise<void> {
     // npm unreachable or timeout — fail silently
   }
 
+  const host = config.host || '127.0.0.1';
+
+  // Check if services should be managed by a platform service manager
+  const serviceManager = detectInstalledServiceManager();
+
+  if (serviceManager === 'systemd') {
+    console.log('  Starting via systemd...');
+    ensureXdgRuntime();
+    const startedPorts: { name: string; port: number }[] = [];
+    for (const svc of SERVICES) {
+      const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', `slycode-${svc}.service`);
+      if (!fs.existsSync(unitPath)) continue;
+      try {
+        execSync(`systemctl --user start slycode-${svc}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+          windowsHide: true,
+        });
+        const port = config.ports[svc as keyof typeof config.ports] as number;
+        console.log(`  \u2713 slycode-${svc} started`);
+        startedPorts.push({ name: svc, port });
+      } catch {
+        // Check if already active
+        try {
+          const status = execSync(`systemctl --user is-active slycode-${svc}`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+          }).trim();
+          if (status === 'active') {
+            console.log(`  slycode-${svc} is already running`);
+          } else {
+            console.error(`  \u2717 slycode-${svc} failed to start`);
+            console.log(`    Check logs: journalctl --user -u slycode-${svc} --no-pager -n 20`);
+          }
+        } catch {
+          console.error(`  \u2717 slycode-${svc} failed to start`);
+          console.log(`    Check logs: journalctl --user -u slycode-${svc} --no-pager -n 20`);
+        }
+      }
+    }
+
+    // Health check — reuse waitForPort
+    if (startedPorts.length > 0) {
+      console.log('');
+      console.log('Waiting for services to be ready...');
+      let healthy = 0;
+      for (const svc of startedPorts) {
+        const ready = await waitForPort(svc.port, '127.0.0.1');
+        if (ready) {
+          console.log(`  \u2713 ${svc.name} ready on port ${svc.port}`);
+          healthy++;
+        } else {
+          console.warn(`  \u26a0 ${svc.name} not responding on port ${svc.port}`);
+        }
+      }
+      console.log('');
+      if (healthy > 0) {
+        const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+        console.log(`All services running.`);
+        console.log(`  Web UI: http://${displayHost}:${config.ports.web}`);
+      }
+    }
+    return;
+  }
+
+  if (serviceManager === 'launchd') {
+    console.log('  Starting via launchd...');
+    const startedPorts: { name: string; port: number }[] = [];
+    for (const svc of SERVICES) {
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
+      if (!fs.existsSync(plistPath)) continue;
+      try {
+        execSync(`launchctl load "${plistPath}"`, {
+          stdio: 'pipe',
+          timeout: 10000,
+          windowsHide: true,
+        });
+        const port = config.ports[svc as keyof typeof config.ports] as number;
+        console.log(`  \u2713 com.slycode.${svc} loaded`);
+        startedPorts.push({ name: svc, port });
+      } catch {
+        console.log(`  com.slycode.${svc} may already be loaded`);
+      }
+    }
+
+    if (startedPorts.length > 0) {
+      console.log('');
+      console.log('Waiting for services to be ready...');
+      let healthy = 0;
+      for (const svc of startedPorts) {
+        const ready = await waitForPort(svc.port, '127.0.0.1');
+        if (ready) {
+          console.log(`  \u2713 ${svc.name} ready on port ${svc.port}`);
+          healthy++;
+        } else {
+          console.warn(`  \u26a0 ${svc.name} not responding on port ${svc.port}`);
+        }
+      }
+      console.log('');
+      if (healthy > 0) {
+        const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+        console.log(`All services running.`);
+        console.log(`  Web UI: http://${displayHost}:${config.ports.web}`);
+      }
+    }
+    return;
+  }
+
+  // Manual mode: spawn detached processes
+
   // Check for already-running services
   if (fs.existsSync(stateFile)) {
     try {
@@ -155,8 +268,6 @@ export async function start(_args: string[]): Promise<void> {
   // In packaged mode: node_modules/slycode/dist/{service}
   // In dev mode: {workspace}/{service}/
   const distDir = packageDir ? path.join(packageDir, 'dist') : null;
-
-  const host = config.host || '127.0.0.1';
 
   // Only web binds to config.host — bridge and messaging are internal-only (localhost)
   const serviceConfigs = [

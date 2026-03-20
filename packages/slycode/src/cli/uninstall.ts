@@ -53,12 +53,14 @@ export async function uninstall(_args: string[]): Promise<void> {
     // May fail if nothing is running
   }
 
-  // 2. Remove system services
-  try {
-    const { service } = await import('./service');
-    await service(['remove']);
-  } catch {
-    // May fail if not installed
+  // 2. Remove system services (not applicable on Windows — services are never installed there)
+  if (process.platform !== 'win32') {
+    try {
+      const { service } = await import('./service');
+      await service(['remove']);
+    } catch {
+      // May fail if not installed
+    }
   }
 
   // 3. Remove global CLI links

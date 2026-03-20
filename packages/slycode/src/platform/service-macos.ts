@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
-import type { SlyCodeConfig } from '../cli/workspace';
+import { type SlyCodeConfig, resolvePackageDir } from '../cli/workspace';
 
 const SERVICES = ['web', 'bridge', 'messaging'] as const;
 
@@ -24,6 +24,14 @@ function resolveEntryPoint(service: string, workspace: string): string {
   return path.join(workspace, service, 'dist', 'index.js');
 }
 
+function resolveWrapperScript(workspace: string): string {
+  const packageDir = resolvePackageDir(workspace);
+  const wrapperPath = packageDir
+    ? path.join(packageDir, 'templates', 'slycode-env-wrapper.sh')
+    : path.join(workspace, 'packages', 'slycode', 'templates', 'slycode-env-wrapper.sh');
+  return wrapperPath;
+}
+
 function generatePlist(
   service: string,
   workspace: string,
@@ -31,6 +39,7 @@ function generatePlist(
 ): string {
   const nodePath = process.execPath;
   const entryPoint = resolveEntryPoint(service, workspace);
+  const wrapperScript = resolveWrapperScript(workspace);
   const label = `com.slycode.${service}`;
   const logDir = path.join(os.homedir(), '.slycode', 'logs');
   const logPath = path.join(logDir, `${service}.log`);
@@ -73,6 +82,7 @@ function generatePlist(
   <string>${workspace}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>${wrapperScript}</string>
     <string>${nodePath}</string>
     <string>${entryPoint}</string>
   </array>
@@ -99,6 +109,15 @@ ${envEntries}
 
 async function install(workspace: string, config: SlyCodeConfig): Promise<void> {
   console.log('Installing launchd user agents...');
+
+  // Ensure env wrapper script is executable
+  const wrapperScript = resolveWrapperScript(workspace);
+  if (!fs.existsSync(wrapperScript)) {
+    console.error(`  ✗ env wrapper not found: ${wrapperScript}`);
+    console.error('Is slycode installed correctly?');
+    return;
+  }
+  try { fs.chmodSync(wrapperScript, 0o755); } catch { /* ok if already executable */ }
 
   for (const svc of SERVICES) {
     const plist = generatePlist(svc, workspace, config);

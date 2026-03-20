@@ -40,86 +40,14 @@ const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const workspace_1 = require("./workspace");
 const sync_1 = require("./sync");
-const SERVICES = ['web', 'bridge', 'messaging'];
-/**
- * Detect how services are currently running.
- * Checks platform service managers first, then falls back to PID state file.
- */
-function detectRunMode(stateFile) {
-    // Linux: check systemd units
-    if (process.platform === 'linux') {
-        const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
-        const hasUnits = SERVICES.some(svc => fs.existsSync(path.join(unitDir, `slycode-${svc}.service`)));
-        if (hasUnits) {
-            try {
-                const output = (0, child_process_1.execSync)('systemctl --user is-active slycode-web', {
-                    encoding: 'utf-8',
-                    stdio: ['pipe', 'pipe', 'pipe'],
-                    windowsHide: true,
-                }).trim();
-                if (output === 'active')
-                    return 'systemd';
-            }
-            catch { /* not active or systemd unavailable */ }
-        }
-    }
-    // macOS: check launchd agents
-    if (process.platform === 'darwin') {
-        const agentDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
-        const hasAgents = SERVICES.some(svc => fs.existsSync(path.join(agentDir, `com.slycode.${svc}.plist`)));
-        if (hasAgents) {
-            try {
-                const output = (0, child_process_1.execSync)('launchctl list com.slycode.web 2>/dev/null', {
-                    encoding: 'utf-8',
-                    stdio: ['pipe', 'pipe', 'pipe'],
-                    windowsHide: true,
-                });
-                if (output.includes('"PID"'))
-                    return 'launchd';
-            }
-            catch { /* not loaded */ }
-        }
-    }
-    // Windows: check Task Scheduler
-    if (process.platform === 'win32') {
-        try {
-            const output = (0, child_process_1.execSync)('schtasks /Query /TN "SlyCode-web" /FO CSV /NH', {
-                encoding: 'utf-8',
-                stdio: ['pipe', 'pipe', 'pipe'],
-                windowsHide: true,
-            });
-            if (output.includes('Running'))
-                return 'windows-task';
-        }
-        catch { /* not installed */ }
-    }
-    // Fallback: PID-based background processes
-    if (fs.existsSync(stateFile)) {
-        try {
-            const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-            const running = state.services?.some((s) => {
-                try {
-                    process.kill(s.pid, 0);
-                    return true;
-                }
-                catch {
-                    return false;
-                }
-            });
-            if (running)
-                return 'background';
-        }
-        catch { /* stale state */ }
-    }
-    return 'none';
-}
+const service_detect_1 = require("../platform/service-detect");
 function restartSystemd() {
     console.log('  Restarting systemd services...');
     try {
         (0, child_process_1.execSync)('systemctl --user daemon-reload', { stdio: 'pipe', windowsHide: true });
     }
     catch { /* ok */ }
-    for (const svc of SERVICES) {
+    for (const svc of service_detect_1.SERVICES) {
         const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', `slycode-${svc}.service`);
         if (!fs.existsSync(unitPath))
             continue;
@@ -135,7 +63,7 @@ function restartSystemd() {
 function restartLaunchd() {
     console.log('  Restarting launchd agents...');
     const uid = process.getuid?.() ?? 0;
-    for (const svc of SERVICES) {
+    for (const svc of service_detect_1.SERVICES) {
         const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
         if (!fs.existsSync(plistPath))
             continue;
@@ -150,7 +78,7 @@ function restartLaunchd() {
 }
 function restartWindowsTasks() {
     console.log('  Restarting Windows tasks...');
-    for (const svc of SERVICES) {
+    for (const svc of service_detect_1.SERVICES) {
         const name = `SlyCode-${svc}`;
         try {
             (0, child_process_1.execSync)(`schtasks /End /TN "${name}"`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
@@ -177,7 +105,7 @@ async function update(_args) {
     const workspace = (0, workspace_1.resolveWorkspaceOrExit)();
     const stateFile = path.join((0, workspace_1.getStateDir)(), 'state.json');
     // Detect how services are running before we update anything
-    const runMode = detectRunMode(stateFile);
+    const runMode = (0, service_detect_1.detectRunMode)(stateFile);
     // Step 1: npm update @slycode/slycode
     console.log('Updating SlyCode...');
     console.log('');

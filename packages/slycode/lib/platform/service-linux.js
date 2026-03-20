@@ -87,9 +87,17 @@ function loadEnvFile(workspace) {
     }
     return vars;
 }
-function generateUnit(service, workspace, config, envVars) {
+function resolveWrapperScript(workspace) {
+    const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
+    const wrapperPath = packageDir
+        ? path.join(packageDir, 'templates', 'slycode-env-wrapper.sh')
+        : path.join(workspace, 'packages', 'slycode', 'templates', 'slycode-env-wrapper.sh');
+    return wrapperPath;
+}
+function generateUnit(service, workspace, config) {
     const nodePath = process.execPath;
     const resolvedPackage = resolveEntryPoint(service, workspace);
+    const wrapperScript = resolveWrapperScript(workspace);
     const bridgeUrl = `http://127.0.0.1:${config.ports.bridge}`;
     const host = config.host || '127.0.0.1';
     let description;
@@ -115,16 +123,6 @@ function generateUnit(service, workspace, config, envVars) {
             envLines.push(`Environment="MESSAGING_SERVICE_PORT=${config.ports.messaging}"`);
             envLines.push(`Environment="HOST=127.0.0.1"`);
             envLines.push(`Environment="BRIDGE_URL=${bridgeUrl}"`);
-            // Messaging needs API keys/tokens from .env
-            for (const key of [
-                'TELEGRAM_BOT_TOKEN', 'TELEGRAM_USER_ID',
-                'OPENAI_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'ELEVENLABS_SPEED',
-                'SLACK_TOKEN',
-            ]) {
-                if (envVars[key]) {
-                    envLines.push(`Environment="${key}=${envVars[key]}"`);
-                }
-            }
             break;
         default:
             throw new Error(`Unknown service: ${service}`);
@@ -137,7 +135,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${workspace}
-ExecStart=${nodePath} ${resolvedPackage}
+ExecStart=${wrapperScript} ${nodePath} ${resolvedPackage}
 Restart=always
 RestartSec=5
 Environment="HOME=${os.homedir()}"
@@ -227,8 +225,19 @@ async function install(workspace, config) {
         console.error('Try: cd ' + workspace + ' && npm install');
         return;
     }
+    // Ensure env wrapper script is executable
+    const wrapperScript = resolveWrapperScript(workspace);
+    if (!fs.existsSync(wrapperScript)) {
+        console.error(`  ✗ env wrapper not found: ${wrapperScript}`);
+        console.error('Is slycode installed correctly?');
+        return;
+    }
+    try {
+        fs.chmodSync(wrapperScript, 0o755);
+    }
+    catch { /* ok if already executable */ }
     for (const svc of installable) {
-        const unitContent = generateUnit(svc, workspace, config, envVars);
+        const unitContent = generateUnit(svc, workspace, config);
         const unitPath = path.join(unitDir, `slycode-${svc}.service`);
         fs.writeFileSync(unitPath, unitContent);
         console.log(`  Written: slycode-${svc}.service`);
@@ -237,7 +246,7 @@ async function install(workspace, config) {
     (0, child_process_1.execSync)(`systemctl --user enable ${installable.map(s => `slycode-${s}`).join(' ')}`, {
         stdio: 'pipe',
     });
-    (0, child_process_1.execSync)(`systemctl --user start ${installable.map(s => `slycode-${s}`).join(' ')}`, {
+    (0, child_process_1.execSync)(`systemctl --user restart ${installable.map(s => `slycode-${s}`).join(' ')}`, {
         stdio: 'pipe',
     });
     // Wait a moment for services to either stabilize or crash

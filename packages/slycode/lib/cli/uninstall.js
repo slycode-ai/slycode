@@ -82,13 +82,15 @@ async function uninstall(_args) {
     catch {
         // May fail if nothing is running
     }
-    // 2. Remove system services
-    try {
-        const { service } = await Promise.resolve().then(() => __importStar(require('./service')));
-        await service(['remove']);
-    }
-    catch {
-        // May fail if not installed
+    // 2. Remove system services (not applicable on Windows — services are never installed there)
+    if (process.platform !== 'win32') {
+        try {
+            const { service } = await Promise.resolve().then(() => __importStar(require('./service')));
+            await service(['remove']);
+        }
+        catch {
+            // May fail if not installed
+        }
     }
     // 3. Remove global CLI links
     try {

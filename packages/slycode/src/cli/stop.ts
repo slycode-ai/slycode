@@ -1,7 +1,9 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execSync } from 'child_process';
 import { getStateDir, resolveConfig, resolveWorkspaceOrExit } from './workspace';
+import { SERVICES, detectRunMode, ensureXdgRuntime } from '../platform/service-detect';
 
 interface ServiceState {
   pid: number;
@@ -117,6 +119,78 @@ export async function stop(_args: string[]): Promise<void> {
   console.log('Stopping SlyCode...');
   console.log('');
 
+  // Check if services are managed by a platform service manager
+  const runMode = detectRunMode(stateFile);
+
+  if (runMode === 'systemd') {
+    console.log('  Stopping via systemd...');
+    ensureXdgRuntime();
+    let stoppedAny = false;
+    for (const svc of SERVICES) {
+      const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', `slycode-${svc}.service`);
+      if (!fs.existsSync(unitPath)) continue;
+      try {
+        execSync(`systemctl --user stop slycode-${svc}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+          windowsHide: true,
+        });
+        console.log(`  \u2713 slycode-${svc} stopped`);
+        stoppedAny = true;
+      } catch {
+        // Check if it was already inactive
+        try {
+          const status = execSync(`systemctl --user is-active slycode-${svc}`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+          }).trim();
+          if (status === 'inactive') {
+            console.log(`  slycode-${svc} was not running`);
+          } else {
+            console.error(`  \u2717 slycode-${svc} could not be stopped`);
+          }
+        } catch {
+          console.log(`  slycode-${svc} was not running`);
+        }
+      }
+    }
+    // Clean up any stale state file from previous manual runs
+    if (fs.existsSync(stateFile)) {
+      fs.unlinkSync(stateFile);
+    }
+    console.log('');
+    console.log(stoppedAny ? 'SlyCode stopped.' : 'Nothing was running.');
+    return;
+  }
+
+  if (runMode === 'launchd') {
+    console.log('  Stopping via launchd...');
+    let stoppedAny = false;
+    for (const svc of SERVICES) {
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
+      if (!fs.existsSync(plistPath)) continue;
+      try {
+        execSync(`launchctl unload "${plistPath}"`, {
+          stdio: 'pipe',
+          timeout: 10000,
+          windowsHide: true,
+        });
+        console.log(`  \u2713 com.slycode.${svc} stopped`);
+        stoppedAny = true;
+      } catch {
+        console.log(`  com.slycode.${svc} was not running`);
+      }
+    }
+    if (fs.existsSync(stateFile)) {
+      fs.unlinkSync(stateFile);
+    }
+    console.log('');
+    console.log(stoppedAny ? 'SlyCode stopped.' : 'Nothing was running.');
+    return;
+  }
+
+  // Manual mode: PID-based stopping
   let stoppedAny = false;
 
   // Strategy 1: Use state file for known PIDs
