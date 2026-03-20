@@ -123,6 +123,7 @@ export class StateManager {
   // --- Project Access ---
 
   getProjects(): Project[] {
+    this.reloadProjects();
     return this.state.projects;
   }
 

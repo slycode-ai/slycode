@@ -112,6 +112,7 @@ export class StateManager {
     }
     // --- Project Access ---
     getProjects() {
+        this.reloadProjects();
         return this.state.projects;
     }
     getSelectedProject() {

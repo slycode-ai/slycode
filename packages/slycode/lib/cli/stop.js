@@ -148,33 +148,53 @@ async function stop(_args) {
             const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', `slycode-${svc}.service`);
             if (!fs.existsSync(unitPath))
                 continue;
+            // Check if active before stopping — systemctl stop can exit non-zero
+            // even when the service does stop (e.g., process exits with error during shutdown)
+            let wasActive = false;
+            try {
+                const status = (0, child_process_1.execSync)(`systemctl --user is-active slycode-${svc}`, {
+                    encoding: 'utf-8',
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    windowsHide: true,
+                }).trim();
+                wasActive = status === 'active';
+            }
+            catch {
+                // is-active exits non-zero for inactive/failed — not active
+            }
+            if (!wasActive) {
+                console.log(`  slycode-${svc} was not running`);
+                continue;
+            }
             try {
                 (0, child_process_1.execSync)(`systemctl --user stop slycode-${svc}`, {
                     stdio: 'pipe',
                     timeout: 10000,
                     windowsHide: true,
                 });
+            }
+            catch {
+                // systemctl stop may exit non-zero even if the service stopped
+            }
+            // Verify it actually stopped
+            let nowActive = false;
+            try {
+                const status = (0, child_process_1.execSync)(`systemctl --user is-active slycode-${svc}`, {
+                    encoding: 'utf-8',
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    windowsHide: true,
+                }).trim();
+                nowActive = status === 'active';
+            }
+            catch {
+                // non-zero = inactive
+            }
+            if (!nowActive) {
                 console.log(`  \u2713 slycode-${svc} stopped`);
                 stoppedAny = true;
             }
-            catch {
-                // Check if it was already inactive
-                try {
-                    const status = (0, child_process_1.execSync)(`systemctl --user is-active slycode-${svc}`, {
-                        encoding: 'utf-8',
-                        stdio: ['pipe', 'pipe', 'pipe'],
-                        windowsHide: true,
-                    }).trim();
-                    if (status === 'inactive') {
-                        console.log(`  slycode-${svc} was not running`);
-                    }
-                    else {
-                        console.error(`  \u2717 slycode-${svc} could not be stopped`);
-                    }
-                }
-                catch {
-                    console.log(`  slycode-${svc} was not running`);
-                }
+            else {
+                console.error(`  \u2717 slycode-${svc} could not be stopped`);
             }
         }
         // Clean up any stale state file from previous manual runs

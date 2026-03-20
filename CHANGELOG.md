@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-03-21
+
+### Fixed
+- Stop CLI command improvements
+
+### Changed
+- Messaging state handling updates
+
 ## [0.2.12] - 2026-03-20
 
 ### Fixed
