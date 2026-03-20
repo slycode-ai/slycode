@@ -1,6 +1,6 @@
 {
   "name": "@slycode/slycode",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "AI-powered development workspace with kanban, terminal bridge, and skill management",
   "bin": {
     "slycode": "bin/slycode.js",

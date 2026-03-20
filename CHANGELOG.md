@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-03-20
+
+### Changed
+- Transcribe API route updates
+- Voice control bar improvements
+- Dependency updates (messaging, web)
+
 ## [0.2.10] - 2026-03-20
 
 ### Added

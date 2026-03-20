@@ -11,6 +11,7 @@ import {
   type LanguageCode,
   type MediaEncoding,
 } from '@aws-sdk/client-transcribe-streaming';
+import { remuxWebmToOgg } from '@/lib/webm-to-ogg-opus';
 
 let openaiClient: OpenAI | null = null;
 let transcribeClient: TranscribeStreamingClient | null = null;
@@ -106,8 +107,13 @@ async function transcribeAwsStreaming(audioBuffer: Buffer, ext: string, region: 
     streamBuffer = audioBuffer;
     mediaEncoding = 'ogg-opus';
     sampleRate = 48000;
+  } else if (ext === 'webm') {
+    // Remux WebM/Opus → OGG/Opus (pure JS, no ffmpeg)
+    streamBuffer = remuxWebmToOgg(audioBuffer);
+    mediaEncoding = 'ogg-opus';
+    sampleRate = 48000;
   } else {
-    // Convert WebM/MP4 to PCM via ffmpeg
+    // MP4/other: convert to PCM via ffmpeg (Safari fallback)
     const tmpDir = process.env.TMPDIR || '/tmp';
     const tmpFile = path.join(tmpDir, `transcribe_${Date.now()}.${ext}`);
     pcmPath = tmpFile.replace(/\.[^.]+$/, '.pcm');

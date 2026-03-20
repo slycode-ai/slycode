@@ -17,6 +17,7 @@
   "dependencies": {
     "@aws-sdk/client-transcribe-streaming": "^3.1012.0",
     "dotenv": "^16.4.7",
+    "ebml": "^3.0.0",
     "express": "^4.21.2",
     "node-telegram-bot-api": "^0.66.0",
     "openai": "^4.78.0"
