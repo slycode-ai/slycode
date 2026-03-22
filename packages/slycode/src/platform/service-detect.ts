@@ -38,32 +38,40 @@ export function detectRunMode(stateFile: string): RunMode {
       fs.existsSync(path.join(unitDir, `slycode-${svc}.service`))
     );
     if (hasUnits) {
-      try {
-        const output = execSync('systemctl --user is-active slycode-web', {
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-          windowsHide: true,
-        }).trim();
-        if (output === 'active') return 'systemd';
-      } catch { /* not active or systemd unavailable */ }
+      // Check if ANY installed service is active (not just web)
+      const anyActive = SERVICES.some(svc => {
+        try {
+          return execSync(`systemctl --user is-active slycode-${svc}`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+          }).trim() === 'active';
+        } catch { return false; }
+      });
+      if (anyActive) return 'systemd';
     }
   }
 
   // macOS: check launchd agents
+  // Return 'launchd' if agents are loaded (even if crashed — they're still under launchd management)
   if (process.platform === 'darwin') {
     const agentDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
     const hasAgents = SERVICES.some(svc =>
       fs.existsSync(path.join(agentDir, `com.slycode.${svc}.plist`))
     );
     if (hasAgents) {
-      try {
-        const output = execSync('launchctl list com.slycode.web 2>/dev/null', {
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (output.includes('"PID"')) return 'launchd';
-      } catch { /* not loaded */ }
+      // Check if ANY installed agent is loaded (not just web)
+      const anyLoaded = SERVICES.some(svc => {
+        try {
+          execSync(`launchctl list com.slycode.${svc} 2>/dev/null`, {
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          return true;
+        } catch { return false; }
+      });
+      if (anyLoaded) return 'launchd';
     }
   }
 

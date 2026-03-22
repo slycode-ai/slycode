@@ -61,9 +61,8 @@ export declare function extractCodexSessionId(filename: string): string | null;
 export declare function detectNewCodexSessionId(dir: string, beforeFiles: string[]): Promise<string | null>;
 /**
  * Get the Gemini chats directory for a given cwd.
- * Gemini v2 uses the project folder name; v1 used SHA-256 hash.
- * Uses v1 if its directory already exists (existing install), otherwise defaults
- * to v2 — even if the v2 path doesn't exist yet (Gemini creates it on first run).
+ * Reads ~/.gemini/projects.json for the canonical slug (Gemini's own registry).
+ * Falls back to computing the slug for first-run cases.
  */
 export declare function getGeminiSessionDir(cwd: string): string;
 /**

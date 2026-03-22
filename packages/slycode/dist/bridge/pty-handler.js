@@ -1,5 +1,43 @@
 import * as pty from 'node-pty';
 import os from 'os';
+import { execSync } from 'child_process';
+// One-time flag: login shell PATH has been merged into process.env.PATH.
+// On macOS/Linux, CLI tools (claude, codex) are often installed in paths
+// added by shell profiles (~/.zprofile, ~/.bashrc). When the bridge starts
+// via nohup or systemd, these paths may be missing. We capture them once
+// from a login shell and merge into process.env.PATH so that:
+// 1. posix_spawnp (used by node-pty on macOS) can find the binary
+// 2. The spawned child process inherits the full PATH
+let loginPathCaptured = false;
+function ensureLoginShellPath() {
+    if (loginPathCaptured || os.platform() === 'win32')
+        return;
+    loginPathCaptured = true;
+    try {
+        // Use the user's default shell with -l to source their profile.
+        // This ensures we capture paths from ~/.zprofile (macOS/zsh),
+        // ~/.bash_profile (Linux/bash), nvm, homebrew, etc.
+        const userShell = process.env.SHELL || '/bin/bash';
+        const knownShells = ['/bin/bash', '/bin/zsh', '/bin/sh', '/usr/bin/bash', '/usr/bin/zsh'];
+        const shell = knownShells.includes(userShell) ? userShell : '/bin/bash';
+        const loginPath = execSync(`${shell} -l -c 'printf "%s" "$PATH"'`, {
+            encoding: 'utf-8',
+            timeout: 10000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        if (loginPath) {
+            const currentPaths = new Set((process.env.PATH || '').split(':'));
+            const additions = loginPath.split(':').filter(p => p && !currentPaths.has(p));
+            if (additions.length > 0) {
+                process.env.PATH = `${process.env.PATH}:${additions.join(':')}`;
+                console.log(`[pty] Augmented PATH with ${additions.length} entries from login shell`);
+            }
+        }
+    }
+    catch (err) {
+        console.warn('[pty] Could not capture login shell PATH:', err.message);
+    }
+}
 export function spawnPty(options) {
     let shell = options.command || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
     // On Windows, commands like 'claude' are installed as .cmd batch wrappers.
@@ -8,6 +46,8 @@ export function spawnPty(options) {
     if (os.platform() === 'win32' && shell && !shell.includes('.') && !shell.includes('\\') && !shell.includes('/')) {
         shell = `${shell}.cmd`;
     }
+    // Ensure login shell PATH is captured (one-time, augments process.env.PATH)
+    ensureLoginShellPath();
     // Clean env - remove npm_config_prefix to avoid nvm/linuxbrew conflict warning
     const { npm_config_prefix, ...cleanEnv } = process.env;
     const ptyProcess = pty.spawn(shell, options.args, {

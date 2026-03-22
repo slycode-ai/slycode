@@ -25,7 +25,7 @@ function restartSystemd(): void {
 
 function restartLaunchd(): void {
   console.log('  Restarting launchd agents...');
-  const uid = process.getuid?.() ?? 0;
+  const uid = process.getuid?.() ?? 501;
   for (const svc of SERVICES) {
     const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
     if (!fs.existsSync(plistPath)) continue;

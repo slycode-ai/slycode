@@ -142,6 +142,8 @@ export function ClaudeTerminalPanel({
   const imagePasteInProgressRef = useRef(false);
   // Exit output toast state (persists across terminal unmount)
   const [exitToast, setExitToast] = useState<{ code: number; output: string } | null>(null);
+  // Spawn error toast — shown when session creation fails (e.g. posix_spawnp failed)
+  const [spawnError, setSpawnError] = useState<string | null>(null);
 
   // Instruction file check state
   const [instructionFileCheck, setInstructionFileCheck] = useState<{ needed: boolean; targetFile?: string; copySource?: string } | null>(null);
@@ -294,6 +296,7 @@ export function ClaudeTerminalPanel({
     setIsStarting(true);
     setShowCustomPrompt(false);
     setExitToast(null);
+    setSpawnError(null);
     try {
       // Build prompt if action provided — context is opt-in via {{cardContext}} etc.
       let prompt: string | undefined;
@@ -328,9 +331,13 @@ export function ClaudeTerminalPanel({
         if (instructionFileCheck?.needed && createInstructionFile) {
           setInstructionFileCheck(null);
         }
+      } else {
+        const body = await res.json().catch(() => ({ error: 'Unknown error' }));
+        setSpawnError(body.error || `Failed to start session (HTTP ${res.status})`);
       }
     } catch (err) {
       console.error('Failed to start session:', err);
+      setSpawnError('Could not reach the bridge server');
     } finally {
       setIsStarting(false);
       setCustomPrompt('');
@@ -779,6 +786,29 @@ export function ClaudeTerminalPanel({
             </button>
           </div>
           <pre className="max-h-32 overflow-auto px-3 pb-2 text-xs text-void-300 font-mono whitespace-pre-wrap">{exitToast.output}</pre>
+        </div>
+      )}
+
+      {/* Spawn error toast — shown when session creation fails entirely */}
+      {spawnError && (
+        <div className="absolute bottom-3 right-3 left-3 z-50 rounded-lg border border-red-500/30 bg-void-800/95 shadow-(--shadow-overlay) backdrop-blur-sm">
+          <div className="flex items-start justify-between gap-2 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-red-400">
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              Failed to start session
+            </div>
+            <button
+              onClick={() => setSpawnError(null)}
+              className="text-void-500 hover:text-void-300 flex-shrink-0"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <pre className="max-h-32 overflow-auto px-3 pb-2 text-xs text-void-300 font-mono whitespace-pre-wrap">{spawnError}</pre>
         </div>
       )}
 

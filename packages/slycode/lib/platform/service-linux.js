@@ -38,8 +38,7 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
-const workspace_1 = require("../cli/workspace");
-const SERVICES = ['web', 'bridge', 'messaging'];
+const service_common_1 = require("./service-common");
 function hasSystemd() {
     try {
         (0, child_process_1.execSync)('systemctl --user --version', { stdio: 'pipe' });
@@ -64,40 +63,10 @@ function getUnitDir() {
     }
     return dir;
 }
-/**
- * Load .env from the workspace and return key=value pairs.
- * Needed because systemd services don't inherit the user's .env.
- */
-function loadEnvFile(workspace) {
-    const envFile = path.join(workspace, '.env');
-    const vars = {};
-    if (!fs.existsSync(envFile))
-        return vars;
-    for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#'))
-            continue;
-        const eq = trimmed.indexOf('=');
-        if (eq > 0) {
-            const key = trimmed.slice(0, eq);
-            const val = trimmed.slice(eq + 1);
-            if (val)
-                vars[key] = val; // Only include non-empty values
-        }
-    }
-    return vars;
-}
-function resolveWrapperScript(workspace) {
-    const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
-    const wrapperPath = packageDir
-        ? path.join(packageDir, 'dist', 'scripts', 'slycode-env-wrapper.sh')
-        : path.join(workspace, 'packages', 'slycode', 'src', 'platform', 'slycode-env-wrapper.sh');
-    return wrapperPath;
-}
 function generateUnit(service, workspace, config) {
     const nodePath = process.execPath;
-    const resolvedPackage = resolveEntryPoint(service, workspace);
-    const wrapperScript = resolveWrapperScript(workspace);
+    const resolvedPackage = (0, service_common_1.resolveEntryPoint)(service, workspace);
+    const wrapperScript = (0, service_common_1.resolveWrapperScript)(workspace);
     const bridgeUrl = `http://127.0.0.1:${config.ports.bridge}`;
     const host = config.host || '127.0.0.1';
     let description;
@@ -148,22 +117,6 @@ ${envLines.join('\n')}
 WantedBy=default.target
 `;
 }
-function resolveEntryPoint(service, workspace) {
-    const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
-    const distDir = packageDir ? path.join(packageDir, 'dist') : null;
-    // Web uses server.js (Next.js standalone), others use index.js
-    const entryFile = service === 'web' ? 'server.js' : 'index.js';
-    if (distDir) {
-        const distPath = path.join(distDir, service, entryFile);
-        if (fs.existsSync(distPath))
-            return distPath;
-    }
-    // Fallback to local dev build
-    if (service === 'web') {
-        return path.join(workspace, 'web', 'node_modules', '.bin', 'next');
-    }
-    return path.join(workspace, service, 'dist', 'index.js');
-}
 function checkLinger() {
     try {
         const output = (0, child_process_1.execSync)(`loginctl show-user ${os.userInfo().username} -p Linger --value 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -173,26 +126,6 @@ function checkLinger() {
         return false;
     }
 }
-/**
- * Determine which services should be installed.
- * Skips messaging if no channel tokens are configured.
- */
-function getEnabledServices(config, envVars) {
-    const enabled = [];
-    for (const svc of SERVICES) {
-        if (!config.services[svc]) {
-            console.log(`  ⊘ ${svc}: disabled in config — skipping`);
-            continue;
-        }
-        if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN) {
-            console.log(`  ⊘ messaging: no channels configured — skipping`);
-            console.log('    (add TELEGRAM_BOT_TOKEN to .env, then run service install again)');
-            continue;
-        }
-        enabled.push(svc);
-    }
-    return enabled;
-}
 async function install(workspace, config) {
     if (!hasSystemd()) {
         console.error('systemd is not available on this system.');
@@ -201,10 +134,10 @@ async function install(workspace, config) {
     }
     ensureXdgRuntime();
     const unitDir = getUnitDir();
-    const envVars = loadEnvFile(workspace);
+    const envVars = (0, service_common_1.loadEnvFile)(workspace);
     console.log('Installing systemd user services...');
     console.log('');
-    const enabled = getEnabledServices(config, envVars);
+    const enabled = (0, service_common_1.getEnabledServices)(config, envVars);
     if (enabled.length === 0) {
         console.error('No services to install.');
         return;
@@ -213,7 +146,7 @@ async function install(workspace, config) {
     // Validate entry points before installing
     const installable = [];
     for (const svc of enabled) {
-        const entryPoint = resolveEntryPoint(svc, workspace);
+        const entryPoint = (0, service_common_1.resolveEntryPoint)(svc, workspace);
         if (!fs.existsSync(entryPoint)) {
             console.warn(`  \u2717 ${svc}: entry point not found: ${entryPoint}`);
             continue;
@@ -226,7 +159,7 @@ async function install(workspace, config) {
         return;
     }
     // Ensure env wrapper script is executable
-    const wrapperScript = resolveWrapperScript(workspace);
+    const wrapperScript = (0, service_common_1.resolveWrapperScript)(workspace);
     if (!fs.existsSync(wrapperScript)) {
         console.error(`  ✗ env wrapper not found: ${wrapperScript}`);
         console.error('Is slycode installed correctly?');
@@ -294,7 +227,7 @@ async function remove() {
     ensureXdgRuntime();
     console.log('Removing systemd user services...');
     // Disable first (prevents restart loops), then stop with timeout
-    for (const svc of SERVICES) {
+    for (const svc of service_common_1.SERVICES) {
         try {
             (0, child_process_1.execSync)(`systemctl --user disable slycode-${svc}`, { stdio: 'pipe' });
         }
@@ -324,13 +257,13 @@ async function status() {
     }
     // Check if any unit files exist
     const unitDir = getUnitDir();
-    const hasUnits = SERVICES.some(svc => fs.existsSync(path.join(unitDir, `slycode-${svc}.service`)));
+    const hasUnits = service_common_1.SERVICES.some(svc => fs.existsSync(path.join(unitDir, `slycode-${svc}.service`)));
     if (!hasUnits) {
         console.log('  No services installed.');
         console.log('  Install with: slycode service install');
         return;
     }
-    for (const svc of SERVICES) {
+    for (const svc of service_common_1.SERVICES) {
         const unitPath = path.join(unitDir, `slycode-${svc}.service`);
         if (!fs.existsSync(unitPath)) {
             console.log(`  slycode-${svc}: not installed`);

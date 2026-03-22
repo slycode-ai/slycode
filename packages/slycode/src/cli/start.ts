@@ -181,22 +181,49 @@ export async function start(_args: string[]): Promise<void> {
 
   if (serviceManager === 'launchd') {
     console.log('  Starting via launchd...');
+    const uid = process.getuid?.() ?? 501;
     const startedPorts: { name: string; port: number }[] = [];
     for (const svc of SERVICES) {
-      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
-      if (!fs.existsSync(plistPath)) continue;
+      const plistFile = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
+      if (!fs.existsSync(plistFile)) continue;
+      const port = config.ports[svc as keyof typeof config.ports] as number;
+
+      // Check if already loaded
+      let isLoaded = false;
       try {
-        execSync(`launchctl load "${plistPath}"`, {
-          stdio: 'pipe',
-          timeout: 10000,
+        execSync(`launchctl list com.slycode.${svc} 2>/dev/null`, {
+          stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
         });
-        const port = config.ports[svc as keyof typeof config.ports] as number;
-        console.log(`  \u2713 com.slycode.${svc} loaded`);
-        startedPorts.push({ name: svc, port });
-      } catch {
-        console.log(`  com.slycode.${svc} may already be loaded`);
+        isLoaded = true;
+      } catch { /* not loaded */ }
+
+      if (isLoaded) {
+        // Already loaded — use kickstart to ensure it's running (handles crashed agents)
+        try {
+          execSync(`launchctl kickstart -k gui/${uid}/com.slycode.${svc}`, {
+            stdio: 'pipe',
+            timeout: 10000,
+            windowsHide: true,
+          });
+          console.log(`  \u2713 com.slycode.${svc} restarted`);
+        } catch {
+          console.log(`  com.slycode.${svc} is already running`);
+        }
+      } else {
+        // Not loaded — load the plist
+        try {
+          execSync(`launchctl load "${plistFile}"`, {
+            stdio: 'pipe',
+            timeout: 10000,
+            windowsHide: true,
+          });
+          console.log(`  \u2713 com.slycode.${svc} loaded`);
+        } catch {
+          console.error(`  \u2717 com.slycode.${svc} failed to load`);
+        }
       }
+      startedPorts.push({ name: svc, port });
     }
 
     if (startedPorts.length > 0) {

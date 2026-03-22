@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-03-22
+
+### Added
+- Service detection module
+
+### Changed
+- Service management updates for Linux/macOS
+- Bridge claude-utils and PTY handler updates
+- CLI restart, start, and update command improvements
+- Claude terminal panel updates
+
+### Fixed
+- Remove stale node_modules from public repo
+
 ## [0.2.14] - 2026-03-22
 
 ### Changed

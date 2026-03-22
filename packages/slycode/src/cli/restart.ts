@@ -73,21 +73,18 @@ export async function restart(args: string[]): Promise<void> {
   }
 
   if (runMode === 'launchd') {
+    const uid = process.getuid?.() ?? 501;
     for (const svc of servicesToRestart) {
       const plistFile = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
       if (!fs.existsSync(plistFile)) {
-        console.log(`  ⊘ com.slycode.${svc}: not installed`);
+        console.log(`  \u2298 com.slycode.${svc}: not installed`);
         continue;
       }
       try {
-        // launchd has no native restart — unload then load
-        try {
-          execSync(`launchctl unload "${plistFile}"`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
-        } catch { /* may not be loaded */ }
-        execSync(`launchctl load "${plistFile}"`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
-        console.log(`  ✓ com.slycode.${svc} restarted`);
+        execSync(`launchctl kickstart -k gui/${uid}/com.slycode.${svc}`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
+        console.log(`  \u2713 com.slycode.${svc} restarted`);
       } catch {
-        console.error(`  ✗ com.slycode.${svc} failed to restart`);
+        console.error(`  \u2717 com.slycode.${svc} failed to restart`);
       }
     }
     console.log('');

@@ -2,9 +2,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
-import { type SlyCodeConfig, resolvePackageDir } from '../cli/workspace';
-
-const SERVICES = ['web', 'bridge', 'messaging'] as const;
+import type { SlyCodeConfig } from '../cli/workspace';
+import {
+  SERVICES,
+  resolveEntryPoint,
+  resolveWrapperScript,
+  loadEnvFile,
+  getEnabledServices,
+} from './service-common';
 
 function hasSystemd(): boolean {
   try {
@@ -32,35 +37,6 @@ function getUnitDir(): string {
   return dir;
 }
 
-/**
- * Load .env from the workspace and return key=value pairs.
- * Needed because systemd services don't inherit the user's .env.
- */
-function loadEnvFile(workspace: string): Record<string, string> {
-  const envFile = path.join(workspace, '.env');
-  const vars: Record<string, string> = {};
-  if (!fs.existsSync(envFile)) return vars;
-
-  for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq > 0) {
-      const key = trimmed.slice(0, eq);
-      const val = trimmed.slice(eq + 1);
-      if (val) vars[key] = val; // Only include non-empty values
-    }
-  }
-  return vars;
-}
-
-function resolveWrapperScript(workspace: string): string {
-  const packageDir = resolvePackageDir(workspace);
-  const wrapperPath = packageDir
-    ? path.join(packageDir, 'dist', 'scripts', 'slycode-env-wrapper.sh')
-    : path.join(workspace, 'packages', 'slycode', 'src', 'platform', 'slycode-env-wrapper.sh');
-  return wrapperPath;
-}
 
 function generateUnit(
   service: string,
@@ -124,24 +100,6 @@ WantedBy=default.target
 `;
 }
 
-function resolveEntryPoint(service: string, workspace: string): string {
-  const packageDir = resolvePackageDir(workspace);
-  const distDir = packageDir ? path.join(packageDir, 'dist') : null;
-
-  // Web uses server.js (Next.js standalone), others use index.js
-  const entryFile = service === 'web' ? 'server.js' : 'index.js';
-
-  if (distDir) {
-    const distPath = path.join(distDir, service, entryFile);
-    if (fs.existsSync(distPath)) return distPath;
-  }
-
-  // Fallback to local dev build
-  if (service === 'web') {
-    return path.join(workspace, 'web', 'node_modules', '.bin', 'next');
-  }
-  return path.join(workspace, service, 'dist', 'index.js');
-}
 
 function checkLinger(): boolean {
   try {
@@ -155,29 +113,6 @@ function checkLinger(): boolean {
   }
 }
 
-/**
- * Determine which services should be installed.
- * Skips messaging if no channel tokens are configured.
- */
-function getEnabledServices(
-  config: SlyCodeConfig,
-  envVars: Record<string, string>
-): typeof SERVICES[number][] {
-  const enabled: typeof SERVICES[number][] = [];
-  for (const svc of SERVICES) {
-    if (!config.services[svc]) {
-      console.log(`  ⊘ ${svc}: disabled in config — skipping`);
-      continue;
-    }
-    if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN) {
-      console.log(`  ⊘ messaging: no channels configured — skipping`);
-      console.log('    (add TELEGRAM_BOT_TOKEN to .env, then run service install again)');
-      continue;
-    }
-    enabled.push(svc);
-  }
-  return enabled;
-}
 
 async function install(workspace: string, config: SlyCodeConfig): Promise<void> {
   if (!hasSystemd()) {

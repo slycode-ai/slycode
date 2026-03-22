@@ -188,24 +188,52 @@ async function start(_args) {
     }
     if (serviceManager === 'launchd') {
         console.log('  Starting via launchd...');
+        const uid = process.getuid?.() ?? 501;
         const startedPorts = [];
         for (const svc of service_detect_1.SERVICES) {
-            const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
-            if (!fs.existsSync(plistPath))
+            const plistFile = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
+            if (!fs.existsSync(plistFile))
                 continue;
+            const port = config.ports[svc];
+            // Check if already loaded
+            let isLoaded = false;
             try {
-                (0, child_process_1.execSync)(`launchctl load "${plistPath}"`, {
-                    stdio: 'pipe',
-                    timeout: 10000,
+                (0, child_process_1.execSync)(`launchctl list com.slycode.${svc} 2>/dev/null`, {
+                    stdio: ['pipe', 'pipe', 'pipe'],
                     windowsHide: true,
                 });
-                const port = config.ports[svc];
-                console.log(`  \u2713 com.slycode.${svc} loaded`);
-                startedPorts.push({ name: svc, port });
+                isLoaded = true;
             }
-            catch {
-                console.log(`  com.slycode.${svc} may already be loaded`);
+            catch { /* not loaded */ }
+            if (isLoaded) {
+                // Already loaded — use kickstart to ensure it's running (handles crashed agents)
+                try {
+                    (0, child_process_1.execSync)(`launchctl kickstart -k gui/${uid}/com.slycode.${svc}`, {
+                        stdio: 'pipe',
+                        timeout: 10000,
+                        windowsHide: true,
+                    });
+                    console.log(`  \u2713 com.slycode.${svc} restarted`);
+                }
+                catch {
+                    console.log(`  com.slycode.${svc} is already running`);
+                }
             }
+            else {
+                // Not loaded — load the plist
+                try {
+                    (0, child_process_1.execSync)(`launchctl load "${plistFile}"`, {
+                        stdio: 'pipe',
+                        timeout: 10000,
+                        windowsHide: true,
+                    });
+                    console.log(`  \u2713 com.slycode.${svc} loaded`);
+                }
+                catch {
+                    console.error(`  \u2717 com.slycode.${svc} failed to load`);
+                }
+            }
+            startedPorts.push({ name: svc, port });
         }
         if (startedPorts.length > 0) {
             console.log('');

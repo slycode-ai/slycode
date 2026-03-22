@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
 /**
@@ -186,30 +185,42 @@ export async function detectNewCodexSessionId(dir, beforeFiles) {
 }
 // ============================================================
 // Gemini session detection
-// Gemini v1: ~/.gemini/tmp/<SHA256(cwd)>/chats/session-*.json
-// Gemini v2: ~/.gemini/tmp/<basename(cwd)>/chats/session-*.json
+// Sessions: ~/.gemini/tmp/<slug>/chats/session-*.json
+// Slug resolved from ~/.gemini/projects.json registry or computed via slugify
 // Full UUID stored inside JSON as sessionId field
 // ============================================================
 /**
+ * Slugify a name the same way Gemini CLI does (projectRegistry.ts).
+ * Lowercase, replace non-alphanumeric with hyphens, collapse, trim.
+ */
+function geminiSlugify(text) {
+    return (text
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'project');
+}
+/**
  * Get the Gemini chats directory for a given cwd.
- * Gemini v2 uses the project folder name; v1 used SHA-256 hash.
- * Uses v1 if its directory already exists (existing install), otherwise defaults
- * to v2 — even if the v2 path doesn't exist yet (Gemini creates it on first run).
+ * Reads ~/.gemini/projects.json for the canonical slug (Gemini's own registry).
+ * Falls back to computing the slug for first-run cases.
  */
 export function getGeminiSessionDir(cwd) {
-    const geminiBase = path.join(os.homedir(), '.gemini', 'tmp');
-    // Check if v1 hash-based path exists (legacy Gemini installs)
-    const projectHash = crypto.createHash('sha256').update(cwd).digest('hex');
-    const v1Path = path.join(geminiBase, projectHash, 'chats');
+    const geminiDir = path.join(os.homedir(), '.gemini');
+    const geminiBase = path.join(geminiDir, 'tmp');
+    // Read Gemini's project registry for the canonical slug
+    const registryPath = path.join(geminiDir, 'projects.json');
     try {
-        require('fs').accessSync(v1Path);
-        return v1Path;
+        const data = JSON.parse(require('fs').readFileSync(registryPath, 'utf-8'));
+        const slug = data?.projects?.[cwd];
+        if (slug) {
+            return path.join(geminiBase, slug, 'chats');
+        }
     }
-    catch {
-        // Default to v2 folder-name path (don't check existence — Gemini creates it lazily)
-        const folderName = path.basename(cwd);
-        return path.join(geminiBase, folderName, 'chats');
-    }
+    catch { /* registry doesn't exist yet */ }
+    // Fallback: compute slug the same way Gemini does
+    const baseName = path.basename(cwd) || 'project';
+    return path.join(geminiBase, geminiSlugify(baseName), 'chats');
 }
 /**
  * List all session files in a Gemini chats directory.
