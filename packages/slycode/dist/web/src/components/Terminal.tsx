@@ -17,7 +17,7 @@ interface TerminalProps {
   bridgeUrl?: string;
   tintColor?: string;
   onConnectionChange?: (connected: boolean) => void;
-  onSessionExit?: (code: number) => void;
+  onSessionExit?: (code: number, output?: string) => void;
   onReady?: (handle: TerminalHandle) => void;
   onImagePaste?: (file: File) => void;
 }
@@ -375,7 +375,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         try {
           const msg = JSON.parse(event.data);
           terminal.write(`\r\n\x1b[33mSession exited (code: ${msg.code})\x1b[0m\r\n`);
-          onSessionExitRef.current?.(msg.code);
+          onSessionExitRef.current?.(msg.code, msg.output);
         } catch {
           terminal.write('\r\n\x1b[33mSession exited\x1b[0m\r\n');
         }

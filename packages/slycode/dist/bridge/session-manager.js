@@ -434,7 +434,7 @@ export class SessionManager {
                 pid: null,
                 connectedClients: 0,
                 claudeSessionId: doResume ? storedSessionId : null,
-                createdAt: persisted?.createdAt || now,
+                createdAt: doResume ? (persisted?.createdAt || now) : now,
                 lastActive: persisted?.lastActive || now,
                 lastOutputAt: now,
                 activityStartedAt: now,
@@ -724,22 +724,45 @@ export class SessionManager {
             session.exitResolver();
             session.exitResolver = undefined;
         }
+        // Capture last terminal output for unexpected exits (non-zero, not user-initiated)
+        let exitOutput;
+        if (code !== 0 && !session.stoppedByUser && session.serializeAddon) {
+            try {
+                const raw = session.serializeAddon.serialize({ scrollback: 20 });
+                const stripped = stripAnsi(raw);
+                // Only keep non-empty output (filter blank lines, trim)
+                const lines = stripped.split('\n').filter(l => l.trim().length > 0);
+                if (lines.length > 0) {
+                    exitOutput = lines.join('\n');
+                    session.exitOutput = exitOutput;
+                }
+            }
+            catch (err) {
+                // Terminal may be in a corrupted state — don't let this break exit handling
+                console.log(`[PTY] Failed to capture exit output for ${name}:`, err);
+            }
+        }
         // Dispose headless terminal
         if (session.headlessTerminal) {
             session.headlessTerminal.dispose();
             session.headlessTerminal = null;
             session.serializeAddon = null;
         }
+        // Build exit event payload (include output if captured)
+        const exitPayload = { code };
+        if (exitOutput) {
+            exitPayload.output = exitOutput;
+        }
         // Notify WebSocket clients
         for (const client of session.clients) {
             if (client.readyState === 1) {
-                client.send(JSON.stringify({ type: 'exit', code }));
+                client.send(JSON.stringify({ type: 'exit', ...exitPayload }));
             }
         }
         // Notify SSE clients
         for (const client of session.sseClients) {
             try {
-                client.write(`event: exit\ndata: ${JSON.stringify({ code })}\n\n`);
+                client.write(`event: exit\ndata: ${JSON.stringify(exitPayload)}\n\n`);
                 client.end();
             }
             catch (err) {
@@ -973,6 +996,8 @@ export class SessionManager {
         if (!session.pty) {
             return null;
         }
+        // Mark as user-initiated stop so handlePtyExit skips exit output capture
+        session.stoppedByUser = true;
         // Create a promise that resolves when PTY exits (event-driven, not polling)
         const exitPromise = new Promise((resolve) => {
             if (session.status === 'stopped') {

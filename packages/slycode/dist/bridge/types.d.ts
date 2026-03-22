@@ -41,6 +41,8 @@ export interface Session {
     pendingPromptTimer?: ReturnType<typeof setTimeout>;
     exitCode?: number;
     exitedAt?: string;
+    exitOutput?: string;
+    stoppedByUser?: boolean;
     lastActivityState?: boolean;
     lastOutputSnippet?: string;
     lastOutputRawHex?: string;
@@ -131,6 +133,7 @@ export interface WsOutputMessage {
 export interface WsExitMessage {
     type: 'exit';
     code: number;
+    output?: string;
 }
 export interface WsErrorMessage {
     type: 'error';

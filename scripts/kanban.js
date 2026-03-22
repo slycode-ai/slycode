@@ -151,16 +151,19 @@ Examples:
 
 const ARCHIVE_HELP = `
 Usage: kanban archive <card-id>
+       kanban archive <card-id> --undo
        kanban archive --all [--before <days>]
 
-Archive cards (soft delete).
+Archive cards (soft delete) or restore archived cards.
 
 Options:
   --all               Archive all cards in done stage
   --before <days>     Only archive done cards older than N days
+  --undo              Unarchive a card (restore from archive)
 
 Examples:
   kanban archive card-123
+  kanban archive card-123 --undo
   kanban archive --all
   kanban archive --all --before 30
 `;
@@ -924,6 +927,11 @@ function cmdArchive(args) {
 
   const kanban = readKanban();
 
+  if (opts.all && opts.undo) {
+    console.error('Error: --undo is not supported with --all. Unarchive cards one at a time.');
+    process.exit(1);
+  }
+
   if (opts.all) {
     // Archive all done cards
     const beforeDays = parseInt(opts.before) || 0;
@@ -976,6 +984,23 @@ function cmdArchive(args) {
     }
 
     const { card, stage } = result;
+
+    if (opts.undo) {
+      if (!card.archived) {
+        console.log(`Card '${cardId}' is not archived.`);
+        return;
+      }
+
+      card.archived = false;
+      card.last_modified_by = 'cli';
+      writeKanban(kanban);
+      emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' unarchived`, cardId);
+
+      console.log(`Unarchived card: ${cardId}`);
+      console.log(`  Stage: ${stage}`);
+      console.log(`  Title: ${card.title}`);
+      return;
+    }
 
     if (card.archived) {
       console.log(`Card '${cardId}' is already archived.`);

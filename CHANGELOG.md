@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-03-22
+
+### Changed
+- Bridge session manager and types updates
+- Terminal and Claude terminal panel improvements
+- Kanban CLI script updates
+
 ## [0.2.13] - 2026-03-21
 
 ### Fixed

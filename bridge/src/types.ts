@@ -51,6 +51,8 @@ export interface Session {
   // Exit info (populated by handlePtyExit, persists until session is deleted from map)
   exitCode?: number;
   exitedAt?: string;
+  exitOutput?: string;           // Last ~20 lines of terminal output (ANSI-stripped, in-memory only)
+  stoppedByUser?: boolean;       // Set by stopSession() to suppress exit output capture
   // Activity debug logging
   lastActivityState?: boolean;
   lastOutputSnippet?: string;   // Readable snippet of most recent output
@@ -157,6 +159,7 @@ export interface WsOutputMessage {
 export interface WsExitMessage {
   type: 'exit';
   code: number;
+  output?: string;
 }
 
 export interface WsErrorMessage {
