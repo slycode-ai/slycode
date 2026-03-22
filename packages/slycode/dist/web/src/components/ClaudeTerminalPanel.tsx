@@ -491,7 +491,7 @@ export function ClaudeTerminalPanel({
       // Delay before Enter — multi-line pastes trigger bracket paste mode
       // and need time to process before \r can submit
       if (submit) {
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 600));
         await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

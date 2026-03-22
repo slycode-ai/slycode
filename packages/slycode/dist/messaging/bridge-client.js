@@ -242,7 +242,7 @@ export class BridgeClient {
             throw new Error(`Failed to send input to session ${sessionName}`);
         }
         // Wait briefly, then send carriage return to submit
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 600));
         const crSent = await this.sendInput(sessionName, '\r');
         if (!crSent) {
             debugLog(`[sendMessage] FAILED to send CR to ${sessionName} — message typed but not submitted`);

@@ -457,8 +457,17 @@ export async function triggerAutomation(
       const inputRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: fullPrompt + '\r' }),
+        body: JSON.stringify({ data: fullPrompt }),
       });
+      if (inputRes.ok) {
+        // Delay before Enter to let PTY process the text
+        await new Promise(r => setTimeout(r, 600));
+        await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: '\r' }),
+        });
+      }
       if (!inputRes.ok) {
         const body = await inputRes.text();
         return logAndReturn({ cardId: card.id, projectId, success: false, error: `Input failed (${inputRes.status}): ${body}` });
@@ -520,7 +529,7 @@ export async function triggerAutomation(
     });
 
     if (retryRes.ok) {
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 600));
       await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

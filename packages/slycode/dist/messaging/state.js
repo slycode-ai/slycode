@@ -21,6 +21,7 @@ export class StateManager {
     voiceTone = null;
     selectedProvider = 'claude';
     _pendingInstructionFileConfirm = null;
+    chatId = null;
     constructor() {
         this.state = {
             selectedProjectId: null,
@@ -87,6 +88,9 @@ export class StateManager {
             if (data.selectedProvider) {
                 this.selectedProvider = data.selectedProvider;
             }
+            if (data.chatId) {
+                this.chatId = data.chatId;
+            }
         }
         catch {
             // No persisted state, that's fine
@@ -104,6 +108,7 @@ export class StateManager {
                 responseMode: this.responseMode,
                 voiceTone: this.voiceTone,
                 selectedProvider: this.selectedProvider,
+                chatId: this.chatId,
             }, null, 2));
         }
         catch (err) {
@@ -250,6 +255,14 @@ export class StateManager {
     }
     setSelectedProvider(provider) {
         this.selectedProvider = provider;
+        this.saveState();
+    }
+    // --- Chat ID (persisted across restarts) ---
+    getChatId() {
+        return this.chatId;
+    }
+    setChatId(chatId) {
+        this.chatId = chatId;
         this.saveState();
     }
     // --- Pending Instruction File Confirm (ephemeral, not persisted) ---

@@ -162,13 +162,15 @@ function loadConfig(bridgeUrl) {
         },
     };
 }
-function createChannel() {
+function createChannel(state) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const userId = process.env.TELEGRAM_USER_ID;
     if (botToken && userId) {
         return new TelegramChannel({
             botToken,
             authorizedUserId: parseInt(userId, 10),
+            chatId: state.getChatId() ?? undefined,
+            onChatIdChanged: (chatId) => state.setChatId(chatId),
         });
     }
     return null;
@@ -1104,10 +1106,10 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
 async function main() {
     const bridgeUrl = await detectBridgeUrl();
     const { service: serviceConfig, voice: voiceConfig } = loadConfig(bridgeUrl);
-    const channel = createChannel();
+    const state = new StateManager();
+    const channel = createChannel(state);
     logConfigStatus(channel, voiceConfig, serviceConfig.bridgeUrl);
     const bridge = new BridgeClient(serviceConfig.bridgeUrl);
-    const state = new StateManager();
     const kanban = new KanbanClient(state.getProjects());
     const actionFilter = new SlyActionFilter();
     console.log(`Projects loaded: ${state.getProjects().length}`);

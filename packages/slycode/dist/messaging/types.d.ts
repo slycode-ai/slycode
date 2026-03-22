@@ -50,6 +50,8 @@ export interface InlineButton {
 export interface TelegramChannelConfig {
     botToken: string;
     authorizedUserId: number;
+    chatId?: number;
+    onChatIdChanged?: (chatId: number) => void;
 }
 export interface ServiceConfig {
     servicePort: number;

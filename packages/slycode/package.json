@@ -1,6 +1,6 @@
 {
   "name": "@slycode/slycode",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "AI-powered development workspace with kanban, terminal bridge, and skill management",
   "bin": {
     "slycode": "bin/slycode.js",
@@ -49,12 +49,11 @@
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.1",
     "node-pty": "^1.0.0",
-    "node-telegram-bot-api": "^0.66.0",
     "openai": "^4.78.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "typescript": "^5.3.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
   }
 }

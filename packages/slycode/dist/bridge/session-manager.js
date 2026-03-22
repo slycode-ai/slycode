@@ -328,8 +328,8 @@ export class SessionManager {
                 // \n characters in the prompt may not be handled correctly and \r may not submit.
                 if (prompt && existing.pty) {
                     writeToPty(existing.pty, `\x1b[200~${prompt}\x1b[201~`);
-                    // Small delay before Enter to let Claude Code process the paste
-                    await new Promise(r => setTimeout(r, 150));
+                    // Delay before Enter to let the provider process the paste
+                    await new Promise(r => setTimeout(r, 600));
                     writeToPty(existing.pty, '\r');
                 }
                 // Reattach if was detached
@@ -672,7 +672,7 @@ export class SessionManager {
                     session.pty.write(prompt);
             }
             // Wait for write to settle, then send Enter
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 600));
             if (session.pty) {
                 session.pty.write('\r');
             }

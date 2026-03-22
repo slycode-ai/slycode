@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-03-22
+
+### Changed
+- Bridge session manager updates
+- Messaging service improvements (bridge-client, telegram, state, types)
+- Scheduler updates
+- Claude terminal panel updates
+
 ## [0.2.15] - 2026-03-22
 
 ### Added

@@ -26,6 +26,7 @@ export class StateManager {
   private voiceTone: string | null = null;
   private selectedProvider: string = 'claude';
   private _pendingInstructionFileConfirm: PendingInstructionFileConfirm | null = null;
+  private chatId: number | null = null;
 
   constructor() {
     this.state = {
@@ -97,6 +98,9 @@ export class StateManager {
       if (data.selectedProvider) {
         this.selectedProvider = data.selectedProvider;
       }
+      if (data.chatId) {
+        this.chatId = data.chatId;
+      }
     } catch {
       // No persisted state, that's fine
     }
@@ -114,6 +118,7 @@ export class StateManager {
         responseMode: this.responseMode,
         voiceTone: this.voiceTone,
         selectedProvider: this.selectedProvider,
+        chatId: this.chatId,
       }, null, 2));
     } catch (err) {
       console.warn('Could not save state:', (err as Error).message);
@@ -280,6 +285,17 @@ export class StateManager {
 
   setSelectedProvider(provider: string): void {
     this.selectedProvider = provider;
+    this.saveState();
+  }
+
+  // --- Chat ID (persisted across restarts) ---
+
+  getChatId(): number | null {
+    return this.chatId;
+  }
+
+  setChatId(chatId: number): void {
+    this.chatId = chatId;
     this.saveState();
   }
 
