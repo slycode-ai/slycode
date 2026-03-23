@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-03-23
+
+### Changed
+- Web app layout updates
+
 ## [0.2.17] - 2026-03-23
 
 ### Changed

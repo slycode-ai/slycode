@@ -1,6 +1,6 @@
 {
   "name": "@slycode/slycode",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "description": "AI-powered development workspace with kanban, terminal bridge, and skill management",
   "bin": {
     "slycode": "bin/slycode.js",
@@ -21,7 +21,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "postinstall": "node -e \"const fs=require('fs'),path=require('path'); const d=path.join(__dirname,'..','node-pty','prebuilds'); if(!fs.existsSync(d))process.exit(0); fs.readdirSync(d).filter(f=>f.startsWith('darwin')).forEach(f=>{const h=path.join(d,f,'spawn-helper'); if(fs.existsSync(h))fs.chmodSync(h,0o755);})\""
   },
   "keywords": [
     "slycode",

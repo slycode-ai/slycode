@@ -19,7 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'SlyCode 🦊',
+  title: 'SlyCode',
   description: 'SlyCode Managed Projects',
   icons: {
     icon: '/favicon.png',
