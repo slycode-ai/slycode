@@ -54,6 +54,57 @@ function ensureLoginShellPath(): void {
   }
 }
 
+// Cache of resolved command paths: bare name -> absolute path
+const resolvedCommands = new Map<string, string>();
+
+/**
+ * Resolve a bare command name to its absolute path.
+ * On macOS, posix_spawnp can fail on npm bin stubs (symlinks to scripts
+ * with shebangs) even when the command IS on PATH. Passing an absolute
+ * path bypasses posix_spawnp's path search entirely.
+ */
+function resolveCommand(command: string): string {
+  if (command.includes('/')) return command; // already a path
+  if (os.platform() === 'win32') return command;
+
+  const cached = resolvedCommands.get(command);
+  if (cached) return cached;
+
+  // Strategy 1: resolve in the bridge's current PATH
+  try {
+    const resolved = execSync(`command -v ${command}`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (resolved && resolved.startsWith('/')) {
+      resolvedCommands.set(command, resolved);
+      console.log(`[pty] Resolved ${command} -> ${resolved}`);
+      return resolved;
+    }
+  } catch { /* not found in current PATH */ }
+
+  // Strategy 2: resolve via login shell (captures homebrew, nvm, etc.)
+  try {
+    const userShell = process.env.SHELL || '/bin/bash';
+    const knownShells = ['/bin/bash', '/bin/zsh', '/bin/sh', '/usr/bin/bash', '/usr/bin/zsh'];
+    const loginShell = knownShells.includes(userShell) ? userShell : '/bin/bash';
+    const resolved = execSync(`${loginShell} -l -c 'command -v ${command}'`, {
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (resolved && resolved.startsWith('/')) {
+      resolvedCommands.set(command, resolved);
+      console.log(`[pty] Resolved ${command} -> ${resolved} (via login shell)`);
+      return resolved;
+    }
+  } catch { /* not found in login shell either */ }
+
+  console.warn(`[pty] Could not resolve absolute path for '${command}', falling back to bare name`);
+  return command;
+}
+
 export function spawnPty(options: PtyOptions): IPty {
   let shell = options.command || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
 
@@ -66,6 +117,11 @@ export function spawnPty(options: PtyOptions): IPty {
 
   // Ensure login shell PATH is captured (one-time, augments process.env.PATH)
   ensureLoginShellPath();
+
+  // Resolve bare command names to absolute paths. On macOS, posix_spawnp
+  // (used by node-pty) can fail on npm bin stubs even when on PATH.
+  // Passing an absolute path bypasses the path search entirely.
+  shell = resolveCommand(shell);
 
   // Clean env - remove npm_config_prefix to avoid nvm/linuxbrew conflict warning
   const { npm_config_prefix, ...cleanEnv } = process.env;
