@@ -41,6 +41,7 @@ const child_process_1 = require("child_process");
 const workspace_1 = require("./workspace");
 const sync_1 = require("./sync");
 const service_detect_1 = require("../platform/service-detect");
+const symlinks_1 = require("../platform/symlinks");
 function restartSystemd() {
     console.log('  Restarting systemd services...');
     try {
@@ -118,6 +119,8 @@ async function update(_args) {
         console.error('  npm update failed. Check your network connection and try again.');
         process.exit(1);
     }
+    // Step 1b: Re-link CLI commands to pick up updated binaries
+    (0, symlinks_1.linkClis)(workspace);
     // Step 2: Refresh updates from new templates
     const result = (0, sync_1.refreshUpdates)(workspace);
     if (result.refreshed > 0) {

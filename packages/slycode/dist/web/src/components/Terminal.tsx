@@ -134,6 +134,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     };
 
     terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // Shift+Enter → send CSI u escape sequence for "insert newline" instead
+      // of xterm's default \r (which submits). CLI tools like Claude Code,
+      // Codex, and Gemini interpret \x1b[13;2u as newline insertion.
+      // Must return false for ALL event types (keydown, keypress) to prevent
+      // xterm from sending \r via the keypress path.
+      if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.type === 'keydown') {
+          pasteText('\x1b[13;2u');
+        }
+        return false;
+      }
+
       if (e.type !== 'keydown') return true;
       if (!((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey)) return true;
 

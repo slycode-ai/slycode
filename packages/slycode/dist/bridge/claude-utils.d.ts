@@ -4,6 +4,11 @@
  * On Linux: forward slashes and underscores become hyphens.
  * On Windows: backslashes, colons, forward slashes, and underscores become hyphens.
  *   e.g. D:\Dev\Projects\slycode -> D--Dev-Projects-slycode
+ *
+ * IMPORTANT: Resolve symlinks before transforming, because Claude CLI uses
+ * realpathSync internally. Without this, a symlinked CWD (e.g. /home/user/link
+ * -> /opt/actual) causes the bridge to poll a different directory than where
+ * Claude writes session files, and GUID detection silently fails.
  */
 export declare function getClaudeProjectDir(cwd: string): string;
 /**

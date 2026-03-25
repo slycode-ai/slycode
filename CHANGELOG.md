@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-03-25
+
+### Changed
+- Bridge claude-utils and PTY handler updates
+- CLI update command improvements
+- Terminal component updates
+
 ## [0.2.19] - 2026-03-25
 
 ### Added

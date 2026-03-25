@@ -123,8 +123,28 @@ export function spawnPty(options: PtyOptions): IPty {
   // Passing an absolute path bypasses the path search entirely.
   shell = resolveCommand(shell);
 
-  // Clean env - remove npm_config_prefix to avoid nvm/linuxbrew conflict warning
-  const { npm_config_prefix, ...cleanEnv } = process.env;
+  // Clean env for spawned sessions:
+  // 1. Remove npm_config_prefix to avoid nvm/linuxbrew conflict warning
+  // 2. Strip npm_* vars leaked from npm run/npx lifecycle
+  // 3. Sanitize PATH to remove node_modules/.bin and .npm/_npx entries
+  //    injected by npm/npx — these cause stale binary resolution in AI sessions
+  const cleanEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (key === 'npm_config_prefix') continue;
+    if (key.startsWith('npm_')) continue;
+    cleanEnv[key] = value;
+  }
+
+  // Sanitize PATH: remove node_modules/.bin and .npm/_npx entries
+  if (cleanEnv.PATH) {
+    const sep = os.platform() === 'win32' ? ';' : ':';
+    cleanEnv.PATH = cleanEnv.PATH
+      .split(sep)
+      .filter(p => !p.includes('node_modules/.bin') && !p.includes('node_modules\\.bin')
+                 && !p.includes('.npm/_npx') && !p.includes('.npm\\_npx'))
+      .join(sep);
+  }
 
   const ptyProcess = pty.spawn(shell, options.args, {
     name: 'xterm-256color',

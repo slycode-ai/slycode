@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import { resolveWorkspaceOrExit, getStateDir } from './workspace';
 import { refreshUpdates, refreshProviders } from './sync';
 import { SERVICES, detectRunMode } from '../platform/service-detect';
+import { linkClis } from '../platform/symlinks';
 
 function restartSystemd(): void {
   console.log('  Restarting systemd services...');
@@ -81,6 +82,9 @@ export async function update(_args: string[]): Promise<void> {
     console.error('  npm update failed. Check your network connection and try again.');
     process.exit(1);
   }
+
+  // Step 1b: Re-link CLI commands to pick up updated binaries
+  linkClis(workspace);
 
   // Step 2: Refresh updates from new templates
   const result = refreshUpdates(workspace);
