@@ -23,11 +23,17 @@ function findProjectRoot() {
     }
     dir = path.dirname(dir);
   }
-  // Fallback: use cwd (kanban.json may not exist yet, e.g. first run)
-  return process.cwd();
+  // No kanban.json found in directory tree — return null so callers can show a clear error
+  return null;
 }
 
 const PROJECT_ROOT = findProjectRoot();
+if (!PROJECT_ROOT) {
+  console.error('Error: No kanban board found.');
+  console.error(`Searched for documentation/kanban.json in the directory tree above ${process.cwd()}`);
+  console.error('Run this command from within a project that has a kanban board.');
+  process.exit(1);
+}
 const PROJECT_NAME = path.basename(PROJECT_ROOT);
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
@@ -1828,7 +1834,7 @@ function cmdAutomation(args) {
       const doRun = async () => {
         try {
           // Create or reuse session
-          const cwd = auto.workingDirectory || process.cwd();
+          const cwd = auto.workingDirectory || PROJECT_ROOT;
           const createRes = await fetch(`${bridgeUrl}/sessions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

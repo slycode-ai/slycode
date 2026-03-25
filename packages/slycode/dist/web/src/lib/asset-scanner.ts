@@ -350,7 +350,7 @@ export function getAssetPath(projectPath: string, assetType: AssetType, assetNam
     case 'agent':
       return path.join(projectPath, '.claude', 'agents', `${assetName}.md`);
     case 'mcp':
-      return path.join(projectPath, '.claude', 'settings.json');
+      return path.join(projectPath, '.mcp.json');
     default:
       return path.join(projectPath, '.claude', 'skills', assetName);
   }

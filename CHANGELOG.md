@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-03-25
+
+### Added
+- Asset viewer component
+- MCP common utilities
+- Provider paths utility
+
+### Changed
+- CLI assets routes (assistant, store, sync)
+- Store scanner and asset scanner updates
+- Store view and CLI assets tab improvements
+- Kanban CLI updates
+
 ## [0.2.18] - 2026-03-23
 
 ### Changed

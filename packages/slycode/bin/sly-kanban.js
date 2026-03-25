@@ -40,10 +40,10 @@ if (!kanbanScript) {
   process.exit(1);
 }
 
-// Set working directory to workspace so kanban.js can find its files
-process.chdir(workspace);
-
 // Set SLYCODE_HOME for downstream tools
+// NOTE: Do not process.chdir(workspace) here — CLI tools should operate on the
+// project the user is standing in. The wrapper's job is to locate the script;
+// the script's job is to locate its data via CWD-based resolution.
 process.env.SLYCODE_HOME = workspace;
 
 // Execute the kanban script in-process

@@ -19,11 +19,12 @@ import { getProviderMcpConfigPath } from './provider-paths';
 
 export interface CommonMcpConfig {
   name: string;
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
   timeout?: number;
-  transport?: string;
   version?: string;
   description?: string;
   updated?: string;
@@ -54,12 +55,20 @@ export function parseMcpFromStore(jsonPath: string): CommonMcpConfig | null {
  * Claude uses JSON: { "mcpServers": { "name": { command, args, env } } }
  */
 export function transformToClaudeMcp(config: CommonMcpConfig): Record<string, unknown> {
-  const entry: Record<string, unknown> = {
-    command: config.command,
-  };
-  if (config.args?.length) entry.args = config.args;
-  if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
-  if (config.timeout) entry.timeout = config.timeout;
+  const entry: Record<string, unknown> = {};
+
+  if (config.url) {
+    // HTTP transport
+    entry.type = 'http';
+    entry.url = config.url;
+    if (config.headers && Object.keys(config.headers).length > 0) entry.headers = config.headers;
+  } else if (config.command) {
+    // Stdio transport
+    entry.command = config.command;
+    if (config.args?.length) entry.args = config.args;
+    if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
+    if (config.timeout) entry.timeout = config.timeout;
+  }
 
   return { [config.name]: entry };
 }
@@ -69,11 +78,18 @@ export function transformToClaudeMcp(config: CommonMcpConfig): Record<string, un
  * Gemini also uses JSON, similar to Claude.
  */
 export function transformToGeminiMcp(config: CommonMcpConfig): Record<string, unknown> {
-  const entry: Record<string, unknown> = {
-    command: config.command,
-  };
-  if (config.args?.length) entry.args = config.args;
-  if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
+  const entry: Record<string, unknown> = {};
+
+  if (config.url) {
+    // HTTP transport — Gemini uses httpUrl (NOT url; url means SSE in Gemini)
+    entry.httpUrl = config.url;
+    if (config.headers && Object.keys(config.headers).length > 0) entry.headers = config.headers;
+  } else if (config.command) {
+    // Stdio transport
+    entry.command = config.command;
+    if (config.args?.length) entry.args = config.args;
+    if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
+  }
 
   return { [config.name]: entry };
 }
@@ -85,18 +101,30 @@ export function transformToGeminiMcp(config: CommonMcpConfig): Record<string, un
 export function transformToCodexMcp(config: CommonMcpConfig): string {
   const lines: string[] = [];
   lines.push(`[mcp_servers.${config.name}]`);
-  lines.push(`command = "${config.command}"`);
 
-  if (config.args?.length) {
-    const argsStr = config.args.map(a => `"${a}"`).join(', ');
-    lines.push(`args = [${argsStr}]`);
-  }
-
-  if (config.env && Object.keys(config.env).length > 0) {
-    lines.push('');
-    lines.push(`[mcp_servers.${config.name}.env]`);
-    for (const [key, value] of Object.entries(config.env)) {
-      lines.push(`${key} = "${value}"`);
+  if (config.url) {
+    // HTTP transport — Codex uses url + http_headers (not headers)
+    lines.push(`url = "${config.url}"`);
+    if (config.headers && Object.keys(config.headers).length > 0) {
+      lines.push('');
+      lines.push(`[mcp_servers.${config.name}.http_headers]`);
+      for (const [key, value] of Object.entries(config.headers)) {
+        lines.push(`${key} = "${value}"`);
+      }
+    }
+  } else if (config.command) {
+    // Stdio transport
+    lines.push(`command = "${config.command}"`);
+    if (config.args?.length) {
+      const argsStr = config.args.map(a => `"${a}"`).join(', ');
+      lines.push(`args = [${argsStr}]`);
+    }
+    if (config.env && Object.keys(config.env).length > 0) {
+      lines.push('');
+      lines.push(`[mcp_servers.${config.name}.env]`);
+      for (const [key, value] of Object.entries(config.env)) {
+        lines.push(`${key} = "${value}"`);
+      }
     }
   }
 
@@ -111,20 +139,22 @@ export function transformToCodexMcp(config: CommonMcpConfig): string {
  * Activate an MCP server in a project for a specific provider.
  * Reads the provider's config file, merges the MCP entry, writes back.
  */
+export type ActivateResult = 'deployed' | 'already_exists';
+
 export function activateMcp(
   projectPath: string,
   provider: ProviderId,
   config: CommonMcpConfig,
-): void {
+): ActivateResult {
   const configPath = getProviderMcpConfigPath(projectPath, provider);
   if (!configPath) {
     throw new Error(`Provider '${provider}' does not have an MCP config path`);
   }
 
   if (provider === 'codex') {
-    activateCodexMcp(configPath, config);
+    return activateCodexMcp(configPath, config);
   } else {
-    activateJsonMcp(configPath, config, provider);
+    return activateJsonMcp(configPath, config, provider);
   }
 }
 
@@ -154,7 +184,7 @@ function activateJsonMcp(
   configPath: string,
   config: CommonMcpConfig,
   provider: ProviderId,
-): void {
+): ActivateResult {
   let existing: Record<string, unknown> = {};
   try {
     if (fs.existsSync(configPath)) {
@@ -165,6 +195,10 @@ function activateJsonMcp(
   }
 
   const mcpServers = (existing.mcpServers || {}) as Record<string, unknown>;
+
+  // Skip if an entry with this name already exists
+  if (config.name in mcpServers) return 'already_exists';
+
   const transformed = provider === 'claude'
     ? transformToClaudeMcp(config)
     : transformToGeminiMcp(config);
@@ -174,6 +208,7 @@ function activateJsonMcp(
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
+  return 'deployed';
 }
 
 function deactivateJsonMcp(configPath: string, mcpName: string): void {
@@ -196,7 +231,7 @@ function deactivateJsonMcp(configPath: string, mcpName: string): void {
 // TOML-based MCP (Codex)
 // ============================================================================
 
-function activateCodexMcp(configPath: string, config: CommonMcpConfig): void {
+function activateCodexMcp(configPath: string, config: CommonMcpConfig): ActivateResult {
   let content = '';
   try {
     if (fs.existsSync(configPath)) {
@@ -206,8 +241,9 @@ function activateCodexMcp(configPath: string, config: CommonMcpConfig): void {
     content = '';
   }
 
-  // Remove existing section for this MCP if present
-  content = removeTomlSection(content, `mcp_servers.${config.name}`);
+  // Skip if this MCP section already exists
+  const sectionHeader = `[mcp_servers.${config.name}]`;
+  if (content.includes(sectionHeader)) return 'already_exists';
 
   // Append new section
   const tomlSection = transformToCodexMcp(config);
@@ -215,6 +251,7 @@ function activateCodexMcp(configPath: string, config: CommonMcpConfig): void {
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, content);
+  return 'deployed' as const;
 }
 
 function deactivateCodexMcp(configPath: string, mcpName: string): void {
@@ -230,25 +267,27 @@ function deactivateCodexMcp(configPath: string, mcpName: string): void {
 }
 
 /**
- * Remove a TOML section and its contents.
- * Simple approach: find [section.name] header, remove lines until next [section] or EOF.
+ * Remove a TOML section and all its subsections.
+ * Matches [sectionName] and any [sectionName.*] (e.g. .env, .http_headers).
+ * Removes lines until the next unrelated [section] or EOF.
  */
 function removeTomlSection(content: string, sectionName: string): string {
   const lines = content.split('\n');
   const result: string[] = [];
-  const header = `[${sectionName}]`;
-  const envHeader = `[${sectionName}.env]`;
+  const prefix = `[${sectionName}`;
   let skipping = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    if (trimmed === header || trimmed === envHeader) {
+    // Match [sectionName] or [sectionName.anything]
+    if (trimmed.startsWith(prefix) && (trimmed === `${prefix}]` || trimmed.startsWith(`${prefix}.`))) {
       skipping = true;
       continue;
     }
 
-    if (skipping && trimmed.startsWith('[') && trimmed !== header && trimmed !== envHeader) {
+    // Stop skipping when we hit a different section header
+    if (skipping && trimmed.startsWith('[')) {
       skipping = false;
     }
 

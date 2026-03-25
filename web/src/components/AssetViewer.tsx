@@ -131,11 +131,110 @@ export function AssetViewer({ asset, projectId, pathPrefix, onClose }: AssetView
             <div className="flex items-center justify-center py-8">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-void-600 border-t-neon-blue-400" />
             </div>
+          ) : asset.type === 'mcp' && content ? (
+            <McpConfigDisplay content={content} />
           ) : (
             <MarkdownContent>{markdownBody}</MarkdownContent>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Structured display for MCP server config JSON.
+ */
+interface McpJson {
+  name?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  description?: string;
+  version?: string;
+  updated?: string;
+}
+
+function McpConfigDisplay({ content }: { content: string }) {
+  let config: McpJson;
+  try {
+    config = JSON.parse(content) as McpJson;
+  } catch {
+    return <pre className="text-xs text-void-400 whitespace-pre-wrap">{content}</pre>;
+  }
+
+  const isHttp = !!config.url;
+  const labelClass = 'text-[11px] font-medium uppercase tracking-wider text-void-500';
+  const valueClass = 'mt-1 rounded bg-void-900 px-3 py-2 font-mono text-xs text-void-200';
+
+  return (
+    <div className="space-y-4">
+      {/* Transport badge */}
+      <div className="flex items-center gap-2">
+        <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+          isHttp
+            ? 'bg-blue-900/40 text-blue-300'
+            : 'bg-void-700 text-void-300'
+        }`}>
+          {isHttp ? 'HTTP' : 'stdio'}
+        </span>
+      </div>
+
+      {/* HTTP fields */}
+      {isHttp && (
+        <>
+          <div>
+            <div className={labelClass}>URL</div>
+            <div className={valueClass}>{String(config.url)}</div>
+          </div>
+          {config.headers && Object.keys(config.headers).length > 0 && (
+            <div>
+              <div className={labelClass}>Headers</div>
+              <div className={valueClass}>
+                {Object.entries(config.headers).map(([k, v]) => (
+                  <div key={k}><span className="text-void-400">{k}:</span> {String(v)}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Stdio fields */}
+      {!isHttp && config.command && (
+        <>
+          <div>
+            <div className={labelClass}>Command</div>
+            <div className={valueClass}>{String(config.command)}</div>
+          </div>
+          {Array.isArray(config.args) && config.args.length > 0 && (
+            <div>
+              <div className={labelClass}>Args</div>
+              <div className={valueClass}>
+                <div className="flex flex-wrap gap-1.5">
+                  {config.args.map((arg, i) => (
+                    <code key={i} className="rounded bg-void-800 px-1.5 py-0.5 text-[11px] text-void-300">{arg}</code>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Env vars (shared) */}
+      {config.env && Object.keys(config.env).length > 0 && (
+        <div>
+          <div className={labelClass}>Environment Variables</div>
+          <div className={valueClass}>
+            {Object.entries(config.env).map(([k, v]) => (
+              <div key={k}><span className="text-void-400">{k}=</span>{String(v)}</div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,7 +18,7 @@ const PROVIDER_PATHS: Record<ProviderId, ProviderAssetPaths> = {
   claude: {
     skills: '.claude/skills',
     agents: '.claude/agents',
-    mcpConfig: '.claude/settings.json',
+    mcpConfig: '.mcp.json',
   },
   agents: {
     skills: '.agents/skills',

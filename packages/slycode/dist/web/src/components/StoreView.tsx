@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import type { StoreData, StoreAssetInfo, AssetType } from '@/lib/types';
+import { useState, useEffect } from 'react';
+import type { StoreData, StoreAssetInfo, AssetType, ProviderId, Project } from '@/lib/types';
 import { AssetViewer } from './AssetViewer';
 
 interface StoreViewProps {
@@ -21,7 +21,8 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
   const [viewingAsset, setViewingAsset] = useState<StoreAssetInfo | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ name: string; type: AssetType } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [expandedSections, setExpandedSections] = useState({
+  const [deployTarget, setDeployTarget] = useState<{ name: string } | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     skills: true,
     agents: true,
     mcp: true,
@@ -48,8 +49,9 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
   }
 
   const sections = [
-    { key: 'skills' as const, label: 'Skills', assets: data.skills },
-    { key: 'agents' as const, label: 'Agents', assets: data.agents },
+    { key: 'skills', label: 'Skills', assets: data.skills },
+    { key: 'agents', label: 'Agents', assets: data.agents },
+    { key: 'mcp', label: 'MCP Configs', assets: data.mcp },
   ];
 
   return (
@@ -114,6 +116,15 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {asset.type === 'mcp' && (
+                            <button
+                              onClick={() => setDeployTarget({ name: asset.name })}
+                              className="rounded border border-neon-blue-400/30 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 hover:bg-neon-blue-400/20"
+                              title="Deploy to project"
+                            >
+                              Deploy
+                            </button>
+                          )}
                           <button
                             onClick={() => setConfirmDelete({ name: asset.name, type: asset.type })}
                             className="rounded border border-red-400/30 bg-red-400/10 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-400/20"
@@ -155,62 +166,6 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
         </div>
       ))}
 
-      {/* MCP section */}
-      {data.mcp.length > 0 && (
-        <div className="rounded-lg border border-void-200 bg-white shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
-          <button
-            onClick={() => toggleSection('mcp')}
-            className="flex w-full items-center justify-between px-4 py-3"
-          >
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-void-900 dark:text-void-100">MCP Configs</h3>
-              <span className="rounded-full bg-void-100 px-2 py-0.5 text-xs text-void-600 dark:bg-void-700 dark:text-void-300">
-                {data.mcp.length}
-              </span>
-            </div>
-            <svg
-              className={`h-4 w-4 text-void-400 transition-transform ${expandedSections.mcp ? 'rotate-180' : ''}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {expandedSections.mcp && (
-            <div className="border-t border-void-100 dark:border-void-700">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-void-200 dark:border-void-700">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Name</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Description</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Version</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.mcp.map(mcp => (
-                    <tr key={mcp.name} className="border-b border-void-100 dark:border-void-800">
-                      <td className="px-4 py-2 font-medium text-void-900 dark:text-void-100">
-                        <span className="flex items-center gap-2">
-                          {mcp.name}
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeBadgeColors.mcp}`}>
-                            mcp
-                          </span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-void-500 dark:text-void-400">
-                        {(mcp.frontmatter?.description as string) || '-'}
-                      </td>
-                      <td className="px-4 py-2 text-void-500 dark:text-void-400">
-                        {mcp.frontmatter?.version ? `v${mcp.frontmatter.version}` : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Delete confirmation dialog */}
       {confirmDelete && (
         <div
@@ -248,6 +203,158 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
           onClose={() => setViewingAsset(null)}
         />
       )}
+
+      {/* MCP deploy dialog */}
+      {deployTarget && (
+        <McpDeployDialog
+          mcpName={deployTarget.name}
+          onClose={() => setDeployTarget(null)}
+          onDeployed={() => { setDeployTarget(null); onRefresh?.(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Deploy an MCP from the store to a project.
+ */
+function McpDeployDialog({ mcpName, onClose, onDeployed }: {
+  mcpName: string;
+  onClose: () => void;
+  onDeployed: () => void;
+}) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>('claude');
+  const [deploying, setDeploying] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/dashboard')
+      .then(r => r.json())
+      .then(data => {
+        if (data.projects) setProjects(data.projects);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleDeploy() {
+    if (!selectedProject) return;
+    setDeploying(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/cli-assets/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          changes: [{
+            assetName: mcpName,
+            assetType: 'mcp',
+            projectId: selectedProject,
+            action: 'deploy',
+            provider: selectedProvider,
+            source: 'store',
+          }],
+        }),
+      });
+      const data = await res.json();
+      const firstResult = data.results?.[0];
+      if (res.ok && firstResult?.success && firstResult?.error) {
+        // success=true but has error message means "already present — skipped"
+        setResult({ success: true, message: firstResult.error });
+      } else if (res.ok && firstResult?.success) {
+        setResult({ success: true, message: `Deployed to ${projects.find(p => p.id === selectedProject)?.name || selectedProject}` });
+        setTimeout(onDeployed, 1200);
+      } else {
+        setResult({ success: false, message: data.results?.[0]?.error || data.error || 'Deploy failed' });
+      }
+    } catch {
+      setResult({ success: false, message: 'Network error' });
+    }
+    setDeploying(false);
+  }
+
+  const providers: { id: ProviderId; label: string }[] = [
+    { id: 'claude', label: 'Claude' },
+    { id: 'codex', label: 'Codex' },
+    { id: 'gemini', label: 'Gemini' },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="mx-4 w-full max-w-sm rounded-lg border border-void-700 bg-void-850 p-5 shadow-(--shadow-overlay)">
+        <h3 className="text-sm font-semibold text-void-100">
+          Deploy MCP: <span className="text-neon-blue-400">{mcpName}</span>
+        </h3>
+
+        <div className="mt-4 space-y-3">
+          {/* Project picker */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-void-400">Project</label>
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className="w-full rounded-md border border-void-700 bg-void-900 px-3 py-2 text-sm text-void-200 focus:border-neon-blue-400/50 focus:outline-none"
+            >
+              <option value="">Select project...</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Provider picker */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-void-400">Provider</label>
+            <div className="flex gap-1">
+              {providers.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedProvider(p.id)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    selectedProvider === p.id
+                      ? 'border border-neon-blue-400/40 bg-neon-blue-400/20 text-neon-blue-400'
+                      : 'border border-void-700 text-void-400 hover:border-void-600 hover:text-void-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Result message */}
+          {result && (
+            <div className={`rounded-md border p-2 text-xs ${
+              result.success
+                ? 'border-green-400/30 bg-green-400/10 text-green-400'
+                : 'border-red-400/30 bg-red-400/10 text-red-400'
+            }`}>
+              {result.message}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded px-3 py-1.5 text-sm text-void-400 hover:text-void-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDeploy}
+            disabled={!selectedProject || deploying}
+            className="rounded bg-neon-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deploying ? 'Deploying...' : 'Deploy'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

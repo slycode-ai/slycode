@@ -104,15 +104,17 @@ export async function DELETE(request: NextRequest) {
     }
 
     const root = getSlycodeRoot();
-    const typeDir = assetType === 'skill' ? 'skills' : 'agents';
 
     if (assetType === 'skill') {
-      const assetPath = path.join(root, 'store', typeDir, assetName);
+      const assetPath = path.join(root, 'store', 'skills', assetName);
       if (fs.existsSync(assetPath)) {
         fs.rmSync(assetPath, { recursive: true, force: true });
       }
+    } else if (assetType === 'mcp') {
+      const jsonPath = path.join(root, 'store', 'mcp', `${assetName}.json`);
+      if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath);
     } else {
-      const mdPath = path.join(root, 'store', typeDir, `${assetName}.md`);
+      const mdPath = path.join(root, 'store', 'agents', `${assetName}.md`);
       if (fs.existsSync(mdPath)) fs.unlinkSync(mdPath);
     }
 

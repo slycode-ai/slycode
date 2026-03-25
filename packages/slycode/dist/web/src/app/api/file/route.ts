@@ -25,6 +25,7 @@ const ALLOWED_PATH_PREFIXES = [
 // Only these file extensions can be served
 const ALLOWED_EXTENSIONS = [
   '.md',
+  '.json',
 ];
 
 export async function GET(request: NextRequest) {
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       path: filePath,
       content,
-      type: ext === '.md' ? 'markdown' : 'text',
+      type: ext === '.md' ? 'markdown' : ext === '.json' ? 'json' : 'text',
     });
   } catch (error) {
     console.error('Failed to read file:', error);

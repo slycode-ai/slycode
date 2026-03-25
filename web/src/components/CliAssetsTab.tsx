@@ -454,7 +454,7 @@ export function CliAssetsTab() {
 
       {/* Projects view */}
       {activeView === 'projects' && (
-        <>
+        <div className="space-y-4">
 
           {sections.map(({ key, label, rows }) => (
             <div key={key} className="rounded-lg border border-void-200 bg-white shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
@@ -548,7 +548,7 @@ export function CliAssetsTab() {
               </div>
             );
           })()}
-        </>
+        </div>
       )}
 
       </div>{/* end min-height wrapper */}

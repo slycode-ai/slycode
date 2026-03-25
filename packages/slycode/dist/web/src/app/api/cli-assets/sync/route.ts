@@ -19,9 +19,12 @@ import {
 } from '@/lib/asset-scanner';
 import { getStoreAssets } from '@/lib/store-scanner';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
+import { parseMcpFromStore, activateMcp, deactivateMcp } from '@/lib/mcp-common';
+import { getSlycodeRoot } from '@/lib/paths';
 import { appendEvent } from '@/lib/event-log';
 import type { PendingChange, AssetType, AssetInfo, ProviderId, CliAssetsData } from '@/lib/types';
 import fs from 'fs';
+import path from 'path';
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,7 +53,34 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        if (change.action === 'deploy') {
+        if (change.action === 'deploy' && change.assetType === 'mcp') {
+          // MCP deploy: JSON merge via mcp-common (not file copy)
+          const storePath = path.join(getSlycodeRoot(), 'store', 'mcp', `${change.assetName}.json`);
+          const mcpConfig = parseMcpFromStore(storePath);
+          if (!mcpConfig) {
+            throw new Error(`MCP '${change.assetName}' not found in store`);
+          }
+          const activateResult = activateMcp(project.path, change.provider || 'claude', mcpConfig);
+          if (activateResult === 'already_exists') {
+            results.push({ change, success: true, error: `MCP '${change.assetName}' already present in ${project.name} — skipped` });
+            continue;
+          }
+          appendEvent({
+            type: 'skill_deployed',
+            project: change.projectId,
+            detail: `Deployed MCP '${change.assetName}' (${change.provider || 'claude'}) to ${project.name}`,
+            timestamp: new Date().toISOString(),
+          });
+        } else if (change.action === 'remove' && change.assetType === 'mcp') {
+          // MCP remove: JSON splice via mcp-common
+          deactivateMcp(project.path, change.provider || 'claude', change.assetName);
+          appendEvent({
+            type: 'skill_removed',
+            project: change.projectId,
+            detail: `Removed MCP '${change.assetName}' from ${project.name}`,
+            timestamp: new Date().toISOString(),
+          });
+        } else if (change.action === 'deploy') {
           if (change.source === 'store' && change.provider) {
             // Deploy from flat canonical store to project using provider-specific paths
             const allStoreAssets = getStoreAssets();

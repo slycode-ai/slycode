@@ -109,7 +109,7 @@ function scanStoreMcp(storePath: string): StoreAssetInfo[] {
           description: parsed.description,
           updated: parsed.updated,
         },
-        isValid: !!(parsed.name && parsed.command),
+        isValid: !!(parsed.name && (parsed.command || parsed.url)),
       });
     }
   } catch {

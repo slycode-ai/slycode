@@ -197,41 +197,58 @@ function buildMcpCreatePrompt(
   description: string,
   outputPath: string,
 ): string {
-  const examplePath = path.join(path.dirname(outputPath), 'context7.json');
-
   return `Create an MCP (Model Context Protocol) server configuration called "${assetName}".
 
 **Output file:** \`${outputPath}\`
-**Example config:** \`${examplePath}\`
 
 ## What this MCP server should do
 ${description}
 
 ## Research steps
 
-1. Read the example config at \`${examplePath}\` to understand the JSON format
-2. Research the MCP server package described above — find the correct npm package name, command, and required arguments
-3. Check if there are any required environment variables or setup steps
-4. Determine the correct \`command\` and \`args\` to launch the server
+1. Research the MCP server package described above — find the correct npm package name, command, and required arguments
+2. Check if there are any required environment variables or setup steps
+3. Determine whether this is a stdio MCP (runs locally via command) or HTTP MCP (connects to a URL)
 
-## Required JSON format
+## Store JSON format
 
+There are two transport types. Use the one that matches the MCP server:
+
+### Stdio MCP (runs a local process)
 \`\`\`json
 {
   "name": "${assetName}",
   "command": "<executable, e.g. npx, node, python>",
   "args": ["<arguments to launch the MCP server>"],
-  "description": "<concise one-line description of what this MCP server provides>",
+  "env": {
+    "API_KEY": "\${API_KEY}"
+  },
+  "description": "<concise one-line description>",
   "version": "1.0.0",
   "updated": "<today's date, YYYY-MM-DD>"
 }
 \`\`\`
 
-Key points:
+### HTTP MCP (connects to a remote URL)
+\`\`\`json
+{
+  "name": "${assetName}",
+  "url": "https://<mcp-server-url>",
+  "headers": {
+    "Authorization": "Bearer \${API_KEY}"
+  },
+  "description": "<concise one-line description>",
+  "version": "1.0.0",
+  "updated": "<today's date, YYYY-MM-DD>"
+}
+\`\`\`
+
+## Key points
 - \`name\` must be \`${assetName}\`
-- \`command\` is the executable (usually \`npx\` for npm packages)
-- \`args\` is an array of arguments (for npx, typically \`["-y", "@scope/package@latest"]\`)
-- If the server needs environment variables, add an \`"env"\` object with the variable names and placeholder values
+- **Stdio**: \`command\` is the executable (usually \`npx\`), \`args\` is an array, \`env\` holds environment variables with \`\${PLACEHOLDER}\` values
+- **HTTP**: \`url\` is the MCP server endpoint, \`headers\` is optional (for auth tokens etc.)
+- Do NOT include both \`command\` and \`url\` — pick one transport type
+- \`description\`, \`version\`, and \`updated\` are required metadata fields
 - The file must be valid JSON
 
 Write the config to \`${outputPath}\`.`;
