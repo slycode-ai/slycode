@@ -7,5 +7,5 @@ export interface SttConfig {
     awsTranscribeLanguage: string;
     awsTranscribeS3Bucket: string;
 }
-export declare function validateSttConfig(config: SttConfig): string | null;
+export declare function validateSttConfig(config: SttConfig): Promise<string | null>;
 export declare function transcribeAudio(filePath: string, config: SttConfig): Promise<string>;

@@ -1,6 +1,39 @@
 import * as pty from 'node-pty';
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
 import { execSync } from 'child_process';
+// On macOS, node-pty uses a `spawn-helper` binary for PTY forking.
+// npm doesn't always preserve the executable bit when installing packages,
+// which causes every pty.spawn() to fail with "posix_spawnp failed".
+// Check and fix this once at startup.
+let spawnHelperChecked = false;
+function ensureSpawnHelperPermissions() {
+    if (spawnHelperChecked || os.platform() !== 'darwin')
+        return;
+    spawnHelperChecked = true;
+    try {
+        const ptyDir = path.dirname(require.resolve('node-pty/package.json'));
+        const prebuildsDir = path.join(ptyDir, 'prebuilds');
+        if (!fs.existsSync(prebuildsDir))
+            return;
+        for (const dir of fs.readdirSync(prebuildsDir)) {
+            if (!dir.startsWith('darwin'))
+                continue;
+            const helper = path.join(prebuildsDir, dir, 'spawn-helper');
+            if (!fs.existsSync(helper))
+                continue;
+            const stat = fs.statSync(helper);
+            if (!(stat.mode & 0o111)) {
+                fs.chmodSync(helper, 0o755);
+                console.log(`[pty] Fixed spawn-helper permissions: ${helper}`);
+            }
+        }
+    }
+    catch (err) {
+        console.warn('[pty] Could not check spawn-helper permissions:', err.message);
+    }
+}
 // One-time flag: login shell PATH has been merged into process.env.PATH.
 // On macOS/Linux, CLI tools (claude, codex) are often installed in paths
 // added by shell profiles (~/.zprofile, ~/.bashrc). When the bridge starts
@@ -96,6 +129,8 @@ export function spawnPty(options) {
     if (os.platform() === 'win32' && shell && !shell.includes('.') && !shell.includes('\\') && !shell.includes('/')) {
         shell = `${shell}.cmd`;
     }
+    // Ensure node-pty's spawn-helper is executable (macOS — one-time check)
+    ensureSpawnHelperPermissions();
     // Ensure login shell PATH is captured (one-time, augments process.env.PATH)
     ensureLoginShellPath();
     // Resolve bare command names to absolute paths. On macOS, posix_spawnp
@@ -126,18 +161,29 @@ export function spawnPty(options) {
             && !p.includes('.npm/_npx') && !p.includes('.npm\\_npx'))
             .join(sep);
     }
-    const ptyProcess = pty.spawn(shell, options.args, {
-        name: 'xterm-256color',
-        cols: options.cols || 80,
-        rows: options.rows || 24,
-        cwd: options.cwd,
-        env: {
-            ...cleanEnv,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            ...options.extraEnv,
-        },
-    });
+    let ptyProcess;
+    try {
+        ptyProcess = pty.spawn(shell, options.args, {
+            name: 'xterm-256color',
+            cols: options.cols || 80,
+            rows: options.rows || 24,
+            cwd: options.cwd,
+            env: {
+                ...cleanEnv,
+                TERM: 'xterm-256color',
+                COLORTERM: 'truecolor',
+                ...options.extraEnv,
+            },
+        });
+    }
+    catch (err) {
+        const msg = err.message || '';
+        if (msg.includes('posix_spawnp') && os.platform() === 'darwin') {
+            throw new Error(`PTY spawn failed for '${shell}'. On macOS, this is usually caused by node-pty's spawn-helper ` +
+                `missing execute permissions. Run: chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper`);
+        }
+        throw err;
+    }
     ptyProcess.onData(options.onData);
     ptyProcess.onExit(({ exitCode }) => {
         options.onExit(exitCode);

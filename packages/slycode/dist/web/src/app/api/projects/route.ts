@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 export const dynamic = 'force-dynamic';
 
 function expandTilde(p: string): string {
+  // Normalize Unicode tildes (U+02DC small tilde, U+FF5E fullwidth tilde) to ASCII
+  p = p.replace(/^[\u02dc\uff5e]/, '~');
   if (p.startsWith('~/') || p === '~') {
     return p.replace(/^~/, os.homedir());
   }
@@ -55,8 +57,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolve tilde and make absolute
-    const resolvedPath = path.resolve(expandTilde(projectPath));
+    // Resolve tilde and validate absolute path
+    const expanded = expandTilde(projectPath);
+    if (!path.isAbsolute(expanded)) {
+      return NextResponse.json(
+        { error: 'Please enter an absolute path (e.g. ~/Dev/myproject or /home/user/Dev/myproject)' },
+        { status: 400 }
+      );
+    }
+    const resolvedPath = path.resolve(expanded);
 
     const registry = await loadRegistry();
     const projectId = toKebabCase(name);

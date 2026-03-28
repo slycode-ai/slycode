@@ -205,11 +205,11 @@ function createChannel(state: StateManager): Channel | null {
   return null;
 }
 
-function logConfigStatus(channel: Channel | null, voiceConfig: VoiceConfig, bridgeUrl: string): void {
+async function logConfigStatus(channel: Channel | null, voiceConfig: VoiceConfig, bridgeUrl: string): Promise<void> {
   console.log('Messaging service starting...');
   console.log(`  Telegram: ${channel ? 'configured' : 'not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID in .env'}`);
   if (voiceConfig.sttBackend === 'local') {
-    const sttValid = !validateSttConfig({ backend: 'local', openaiApiKey: '', whisperCliPath: voiceConfig.whisperCliPath, whisperModelPath: voiceConfig.whisperModelPath, awsTranscribeRegion: '', awsTranscribeLanguage: '', awsTranscribeS3Bucket: '' });
+    const sttValid = !(await validateSttConfig({ backend: 'local', openaiApiKey: '', whisperCliPath: voiceConfig.whisperCliPath, whisperModelPath: voiceConfig.whisperModelPath, awsTranscribeRegion: '', awsTranscribeLanguage: '', awsTranscribeS3Bucket: '' }));
     console.log(`  STT (local whisper.cpp): ${sttValid ? 'configured' : 'not configured — check WHISPER_CLI_PATH and WHISPER_MODEL_PATH'}`);
   } else if (voiceConfig.sttBackend === 'aws-transcribe') {
     console.log(`  STT (AWS Transcribe): configured — region: ${voiceConfig.awsTranscribeRegion || 'default'}, language: ${voiceConfig.awsTranscribeLanguage}, bucket: ${voiceConfig.awsTranscribeS3Bucket}`);
@@ -237,7 +237,7 @@ function getBreadcrumb(target: NavigationTarget, state: StateManager, kanban: Ka
         : null;
       const stage = cardInfo?.stage || target.stage || '?';
       const title = cardInfo?.card.title || target.cardId || '?';
-      const truncTitle = title.length > 35 ? title.slice(0, 32) + '...' : title;
+      const truncTitle = title.length > 55 ? title.slice(0, 52) + '...' : title;
       return `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
     }
   }
@@ -1238,7 +1238,7 @@ function setupChannel(
       awsTranscribeLanguage: voiceConfig.awsTranscribeLanguage,
       awsTranscribeS3Bucket: voiceConfig.awsTranscribeS3Bucket,
     };
-    const sttError = validateSttConfig(sttConfig);
+    const sttError = await validateSttConfig(sttConfig);
     if (sttError) {
       await channel.sendText(`Voice transcription not configured: ${sttError}`);
       return;
@@ -1334,7 +1334,7 @@ async function main() {
   const state = new StateManager();
   const channel = createChannel(state);
 
-  logConfigStatus(channel, voiceConfig, serviceConfig.bridgeUrl);
+  await logConfigStatus(channel, voiceConfig, serviceConfig.bridgeUrl);
 
   const bridge = new BridgeClient(serviceConfig.bridgeUrl);
   const kanban = new KanbanClient(state.getProjects());
@@ -1372,7 +1372,7 @@ async function main() {
       const cardId = parts[parts.length - 1];
       const cardInfo = projectId ? kanban.getCard(projectId, cardId) : null;
       const cardTitle = cardInfo?.card.title || cardId;
-      const truncTitle = cardTitle.length > 30 ? cardTitle.slice(0, 27) + '...' : cardTitle;
+      const truncTitle = cardTitle.length > 50 ? cardTitle.slice(0, 47) + '...' : cardTitle;
       return truncTitle;
     }
     return `${projectName} Terminal`;

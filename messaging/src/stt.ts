@@ -1,17 +1,20 @@
 import OpenAI from 'openai';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
-import {
-  TranscribeClient,
-  StartTranscriptionJobCommand,
-  GetTranscriptionJobCommand,
-  type LanguageCode,
-} from '@aws-sdk/client-transcribe';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import type { LanguageCode } from '@aws-sdk/client-transcribe';
 
 let openaiClient: OpenAI | null = null;
-let transcribeClient: TranscribeClient | null = null;
-let s3Client: S3Client | null = null;
+
+// AWS SDK clients — lazy-initialized on first use via dynamic import
+let transcribeClient: any = null;
+let s3Client: any = null;
+let awsSdkLoaded = false;
+let TranscribeClientClass: any = null;
+let StartTranscriptionJobCommandClass: any = null;
+let GetTranscriptionJobCommandClass: any = null;
+let S3ClientClass: any = null;
+let PutObjectCommandClass: any = null;
+let DeleteObjectCommandClass: any = null;
 
 function getClient(apiKey: string): OpenAI {
   if (!openaiClient) {
@@ -20,16 +23,36 @@ function getClient(apiKey: string): OpenAI {
   return openaiClient;
 }
 
-function getTranscribeClient(region?: string): TranscribeClient {
+async function loadAwsSdk(): Promise<void> {
+  if (awsSdkLoaded) return;
+  try {
+    const transcribeMod = await import('@aws-sdk/client-transcribe');
+    const s3Mod = await import('@aws-sdk/client-s3');
+    TranscribeClientClass = transcribeMod.TranscribeClient;
+    StartTranscriptionJobCommandClass = transcribeMod.StartTranscriptionJobCommand;
+    GetTranscriptionJobCommandClass = transcribeMod.GetTranscriptionJobCommand;
+    S3ClientClass = s3Mod.S3Client;
+    PutObjectCommandClass = s3Mod.PutObjectCommand;
+    DeleteObjectCommandClass = s3Mod.DeleteObjectCommand;
+    awsSdkLoaded = true;
+  } catch {
+    throw new Error(
+      'AWS Transcribe requires additional packages. Install them with:\n' +
+      '  npm install @aws-sdk/client-transcribe @aws-sdk/client-s3'
+    );
+  }
+}
+
+function getTranscribeClient(region?: string) {
   if (!transcribeClient) {
-    transcribeClient = new TranscribeClient(region ? { region } : {});
+    transcribeClient = new TranscribeClientClass(region ? { region } : {});
   }
   return transcribeClient;
 }
 
-function getS3Client(region?: string): S3Client {
+function getS3Client(region?: string) {
   if (!s3Client) {
-    s3Client = new S3Client(region ? { region } : {});
+    s3Client = new S3ClientClass(region ? { region } : {});
   }
   return s3Client;
 }
@@ -84,6 +107,8 @@ async function transcribeAwsBatch(
   language: string,
   s3Bucket: string,
 ): Promise<string> {
+  await loadAwsSdk();
+
   const transcribe = getTranscribeClient(region || undefined);
   const s3 = getS3Client(region || undefined);
 
@@ -94,7 +119,7 @@ async function transcribeAwsBatch(
 
   // Upload audio to S3
   const audioData = fs.readFileSync(filePath);
-  await s3.send(new PutObjectCommand({
+  await s3.send(new PutObjectCommandClass({
     Bucket: s3Bucket,
     Key: s3Key,
     Body: audioData,
@@ -102,7 +127,7 @@ async function transcribeAwsBatch(
 
   try {
     // Start transcription job
-    await transcribe.send(new StartTranscriptionJobCommand({
+    await transcribe.send(new StartTranscriptionJobCommandClass({
       TranscriptionJobName: jobName,
       LanguageCode: language as LanguageCode,
       MediaFormat: mediaFormat,
@@ -114,7 +139,7 @@ async function transcribeAwsBatch(
     let resultUri = '';
     while (status === 'IN_PROGRESS' || status === 'QUEUED') {
       await sleep(1500);
-      const result = await transcribe.send(new GetTranscriptionJobCommand({
+      const result = await transcribe.send(new GetTranscriptionJobCommandClass({
         TranscriptionJobName: jobName,
       }));
       status = result.TranscriptionJob?.TranscriptionJobStatus || 'FAILED';
@@ -144,7 +169,7 @@ async function transcribeAwsBatch(
   } finally {
     // Clean up S3 object
     try {
-      await s3.send(new DeleteObjectCommand({ Bucket: s3Bucket, Key: s3Key }));
+      await s3.send(new DeleteObjectCommandClass({ Bucket: s3Bucket, Key: s3Key }));
     } catch { /* ignore cleanup errors */ }
   }
 }
@@ -159,7 +184,7 @@ export interface SttConfig {
   awsTranscribeS3Bucket: string;
 }
 
-export function validateSttConfig(config: SttConfig): string | null {
+export async function validateSttConfig(config: SttConfig): Promise<string | null> {
   if (config.backend === 'openai') {
     if (!config.openaiApiKey) return 'STT backend is "openai" but OPENAI_API_KEY is not set.';
   } else if (config.backend === 'local') {
@@ -169,6 +194,11 @@ export function validateSttConfig(config: SttConfig): string | null {
     if (!fs.existsSync(config.whisperModelPath)) return `Whisper model not found at: ${config.whisperModelPath}`;
   } else if (config.backend === 'aws-transcribe') {
     if (!config.awsTranscribeS3Bucket) return 'STT backend is "aws-transcribe" but AWS_TRANSCRIBE_S3_BUCKET is not set.';
+    try {
+      await import('@aws-sdk/client-transcribe');
+    } catch {
+      return 'STT backend is "aws-transcribe" but AWS SDK is not installed. Run: npm install @aws-sdk/client-transcribe @aws-sdk/client-s3';
+    }
   }
   return null;
 }

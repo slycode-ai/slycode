@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-03-29
+
+### Changed
+- PTY handler updates
+- Messaging service improvements (STT, core)
+- Scaffold updates
+- Projects API route and card modal updates
+
 ## [0.2.20] - 2026-03-25
 
 ### Changed

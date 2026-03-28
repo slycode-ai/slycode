@@ -649,33 +649,40 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   };
   const currentDocPath = getDocPath(activeTab);
 
-  // Track loaded docs by path to avoid reloading
+  // Track loaded docs by path
   const [loadedDocs, setLoadedDocs] = useState<Record<string, string>>({});
   const [docErrors, setDocErrors] = useState<Record<string, string>>({});
 
-  // Load document when a doc tab is selected
+  // Re-fetch document every time a doc tab is selected (always show latest from disk)
   useEffect(() => {
     const isDocTab = activeTab === 'design' || activeTab === 'feature' || activeTab === 'test';
-    if (isDocTab && currentDocPath && !loadedDocs[currentDocPath] && !docLoading) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- gating fetch with loading flag
-      setDocLoading(true);
-      fetch(`/api/file?path=${encodeURIComponent(currentDocPath)}&projectId=${encodeURIComponent(projectId)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.error) {
-            setDocErrors((prev) => ({ ...prev, [currentDocPath!]: data.error }));
-          } else {
-            setLoadedDocs((prev) => ({ ...prev, [currentDocPath!]: data.content }));
-          }
-        })
-        .catch((err) => {
-          setDocErrors((prev) => ({ ...prev, [currentDocPath!]: err.message }));
-        })
-        .finally(() => {
-          setDocLoading(false);
-        });
-    }
-  }, [activeTab, currentDocPath, loadedDocs, docLoading, projectId]);
+    if (!isDocTab || !currentDocPath) return;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- gating fetch with loading flag
+    setDocLoading(true);
+    const fetchPath = currentDocPath;
+    fetch(`/api/file?path=${encodeURIComponent(fetchPath)}&projectId=${encodeURIComponent(projectId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          setDocErrors((prev) => ({ ...prev, [fetchPath]: data.error }));
+        } else {
+          setDocErrors((prev) => {
+            const next = { ...prev };
+            delete next[fetchPath];
+            return next;
+          });
+          setLoadedDocs((prev) => ({ ...prev, [fetchPath]: data.content }));
+        }
+      })
+      .catch((err) => {
+        setDocErrors((prev) => ({ ...prev, [fetchPath]: err.message }));
+      })
+      .finally(() => {
+        setDocLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-fetch on every tab switch
+  }, [activeTab, currentDocPath, projectId]);
 
   const handleTitleSave = () => {
     if (editedTitle.trim() && editedTitle !== card.title) {
@@ -1623,12 +1630,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                   )}
                 </button>
               )}
-              {docLoading && !loadedDocs[currentDocPath!] && (
+              {docLoading && !loadedDocs[currentDocPath!] && !docErrors[currentDocPath!] && (
                 <div className="flex items-center justify-center py-8">
                   <div className="text-void-500">Loading document...</div>
                 </div>
               )}
-              {currentDocPath && docErrors[currentDocPath] && (
+              {currentDocPath && docErrors[currentDocPath] && !loadedDocs[currentDocPath] && (
                 <div className="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-900/20 dark:text-red-300">
                   Error loading document: {docErrors[currentDocPath]}
                 </div>

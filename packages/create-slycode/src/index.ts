@@ -537,6 +537,18 @@ export async function main(args: string[]): Promise<void> {
     }
   }
 
+  // Normalize Unicode tildes (U+02DC small tilde, U+FF5E fullwidth tilde) to ASCII
+  targetDir = targetDir.replace(/^[\u02dc\uff5e]/, '~');
+  // Expand tilde to home directory
+  if (targetDir.startsWith('~/') || targetDir === '~') {
+    targetDir = targetDir.replace(/^~/, require('os').homedir());
+  }
+  // Reject relative paths (defensive — shell normally expands ~, but programmatic callers may not)
+  if (!path.isAbsolute(targetDir) && targetDir !== 'slycode') {
+    console.error('  Error: Please provide an absolute path (e.g. ~/Dev/myproject or /home/user/Dev/myproject)');
+    process.exit(1);
+  }
+
   const resolvedDir = path.resolve(targetDir);
   const dirName = path.basename(resolvedDir);
 
