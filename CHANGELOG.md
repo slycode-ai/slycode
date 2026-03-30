@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-03-31
+
+### Changed
+- Bridge provider-utils, session manager, and types updates
+- Messaging bridge-client, state, and types improvements
+- Projects and providers API route updates
+- Paths utility updates
+- Claude terminal panel updates
+
 ## [0.2.21] - 2026-03-29
 
 ### Changed

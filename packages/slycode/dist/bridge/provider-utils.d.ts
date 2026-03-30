@@ -27,10 +27,19 @@ export interface ProviderConfig {
     prompt: ProviderPrompt;
     instructionFile?: string;
     altInstructionFile?: string;
+    model?: {
+        flag: string;
+        available: Array<{
+            id: string;
+            label: string;
+            description?: string;
+        }>;
+    };
 }
 export interface ProviderDefault {
     provider: string;
     skipPermissions: boolean;
+    model?: string;
 }
 export interface ProvidersData {
     providers: Record<string, ProviderConfig>;
@@ -54,6 +63,7 @@ export interface BuildArgsOptions {
     resume: boolean;
     sessionId?: string | null;
     prompt?: string;
+    model?: string;
 }
 /**
  * Build the command and args array for a provider session.

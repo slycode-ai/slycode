@@ -201,7 +201,7 @@ export class BridgeClient {
             return { needed: false };
         }
     }
-    async ensureSession(sessionName, cwd, provider = 'claude', prompt, createInstructionFile) {
+    async ensureSession(sessionName, cwd, provider = 'claude', prompt, createInstructionFile, model) {
         // Check if session exists and is alive (running or detached)
         const existing = await this.getSession(sessionName);
         if (existing && (existing.status === 'running' || existing.status === 'detached')) {
@@ -217,18 +217,19 @@ export class BridgeClient {
             provider,
             skipPermissions: true,
             createInstructionFile,
+            model: model || undefined,
         });
         debugLog(`[ensureSession] Session created: resumed=${session.resumed}, hasPrompt=${!!prompt}`);
         return { session };
     }
-    async sendMessage(sessionName, cwd, message, provider = 'claude', createInstructionFile) {
+    async sendMessage(sessionName, cwd, message, provider = 'claude', createInstructionFile, model) {
         // Check if session is already active
         const existing = await this.getSession(sessionName);
         const isActive = existing && (existing.status === 'running' || existing.status === 'detached');
         if (!isActive) {
             // New or stopped session — pass message as initial prompt
             debugLog(`[sendMessage] Session ${sessionName} not active (status: ${existing?.status ?? 'not found'}), creating/resuming`);
-            const result = await this.ensureSession(sessionName, cwd, provider, message, createInstructionFile);
+            const result = await this.ensureSession(sessionName, cwd, provider, message, createInstructionFile, model);
             return { permissionMismatch: result.permissionMismatch };
         }
         // Permission mismatch detection for existing sessions
@@ -250,7 +251,7 @@ export class BridgeClient {
         debugLog(`[sendMessage] Done: text=${textSent}, cr=${crSent}`);
         return {};
     }
-    async restartSession(sessionName, cwd, provider, prompt) {
+    async restartSession(sessionName, cwd, provider, prompt, model) {
         // Kill existing session (DELETE with ?action=stop actually terminates the PTY)
         try {
             const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionName)}?action=stop`, {
@@ -272,6 +273,7 @@ export class BridgeClient {
             prompt,
             provider,
             skipPermissions: true,
+            model: model || undefined,
         });
     }
     /**

@@ -7,6 +7,20 @@
 
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+
+/**
+ * Expand tilde (~) in a path to the user's home directory.
+ * Also normalizes Unicode tildes (U+02DC, U+FF5E) that Mac browsers can produce.
+ */
+export function expandTilde(p: string): string {
+  // Normalize Unicode tildes (U+02DC small tilde, U+FF5E fullwidth tilde) to ASCII
+  p = p.replace(/^[\u02dc\uff5e]/, '~');
+  if (p.startsWith('~/') || p === '~') {
+    return p.replace(/^~/, os.homedir());
+  }
+  return p;
+}
 
 /**
  * Resolve the SlyCode root directory (workspace).

@@ -188,6 +188,7 @@ export interface BridgeSessionInfo {
   lastActive?: string;
   provider?: string;
   skipPermissions?: boolean;
+  model?: string;
 }
 
 export interface BridgeCreateSessionRequest {
@@ -199,6 +200,7 @@ export interface BridgeCreateSessionRequest {
   provider?: string;
   skipPermissions?: boolean;
   createInstructionFile?: boolean;
+  model?: string;
 }
 
 export interface InstructionFileCheck {
@@ -214,4 +216,5 @@ export interface PendingInstructionFileConfirm {
   targetFile: string;
   copySource: string;
   originalMessage: string;
+  model?: string;
 }

@@ -19,6 +19,7 @@ export interface Session {
   cwd: string;
   provider: string;          // Provider id (e.g. "claude", "gemini", "codex")
   skipPermissions: boolean;  // Whether permission-skip flag was used
+  model?: string;            // Model id passed to CLI (e.g. "opus", "o3")
   status: SessionStatus;
   pid: number | null;
   connectedClients: number;
@@ -77,6 +78,7 @@ export interface CreateSessionRequest {
   command?: string;
   provider?: string;       // Provider id from providers.json (e.g. "claude", "gemini", "codex")
   skipPermissions?: boolean; // Whether to add permission-skip flag
+  model?: string;           // Model id to pass to CLI via provider's model flag
   cwd?: string;
   fresh?: boolean;
   idleTimeout?: number;
@@ -97,6 +99,7 @@ export interface SessionInfo {
   claudeSessionId?: string | null;
   provider?: string;
   skipPermissions?: boolean;
+  model?: string;
   exitCode?: number;
   exitedAt?: string;
 }
@@ -108,6 +111,7 @@ export interface PersistedSession {
   lastActive: string;
   provider?: string;         // Provider id (absent on old sessions = "claude")
   skipPermissions?: boolean; // Whether permission-skip was used
+  model?: string;            // Model id the session was started with
   exitCode?: number;         // Last exit code (set by handlePtyExit)
   exitedAt?: string;         // When session last exited (ISO timestamp)
 }

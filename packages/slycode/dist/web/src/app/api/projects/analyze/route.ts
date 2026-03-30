@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import { getPackageDir } from '@/lib/paths';
+import { getPackageDir, expandTilde } from '@/lib/paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,11 +23,21 @@ export async function POST(request: Request) {
       );
     }
 
+    // Expand tilde and validate absolute path
+    const expanded = expandTilde(targetPath);
+    if (!path.isAbsolute(expanded)) {
+      return NextResponse.json(
+        { error: 'Please enter an absolute path (e.g. ~/Dev/myproject or /home/user/Dev/myproject)' },
+        { status: 400 }
+      );
+    }
+    const resolvedPath = path.resolve(expanded);
+
     const scaffoldScript = path.join(getPackageDir(), 'scripts', 'scaffold.js');
     const args = [
       scaffoldScript,
       'analyze',
-      '--path', targetPath,
+      '--path', resolvedPath,
       '--json',
     ];
     if (providers && Array.isArray(providers) && providers.length > 0) {

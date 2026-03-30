@@ -20,6 +20,7 @@ export class StateManager {
     responseMode = 'text';
     voiceTone = null;
     selectedProvider = 'claude';
+    selectedModel = ''; // '' = Default (no flag)
     _pendingInstructionFileConfirm = null;
     chatId = null;
     constructor() {
@@ -88,6 +89,9 @@ export class StateManager {
             if (data.selectedProvider) {
                 this.selectedProvider = data.selectedProvider;
             }
+            if (data.selectedModel) {
+                this.selectedModel = data.selectedModel;
+            }
             if (data.chatId) {
                 this.chatId = data.chatId;
             }
@@ -108,6 +112,7 @@ export class StateManager {
                 responseMode: this.responseMode,
                 voiceTone: this.voiceTone,
                 selectedProvider: this.selectedProvider,
+                selectedModel: this.selectedModel,
                 chatId: this.chatId,
             }, null, 2));
         }
@@ -255,6 +260,14 @@ export class StateManager {
     }
     setSelectedProvider(provider) {
         this.selectedProvider = provider;
+        this.selectedModel = ''; // Reset model when switching provider
+        this.saveState();
+    }
+    getSelectedModel() {
+        return this.selectedModel;
+    }
+    setSelectedModel(model) {
+        this.selectedModel = model;
         this.saveState();
     }
     // --- Chat ID (persisted across restarts) ---

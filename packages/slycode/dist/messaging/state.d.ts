@@ -6,6 +6,7 @@ export declare class StateManager {
     private responseMode;
     private voiceTone;
     private selectedProvider;
+    private selectedModel;
     private _pendingInstructionFileConfirm;
     private chatId;
     constructor();
@@ -36,6 +37,8 @@ export declare class StateManager {
     setVoiceTone(tone: string | null): void;
     getSelectedProvider(): string;
     setSelectedProvider(provider: string): void;
+    getSelectedModel(): string;
+    setSelectedModel(model: string): void;
     getChatId(): number | null;
     setChatId(chatId: number): void;
     getPendingInstructionFileConfirm(): PendingInstructionFileConfirm | null;

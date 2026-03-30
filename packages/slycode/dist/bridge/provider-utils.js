@@ -34,7 +34,7 @@ export async function getProvider(providerId) {
  * Returns { command, args } since Codex resume changes the base command.
  */
 export function buildProviderCommand(opts) {
-    const { provider, skipPermissions, resume, sessionId, prompt } = opts;
+    const { provider, skipPermissions, resume, sessionId, prompt, model } = opts;
     const args = [];
     let command = provider.command;
     // Handle Codex-style subcommand resume (command becomes "codex resume")
@@ -61,6 +61,10 @@ export function buildProviderCommand(opts) {
     // Permission flag
     if (skipPermissions) {
         args.push(provider.permissions.flag);
+    }
+    // Model flag — only for fresh sessions (resume reconnects to existing model)
+    if (!resume && model && provider.model?.flag) {
+        args.push(provider.model.flag, model);
     }
     // Resume flag (Claude/Gemini style)
     if (resume && provider.resume.supported && provider.resume.type === 'flag') {

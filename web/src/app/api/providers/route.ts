@@ -31,6 +31,10 @@ function validateProviderDefault(
   if (typeof d.skipPermissions !== 'boolean') {
     return `${label}.skipPermissions must be a boolean`;
   }
+  // Optional model field — pass through to CLI (no validation against available list)
+  if ('model' in d && d.model !== undefined && typeof d.model !== 'string') {
+    return `${label}.model must be a string if provided`;
+  }
   return null;
 }
 

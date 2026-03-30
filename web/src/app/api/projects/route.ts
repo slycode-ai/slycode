@@ -3,21 +3,11 @@ import { loadRegistry, saveRegistry } from '@/lib/registry';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import os from 'os';
-import { getSlycodeRoot, getPackageDir } from '@/lib/paths';
+import { getSlycodeRoot, getPackageDir, expandTilde } from '@/lib/paths';
 
 const execFileAsync = promisify(execFile);
 
 export const dynamic = 'force-dynamic';
-
-function expandTilde(p: string): string {
-  // Normalize Unicode tildes (U+02DC small tilde, U+FF5E fullwidth tilde) to ASCII
-  p = p.replace(/^[\u02dc\uff5e]/, '~');
-  if (p.startsWith('~/') || p === '~') {
-    return p.replace(/^~/, os.homedir());
-  }
-  return p;
-}
 
 function toKebabCase(str: string): string {
   return str

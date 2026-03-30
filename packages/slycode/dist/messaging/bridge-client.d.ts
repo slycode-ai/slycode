@@ -19,14 +19,14 @@ export declare class BridgeClient {
         reason?: string;
     }>;
     checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck>;
-    ensureSession(sessionName: string, cwd: string, provider?: string, prompt?: string, createInstructionFile?: boolean): Promise<{
+    ensureSession(sessionName: string, cwd: string, provider?: string, prompt?: string, createInstructionFile?: boolean, model?: string): Promise<{
         session: BridgeSessionInfo;
         permissionMismatch?: boolean;
     }>;
-    sendMessage(sessionName: string, cwd: string, message: string, provider?: string, createInstructionFile?: boolean): Promise<{
+    sendMessage(sessionName: string, cwd: string, message: string, provider?: string, createInstructionFile?: boolean, model?: string): Promise<{
         permissionMismatch?: boolean;
     }>;
-    restartSession(sessionName: string, cwd: string, provider: string, prompt?: string): Promise<BridgeSessionInfo>;
+    restartSession(sessionName: string, cwd: string, provider: string, prompt?: string, model?: string): Promise<BridgeSessionInfo>;
     /**
      * Poll bridge stats and send typing indicators while session is active.
      * Returns when the session stops producing output.

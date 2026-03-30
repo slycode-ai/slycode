@@ -36,11 +36,16 @@ export interface ProviderConfig {
   prompt: ProviderPrompt;
   instructionFile?: string;
   altInstructionFile?: string;
+  model?: {
+    flag: string;
+    available: Array<{ id: string; label: string; description?: string }>;
+  };
 }
 
 export interface ProviderDefault {
   provider: string;
   skipPermissions: boolean;
+  model?: string;
 }
 
 export interface ProvidersData {
@@ -89,6 +94,7 @@ export interface BuildArgsOptions {
   resume: boolean;
   sessionId?: string | null; // For Claude GUID-based resume
   prompt?: string;
+  model?: string;            // Model id to pass via provider's model flag
 }
 
 /**
@@ -96,7 +102,7 @@ export interface BuildArgsOptions {
  * Returns { command, args } since Codex resume changes the base command.
  */
 export function buildProviderCommand(opts: BuildArgsOptions): { command: string; args: string[] } {
-  const { provider, skipPermissions, resume, sessionId, prompt } = opts;
+  const { provider, skipPermissions, resume, sessionId, prompt, model } = opts;
   const args: string[] = [];
   let command = provider.command;
 
@@ -124,6 +130,11 @@ export function buildProviderCommand(opts: BuildArgsOptions): { command: string;
   // Permission flag
   if (skipPermissions) {
     args.push(provider.permissions.flag);
+  }
+
+  // Model flag — only for fresh sessions (resume reconnects to existing model)
+  if (!resume && model && provider.model?.flag) {
+    args.push(provider.model.flag, model);
   }
 
   // Resume flag (Claude/Gemini style)

@@ -25,12 +25,25 @@ function getProviderDefault(stage) {
         const data = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
         const defaults = data.defaults;
         if (stage && defaults.stages[stage]?.provider) {
-            return defaults.stages[stage].provider;
+            return { provider: defaults.stages[stage].provider, model: defaults.stages[stage].model };
         }
-        return defaults.global?.provider || 'claude';
+        return { provider: defaults.global?.provider || 'claude', model: defaults.global?.model };
     }
     catch {
-        return 'claude';
+        return { provider: 'claude' };
+    }
+}
+function getProvidersPath() {
+    const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
+    return path.join(root, 'data', 'providers.json');
+}
+async function getProviderModels(providerId) {
+    try {
+        const data = JSON.parse(fs.readFileSync(getProvidersPath(), 'utf-8'));
+        return data.providers[providerId]?.model?.available || [];
+    }
+    catch {
+        return [];
     }
 }
 function updateGlobalProviderDefault(provider) {
@@ -297,11 +310,15 @@ async function handleSessionLifecycle(channel, state, bridge, kanban, actionFilt
     const target = ensureStage(state.getTarget(), kanban, state);
     const sessionName = state.getSessionName();
     const breadcrumb = getBreadcrumb(target, state, kanban);
-    // Build provider line
+    // Build provider line with model
     const currentProvider = state.getSelectedProvider();
     const providerLabel = PROVIDER_LABELS[currentProvider] || currentProvider;
     const explicit = await hasExplicitSession(bridge, state);
-    const providerLine = `Provider: ${providerLabel}${explicit ? '' : ' (default)'}`;
+    const currentModel = state.getSelectedModel();
+    const modelLabel = currentModel
+        ? (await getProviderModels(currentProvider)).find(m => m.id === currentModel)?.label || currentModel
+        : null;
+    const providerLine = `Provider: ${providerLabel}${modelLabel ? ` · ${modelLabel}` : ''}${explicit ? '' : ' (default)'}`;
     let session;
     try {
         session = await bridge.getSession(sessionName);
@@ -402,7 +419,7 @@ async function executeQuickCommand(commandKey, channel, state, bridge, kanban, a
             if (!proceed)
                 return;
             // New or stopped session — pass prompt to session creation
-            await bridge.ensureSession(sessionName, cwd, provider, formatted);
+            await bridge.ensureSession(sessionName, cwd, provider, formatted, undefined, state.getSelectedModel() || undefined);
         }
         await channel.sendText(`Sent: ${cmd.label}`);
         bridge.watchActivity(sessionName, channel).catch(() => { });
@@ -449,6 +466,7 @@ async function checkInstructionFilePreFlight(channel, state, bridge, sessionName
         targetFile: check.targetFile,
         copySource: check.copySource,
         originalMessage,
+        model: state.getSelectedModel() || undefined,
     });
     await channel.sendInlineKeyboard(`⚠️ ${check.targetFile} is missing in this project.\n\nCreate from ${check.copySource}?`, [[
             { label: '✅ Yes, create it', callbackData: 'ifc_yes' },
@@ -467,6 +485,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             '/switch - Navigate terminals (global, project, card)\n' +
             '/search - Search cards (or quick access to active/recent)\n' +
             '/provider - Select AI provider (Claude/Gemini/Codex)\n' +
+            '/model - Select model for current provider\n' +
             '/sly - Sly Actions for active session\n' +
             '/global - Switch to global terminal\n' +
             '/project - Switch to project terminal (from card)\n' +
@@ -604,7 +623,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     // --- /global ---
     channel.onCommand('global', async () => {
         state.selectGlobal();
-        state.setSelectedProvider(getProviderDefault());
+        state.setSelectedProvider(getProviderDefault().provider);
         updateKeyboard(channel, state);
         await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
     });
@@ -614,7 +633,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         if (target.projectId) {
             state.selectProject(target.projectId);
             const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId);
-            state.setSelectedProvider(projProvider || getProviderDefault());
+            state.setSelectedProvider(projProvider || getProviderDefault().provider);
             updateKeyboard(channel, state);
             await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
         }
@@ -622,7 +641,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             await channel.sendText('No project selected. Use /switch first.');
         }
     });
-    // --- /model ---
+    // --- /provider ---
     channel.onCommand('provider', async () => {
         const current = state.getSelectedProvider();
         const currentLabel = PROVIDER_LABELS[current] || current;
@@ -632,6 +651,27 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 callbackData: `cfg_${p}`,
             }]);
         await channel.sendInlineKeyboard(`Provider: *${currentLabel}*`, buttons);
+    });
+    // --- /model ---
+    channel.onCommand('model', async () => {
+        const provider = state.getSelectedProvider();
+        const currentModel = state.getSelectedModel();
+        const models = await getProviderModels(provider);
+        if (!models.length) {
+            await channel.sendText(`No models configured for ${PROVIDER_LABELS[provider] || provider}`);
+            return;
+        }
+        const currentLabel = currentModel
+            ? models.find(m => m.id === currentModel)?.label || currentModel
+            : 'Default';
+        const buttons = [
+            [{ label: '🔄 Default', callbackData: 'mdl_' }],
+            ...models.filter(m => m.id !== currentModel).map(m => [{
+                    label: m.label,
+                    callbackData: `mdl_${m.id}`,
+                }]),
+        ];
+        await channel.sendInlineKeyboard(`Model: *${currentLabel}* (${PROVIDER_LABELS[provider] || provider})`, buttons);
     });
     // --- /status ---
     channel.onCommand('status', async () => {
@@ -686,7 +726,11 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 catch { }
             }
         }
-        status += `\nProvider: ${PROVIDER_LABELS[provider] || provider}${providerSuffix}`;
+        const currentModel = state.getSelectedModel();
+        const modelLabel = currentModel
+            ? (await getProviderModels(provider)).find(m => m.id === currentModel)?.label || currentModel
+            : null;
+        status += `\nProvider: ${PROVIDER_LABELS[provider] || provider}${modelLabel ? ` · ${modelLabel}` : ''}${providerSuffix}`;
         status += `\nMode: ${mode}`;
         if (tone)
             status += `\nTone: ${tone}`;
@@ -829,11 +873,41 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         // If the current target was using an inherited default (no bridge session),
         // also update the global default in providers.json
         const explicit = await hasExplicitSession(bridge, state);
-        state.setSelectedProvider(provider);
+        state.setSelectedProvider(provider); // Also resets model to ''
         if (!explicit) {
             updateGlobalProviderDefault(provider);
         }
-        await channel.sendText(`Provider set to: ${PROVIDER_LABELS[provider]}`);
+        // Pre-fill model from stage default if applicable
+        const target = state.getTarget();
+        const stageDefault = getProviderDefault(target.stage);
+        if (stageDefault.model && stageDefault.provider === provider) {
+            state.setSelectedModel(stageDefault.model);
+        }
+        // Show model options if available
+        const models = await getProviderModels(provider);
+        if (models.length > 0) {
+            const buttons = [
+                [{ label: '🔄 Default', callbackData: 'mdl_' }],
+                ...models.map(m => [{ label: m.label, callbackData: `mdl_${m.id}` }]),
+            ];
+            await channel.sendInlineKeyboard(`Provider set to: *${PROVIDER_LABELS[provider]}*\nSelect model:`, buttons);
+        }
+        else {
+            await channel.sendText(`Provider set to: ${PROVIDER_LABELS[provider]}`);
+        }
+    });
+    // --- Model Selection Callbacks (mdl_ prefix) ---
+    channel.onCallback('mdl_', async (data) => {
+        const modelId = data.replace('mdl_', ''); // '' for Default
+        state.setSelectedModel(modelId);
+        if (modelId) {
+            const models = await getProviderModels(state.getSelectedProvider());
+            const label = models.find(m => m.id === modelId)?.label || modelId;
+            await channel.sendText(`Model set to: ${label}`);
+        }
+        else {
+            await channel.sendText('Model set to: Default');
+        }
     });
     // --- Instruction File Confirm Callbacks (ifc_ prefix) ---
     channel.onCallback('ifc_', async (data) => {
@@ -847,7 +921,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         }
         try {
             await channel.sendTyping();
-            const result = await bridge.sendMessage(pending.sessionName, pending.cwd, pending.originalMessage, pending.provider, approved);
+            const result = await bridge.sendMessage(pending.sessionName, pending.cwd, pending.originalMessage, pending.provider, approved, pending.model || undefined);
             if (result.permissionMismatch) {
                 await channel.sendInlineKeyboard('⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?', [[
                         { label: 'Restart session', callbackData: 'perm_restart' },
@@ -874,7 +948,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                     await channel.sendText('⚠️ Terminal is open in the web UI. Disconnecting and restarting...');
                 }
                 await channel.sendTyping();
-                await bridge.restartSession(sessionName, cwd, provider);
+                await bridge.restartSession(sessionName, cwd, provider, undefined, state.getSelectedModel() || undefined);
                 await channel.sendText('Session restarted with skip-permissions. Send your message again.');
             }
             catch (err) {
@@ -889,7 +963,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     channel.onCallback('sw_', async (data) => {
         if (data === 'sw_global') {
             state.selectGlobal();
-            state.setSelectedProvider(getProviderDefault());
+            state.setSelectedProvider(getProviderDefault().provider);
             currentDrilldownStage = null;
             updateKeyboard(channel, state);
             await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
@@ -911,7 +985,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             state.selectProject(projectId);
             // Resolve provider: bridge session > global default
             const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId);
-            state.setSelectedProvider(projBridgeProvider || getProviderDefault());
+            state.setSelectedProvider(projBridgeProvider || getProviderDefault().provider);
             currentDrilldownStage = null;
             kanban.updateProjects(state.getProjects());
             updateKeyboard(channel, state);
@@ -946,7 +1020,24 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             state.selectCard(projectId, cardId, cardStage);
             // Resolve provider: bridge session > stage default > global default
             const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId);
-            state.setSelectedProvider(bridgeProvider || getProviderDefault(cardStage));
+            const stageDefault = getProviderDefault(cardStage);
+            state.setSelectedProvider(bridgeProvider || stageDefault.provider);
+            // Resolve model: bridge session > stage default > Default
+            const sessionName = state.getSessionName();
+            try {
+                const session = await bridge.getSession(sessionName);
+                if (session?.model) {
+                    state.setSelectedModel(session.model);
+                }
+                else if (stageDefault.model && (stageDefault.provider === state.getSelectedProvider())) {
+                    state.setSelectedModel(stageDefault.model);
+                }
+            }
+            catch {
+                if (stageDefault.model && (stageDefault.provider === state.getSelectedProvider())) {
+                    state.setSelectedModel(stageDefault.model);
+                }
+            }
             currentDrilldownStage = null;
             updateKeyboard(channel, state);
             await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
@@ -1004,7 +1095,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             if (!proceed)
                 return;
             await channel.sendTyping();
-            const result = await bridge.sendMessage(sessionName, cwd, formatted, provider);
+            const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined);
             if (result.permissionMismatch) {
                 await channel.sendInlineKeyboard('⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?', [[
                         { label: 'Restart session', callbackData: 'perm_restart' },
@@ -1046,7 +1137,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             if (!proceed)
                 return;
             await channel.sendTyping();
-            const result = await bridge.sendMessage(sessionName, cwd, formatted, provider);
+            const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined);
             if (result.permissionMismatch) {
                 await channel.sendInlineKeyboard('⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?', [[
                         { label: 'Restart session', callbackData: 'perm_restart' },
@@ -1088,7 +1179,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             const proceed = await checkInstructionFilePreFlight(channel, state, bridge, sessionName, cwd, provider, message);
             if (!proceed)
                 return;
-            const result = await bridge.sendMessage(sessionName, cwd, message, provider);
+            const result = await bridge.sendMessage(sessionName, cwd, message, provider, undefined, state.getSelectedModel() || undefined);
             if (result.permissionMismatch) {
                 await channel.sendInlineKeyboard('⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?', [[
                         { label: 'Restart session', callbackData: 'perm_restart' },

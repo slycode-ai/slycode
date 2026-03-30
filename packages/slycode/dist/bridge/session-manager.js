@@ -257,6 +257,7 @@ export class SessionManager {
     async createSession(request) {
         const { name, fresh = false, idleTimeout, prompt } = request;
         const cwd = request.cwd;
+        const model = request.model;
         if (!cwd || !path.isAbsolute(cwd)) {
             throw new Error(`CWD must be an absolute path (got '${cwd || ''}')`);
         }
@@ -395,6 +396,7 @@ export class SessionManager {
                     resume: doResume,
                     sessionId: storedSessionId,
                     prompt: promptForArgs,
+                    model: doResume ? undefined : model,
                 });
                 command = built.command;
                 args = built.args;
@@ -430,6 +432,7 @@ export class SessionManager {
                 cwd,
                 provider: providerId,
                 skipPermissions,
+                model: model || undefined,
                 status: 'running',
                 pid: null,
                 connectedClients: 0,
@@ -462,6 +465,7 @@ export class SessionManager {
                 lastActive: session.lastActive,
                 provider: providerId,
                 skipPermissions,
+                model: model || undefined,
             };
             await this.savePersistedState();
             // Spawn the PTY
@@ -802,6 +806,7 @@ export class SessionManager {
                     claudeSessionId: persisted.claudeSessionId,
                     provider: persisted.provider || 'claude', // Default old sessions to claude
                     skipPermissions: persisted.skipPermissions ?? true,
+                    model: persisted.model,
                     exitCode: persisted.exitCode,
                     exitedAt: persisted.exitedAt,
                 };
@@ -821,6 +826,7 @@ export class SessionManager {
             claudeSessionId: session.claudeSessionId,
             provider: session.provider,
             skipPermissions: session.skipPermissions,
+            model: session.model,
             exitCode: session.exitCode,
             exitedAt: session.exitedAt,
         };

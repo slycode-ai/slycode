@@ -25,6 +25,7 @@ export class StateManager {
   private responseMode: ResponseMode = 'text';
   private voiceTone: string | null = null;
   private selectedProvider: string = 'claude';
+  private selectedModel: string = '';  // '' = Default (no flag)
   private _pendingInstructionFileConfirm: PendingInstructionFileConfirm | null = null;
   private chatId: number | null = null;
 
@@ -98,6 +99,9 @@ export class StateManager {
       if (data.selectedProvider) {
         this.selectedProvider = data.selectedProvider;
       }
+      if (data.selectedModel) {
+        this.selectedModel = data.selectedModel;
+      }
       if (data.chatId) {
         this.chatId = data.chatId;
       }
@@ -118,6 +122,7 @@ export class StateManager {
         responseMode: this.responseMode,
         voiceTone: this.voiceTone,
         selectedProvider: this.selectedProvider,
+        selectedModel: this.selectedModel,
         chatId: this.chatId,
       }, null, 2));
     } catch (err) {
@@ -285,6 +290,16 @@ export class StateManager {
 
   setSelectedProvider(provider: string): void {
     this.selectedProvider = provider;
+    this.selectedModel = '';  // Reset model when switching provider
+    this.saveState();
+  }
+
+  getSelectedModel(): string {
+    return this.selectedModel;
+  }
+
+  setSelectedModel(model: string): void {
+    this.selectedModel = model;
     this.saveState();
   }
 

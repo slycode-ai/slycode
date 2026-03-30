@@ -16,6 +16,7 @@ export interface Session {
     cwd: string;
     provider: string;
     skipPermissions: boolean;
+    model?: string;
     status: SessionStatus;
     pid: number | null;
     connectedClients: number;
@@ -64,6 +65,7 @@ export interface CreateSessionRequest {
     command?: string;
     provider?: string;
     skipPermissions?: boolean;
+    model?: string;
     cwd?: string;
     fresh?: boolean;
     idleTimeout?: number;
@@ -83,6 +85,7 @@ export interface SessionInfo {
     claudeSessionId?: string | null;
     provider?: string;
     skipPermissions?: boolean;
+    model?: string;
     exitCode?: number;
     exitedAt?: string;
 }
@@ -93,6 +96,7 @@ export interface PersistedSession {
     lastActive: string;
     provider?: string;
     skipPermissions?: boolean;
+    model?: string;
     exitCode?: number;
     exitedAt?: string;
 }

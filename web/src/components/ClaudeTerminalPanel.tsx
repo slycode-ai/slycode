@@ -13,11 +13,16 @@ interface ProviderConfig {
   command: string;
   permissions: { flag: string; label: string; default: boolean };
   resume: { supported: boolean };
+  model?: {
+    flag: string;
+    available: Array<{ id: string; label: string; description?: string }>;
+  };
 }
 
 interface ProviderDefault {
   provider: string;
   skipPermissions: boolean;
+  model?: string;
 }
 
 interface ProvidersData {
@@ -45,6 +50,7 @@ interface SessionInfo {
   claudeSessionId?: string | null;
   provider?: string;
   skipPermissions?: boolean;
+  model?: string;
 }
 
 export interface TerminalContext {
@@ -145,6 +151,13 @@ export function ClaudeTerminalPanel({
   // Spawn error toast — shown when session creation fails (e.g. posix_spawnp failed)
   const [spawnError, setSpawnError] = useState<string | null>(null);
 
+  // Model selection state
+  const [selectedModel, setSelectedModel] = useState(''); // '' = Default (no flag)
+  const prevProviderRef = useRef(selectedProvider);
+  const userSelectedModelRef = useRef(false);
+  const sessionInfoRef = useRef(sessionInfo);
+  sessionInfoRef.current = sessionInfo;
+
   // Instruction file check state
   const [instructionFileCheck, setInstructionFileCheck] = useState<{ needed: boolean; targetFile?: string; copySource?: string } | null>(null);
   const [createInstructionFile, setCreateInstructionFile] = useState(true);
@@ -177,15 +190,53 @@ export function ClaudeTerminalPanel({
               setSelectedProvider(def.provider);
             }
             setSkipPermissions(def.skipPermissions);
+            if (def.model) {
+              setSelectedModel(def.model);
+            }
           }
         }
       })
       .catch(() => { /* providers.json not available, use defaults */ });
   }, [stage]);
 
+  // Pre-fill model when provider changes
+  useEffect(() => {
+    if (!providersData) return;
+    const providerChanged = prevProviderRef.current !== selectedProvider;
+    prevProviderRef.current = selectedProvider;
+    if (!providerChanged && userSelectedModelRef.current) return;
+    userSelectedModelRef.current = false;
+    // Priority: last-used from session > stage default > Default
+    const si = sessionInfoRef.current;
+    if (si?.model && si.provider === selectedProvider) {
+      const available = providersData.providers[selectedProvider]?.model?.available;
+      if (available?.some(m => m.id === si.model)) {
+        setSelectedModel(si.model);
+        return;
+      }
+    }
+    const stageDefault = stage ? providersData.defaults.stages[stage] : null;
+    const def = stageDefault || providersData.defaults.global;
+    if (def?.model && def.provider === selectedProvider) {
+      const available = providersData.providers[selectedProvider]?.model?.available;
+      if (available?.some(m => m.id === def.model)) {
+        setSelectedModel(def.model);
+        return;
+      }
+    }
+    setSelectedModel('');
+  }, [selectedProvider, providersData, stage]);
+
   // Persist provider default to /api/providers (fire-and-forget)
   const saveProviderDefault = useCallback((provider: string, skip: boolean) => {
-    const defaultVal = { provider, skipPermissions: skip };
+    // Preserve any existing model field in the stage default (stage model defaults are intentional config)
+    const existingDefault = stage
+      ? providersData?.defaults.stages[stage]
+      : providersData?.defaults.global;
+    const defaultVal: Record<string, unknown> = { provider, skipPermissions: skip };
+    if (existingDefault?.model && existingDefault.provider === provider) {
+      defaultVal.model = existingDefault.model;
+    }
     const defaults = stage
       ? { stages: { [stage]: defaultVal } }
       : { global: defaultVal };
@@ -194,7 +245,7 @@ export function ClaudeTerminalPanel({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ defaults }),
     }).catch(() => { /* preference save — ignore errors */ });
-  }, [stage]);
+  }, [stage, providersData]);
 
   const isRunning = sessionInfo?.status === 'running' || sessionInfo?.status === 'detached';
   const hasHistory = sessionInfo?.hasHistory;
@@ -288,6 +339,74 @@ export function ClaudeTerminalPanel({
     </div>
   ) : null;
 
+  // Helper to render model label from provider config
+  const getModelLabel = (providerId: string, modelId?: string) => {
+    if (!modelId || !providersData) return null;
+    return providersData.providers[providerId]?.model?.available?.find(m => m.id === modelId)?.label || modelId;
+  };
+
+  // Shared provider selector (eliminates duplication between resume and fresh-start screens)
+  const renderProviderSelector = (options?: { showModel?: boolean }) => {
+    if (!providersData || Object.keys(providersData.providers).length <= 1) return null;
+    const currentProvider = providersData.providers[selectedProvider];
+    const models = currentProvider?.model?.available;
+    const showModel = options?.showModel !== false;
+    return (
+      <div className="flex flex-col items-center gap-2 mt-3 pt-3 border-t border-void-700/50">
+        <div className="flex gap-1">
+          {Object.values(providersData.providers).map(p => (
+            <button
+              key={p.id}
+              onClick={() => {
+                setSelectedProvider(p.id);
+                saveProviderDefault(p.id, skipPermissions);
+                onProviderChange?.(p.id);
+              }}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-all ${
+                selectedProvider === p.id
+                  ? 'border border-neon-blue-400/60 bg-neon-blue-400/15 text-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.2)]'
+                  : 'border border-void-600 bg-void-800 text-void-400 hover:border-void-500 hover:text-void-300'
+              }`}
+            >
+              {p.displayName}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          {showModel && models && models.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-void-500">Model</span>
+              <select
+                value={selectedModel}
+                onChange={(e) => { setSelectedModel(e.target.value); userSelectedModelRef.current = true; }}
+                className={`max-w-[140px] truncate rounded border px-2 py-1 text-xs font-medium transition-all ${
+                  selectedModel
+                    ? 'border-neon-blue-400/40 bg-neon-blue-400/10 text-neon-blue-400'
+                    : 'border-void-600 bg-void-800 text-void-400'
+                }`}
+              >
+                <option value="">Default</option>
+                {models.map(m => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-void-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={skipPermissions}
+              onChange={(e) => { setSkipPermissions(e.target.checked); saveProviderDefault(selectedProvider, e.target.checked); }}
+              className="rounded border-void-600"
+            />
+            {providersData.providers[selectedProvider]?.permissions.label || 'Skip permissions'}
+          </label>
+        </div>
+        {instructionFileWarning}
+      </div>
+    );
+  };
+
   // Derive startup and toolbar lists from placement
   const startupActions = actions.filter(a => a.placement === 'startup' || a.placement === 'both');
   const toolbarActions = actions.filter(a => a.placement === 'toolbar' || a.placement === 'both');
@@ -317,6 +436,7 @@ export function ClaudeTerminalPanel({
           cwd,
           fresh: !hasHistory,
           prompt,
+          model: selectedModel || undefined,
           createInstructionFile: instructionFileCheck?.needed ? createInstructionFile : undefined,
         }),
       });
@@ -619,40 +739,7 @@ export function ClaudeTerminalPanel({
                     Custom...
                   </button>
                 </div>
-                {/* Provider selector */}
-                {providersData && Object.keys(providersData.providers).length > 1 && (
-                  <div className="flex flex-col items-center gap-2 mt-3 pt-3 border-t border-void-700/50">
-                    <div className="flex gap-1">
-                      {Object.values(providersData.providers).map(p => (
-                        <button
-                          key={p.id}
-                          onClick={() => {
-                            setSelectedProvider(p.id);
-                            saveProviderDefault(p.id, skipPermissions);
-                            onProviderChange?.(p.id);
-                          }}
-                          className={`rounded-md px-3 py-1 text-xs font-medium transition-all ${
-                            selectedProvider === p.id
-                              ? 'border border-neon-blue-400/60 bg-neon-blue-400/15 text-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.2)]'
-                              : 'border border-void-600 bg-void-800 text-void-400 hover:border-void-500 hover:text-void-300'
-                          }`}
-                        >
-                          {p.displayName}
-                        </button>
-                      ))}
-                    </div>
-                    <label className="flex items-center gap-1.5 text-xs text-void-500 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={skipPermissions}
-                        onChange={(e) => { setSkipPermissions(e.target.checked); saveProviderDefault(selectedProvider, e.target.checked); }}
-                        className="rounded border-void-600"
-                      />
-                      {providersData.providers[selectedProvider]?.permissions.label || 'Skip permissions'}
-                    </label>
-                    {instructionFileWarning}
-                  </div>
-                )}
+                {renderProviderSelector({ showModel: false })}
               </>
             ) : (
               <>
@@ -684,40 +771,7 @@ export function ClaudeTerminalPanel({
                 >
                   Start without prompt
                 </button>
-                {/* Provider selector */}
-                {providersData && Object.keys(providersData.providers).length > 1 && (
-                  <div className="flex flex-col items-center gap-2 mt-3 pt-3 border-t border-void-700/50">
-                    <div className="flex gap-1">
-                      {Object.values(providersData.providers).map(p => (
-                        <button
-                          key={p.id}
-                          onClick={() => {
-                            setSelectedProvider(p.id);
-                            saveProviderDefault(p.id, skipPermissions);
-                            onProviderChange?.(p.id);
-                          }}
-                          className={`rounded-md px-3 py-1 text-xs font-medium transition-all ${
-                            selectedProvider === p.id
-                              ? 'border border-neon-blue-400/60 bg-neon-blue-400/15 text-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.2)]'
-                              : 'border border-void-600 bg-void-800 text-void-400 hover:border-void-500 hover:text-void-300'
-                          }`}
-                        >
-                          {p.displayName}
-                        </button>
-                      ))}
-                    </div>
-                    <label className="flex items-center gap-1.5 text-xs text-void-500 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={skipPermissions}
-                        onChange={(e) => { setSkipPermissions(e.target.checked); saveProviderDefault(selectedProvider, e.target.checked); }}
-                        className="rounded border-void-600"
-                      />
-                      {providersData.providers[selectedProvider]?.permissions.label || 'Skip permissions'}
-                    </label>
-                    {instructionFileWarning}
-                  </div>
-                )}
+                {renderProviderSelector()}
               </>
             )}
           </div>
