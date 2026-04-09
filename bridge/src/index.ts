@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { SessionManager } from './session-manager.js';
 import { setupWebSocket } from './websocket.js';
 import { createApiRouter } from './api.js';
+import { ResponseStore } from './response-store.js';
 import type { BridgeRuntimeConfig } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,11 +81,16 @@ async function main() {
   }, runtimeConfig);
   await sessionManager.init();
 
+  // Initialize response store for cross-card prompt protocol
+  const responseStore = new ResponseStore();
+  responseStore.start();
+  sessionManager.setResponseStore(responseStore);
+
   // API routes
-  app.use('/api', createApiRouter(sessionManager));
+  app.use('/api', createApiRouter(sessionManager, responseStore));
 
   // Also mount at root for convenience
-  app.use('/', createApiRouter(sessionManager));
+  app.use('/', createApiRouter(sessionManager, responseStore));
 
   // Track server start time for uptime calculation
   const startTime = Date.now();
@@ -123,6 +129,7 @@ async function main() {
     server.close();
 
     // Shutdown session manager (kills PTYs, saves state)
+    responseStore.stop();
     await sessionManager.shutdown();
 
     process.exit(0);

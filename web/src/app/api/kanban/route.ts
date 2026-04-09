@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import type { KanbanBoard, KanbanStages, KanbanCard, KanbanStage } from '@/lib/types';
+import type { KanbanBoard, KanbanStages, KanbanCard, KanbanStage, ChangedCard } from '@/lib/types';
 import { getNextRun } from '@/lib/scheduler';
 import { appendEvent } from '@/lib/event-log';
 import {
@@ -230,10 +230,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { projectId, stages: incomingStages, changedCardIds } = body as {
+    const { projectId, stages: incomingStages, changedCardIds, changedCards } = body as {
       projectId: string;
       stages: KanbanStages;
       changedCardIds?: string[];
+      changedCards?: ChangedCard[];
     };
     let stages = incomingStages;
 
@@ -288,21 +289,60 @@ export async function POST(request: NextRequest) {
     // Clean up old numbered backups from previous system (one-time migration)
     await cleanupLegacyBackups(projectId);
 
-    // Merge logic: when changedCardIds is present, only apply those cards from the
-    // frontend payload and keep the disk version of everything else. This prevents
-    // stale frontend state from overwriting concurrent CLI/agent edits.
-    if (changedCardIds && changedCardIds.length > 0) {
+    // Type-aware merge: changedCards carries per-card operation types (move/edit/create/delete).
+    // For "move" cards, preserve disk content and overlay only positional fields.
+    // For "edit"/"create" cards, use the frontend version fully.
+    // Falls back to changedCardIds (untyped) for backward compatibility — treats all as "edit".
+    const effectiveChangedIds = changedCards?.map((c) => c.id) ?? changedCardIds;
+    if (effectiveChangedIds && effectiveChangedIds.length > 0) {
       try {
         const currentContent = await fs.readFile(kanbanPath, 'utf-8');
         const currentData = JSON.parse(currentContent) as KanbanBoard;
         const diskStages = currentData.stages || EMPTY_STAGES;
 
+        // Build type lookup: cardId → change type (default "edit" for backward compat)
+        const changeTypeMap = new Map<string, string>();
+        if (changedCards) {
+          for (const cc of changedCards) {
+            changeTypeMap.set(cc.id, cc.type);
+          }
+        }
+
+        // Build disk card lookup for move operations
+        const diskCardMap = new Map<string, KanbanCard>();
+        for (const [, cards] of Object.entries(diskStages) as [KanbanStage, KanbanCard[]][]) {
+          for (const card of cards || []) {
+            diskCardMap.set(card.id, card);
+          }
+        }
+
         // Build lookup of changed cards from frontend payload
-        const changedCards = new Map<string, { card: KanbanCard; stage: KanbanStage }>();
+        const changedCardMap = new Map<string, { card: KanbanCard; stage: KanbanStage }>();
         for (const [stage, cards] of Object.entries(stages) as [KanbanStage, KanbanCard[]][]) {
           for (const card of cards || []) {
-            if (changedCardIds.includes(card.id)) {
-              changedCards.set(card.id, { card: { ...card, last_modified_by: 'web' }, stage });
+            if (effectiveChangedIds.includes(card.id)) {
+              const changeType = changeTypeMap.get(card.id) || 'edit';
+              let mergedCard: KanbanCard;
+
+              if (changeType === 'move') {
+                // Move: preserve disk content, overlay only positional fields
+                const diskCard = diskCardMap.get(card.id);
+                if (!diskCard) {
+                  // Card deleted on disk during pending move — drop silently
+                  continue;
+                }
+                mergedCard = {
+                  ...diskCard,
+                  order: card.order,
+                  updated_at: card.updated_at,
+                  last_modified_by: 'web',
+                };
+              } else {
+                // Edit/create: use frontend version fully
+                mergedCard = { ...card, last_modified_by: 'web' };
+              }
+
+              changedCardMap.set(card.id, { card: mergedCard, stage: stage as KanbanStage });
             }
           }
         }
@@ -317,14 +357,14 @@ export async function POST(request: NextRequest) {
         };
 
         // Remove changed cards from their current disk positions
-        for (const cardId of changedCardIds) {
+        for (const cardId of effectiveChangedIds) {
           for (const stage of Object.keys(mergedStages) as KanbanStage[]) {
             mergedStages[stage] = mergedStages[stage].filter((c) => c.id !== cardId);
           }
         }
 
         // Re-add changed cards to their target stages (absent = deleted)
-        for (const [, { card, stage }] of changedCards) {
+        for (const [, { card, stage }] of changedCardMap) {
           mergedStages[stage] = [...mergedStages[stage], card];
         }
 
@@ -409,7 +449,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, last_updated: data.last_updated });
+    return NextResponse.json({ success: true, last_updated: data.last_updated, stages: normalizedStages });
   } catch (error) {
     console.error('Failed to save kanban:', error);
     return NextResponse.json({ error: 'Failed to save' }, { status: 500 });

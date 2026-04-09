@@ -3,6 +3,7 @@
   "/_not-found/page": "app/_not-found/page.js",
   "/api/areas/route": "app/api/areas/route.js",
   "/api/bridge/[...path]/route": "app/api/bridge/[...path]/route.js",
+  "/api/changelog/route": "app/api/changelog/route.js",
   "/api/cli-assets/assistant/route": "app/api/cli-assets/assistant/route.js",
   "/api/cli-assets/fix/route": "app/api/cli-assets/fix/route.js",
   "/api/cli-assets/import/route": "app/api/cli-assets/import/route.js",

@@ -1,6 +1,6 @@
 ---
 name: onboard
-version: 1.0.0
+version: 1.1.0
 label: "Onboard"
 description: "Analyze and improve a backlog item, then move to design"
 group: "Card Actions"
@@ -23,7 +23,7 @@ Onboard this backlog item. Analyze it, improve it, and move it to design.
 **Do this:**
 1. Analyze the card - understand the intent from title and description
 2. Improve the title - make it clear, concise, action-oriented
-3. Rewrite the description - structure logically, capture the essential gist
+3. Rewrite the description - structure logically, capture the essential gist. **Do not add new solutions or implementation suggestions** — that belongs in the design phase. However, preserve any solution ideas already present in the original description.
 4. Set appropriate areas (run `sly-kanban areas` to see options)
 4.5 Potentially use context-priming to understand that area better
 5. Set correct type and priority
@@ -34,5 +34,3 @@ Onboard this backlog item. Analyze it, improve it, and move it to design.
 - What you understood the intent to be
 - What changes you made and why
 - Ask for confirmation - if I disagree, I'll tell you what to adjust
-# test change
-# user edit

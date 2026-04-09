@@ -80,6 +80,9 @@ function renderMovedDetail(detail: string): React.ReactNode {
 
 function renderDetail(event: ActivityEvent): React.ReactNode {
   if (event.type === 'card_moved') return renderMovedDetail(event.detail);
+  if (typeof event.detail === 'object' && event.detail !== null) {
+    return JSON.stringify(event.detail);
+  }
   return event.detail;
 }
 

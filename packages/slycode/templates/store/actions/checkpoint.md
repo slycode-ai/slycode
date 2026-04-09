@@ -9,7 +9,7 @@ scope: global
 classes:
   design: 60
   implementation: 30
-  project-terminal: 50
+  project-terminal: 60
 ---
 
 /checkpoint

@@ -53,12 +53,14 @@ export function VersionUpdateToast() {
         />
         <span className="text-sm text-void-700 dark:text-void-300">
           SlyCode <span className="font-medium text-neon-blue-500 dark:text-neon-blue-400">v{info.latest}</span> available
-          <span className="text-void-500 dark:text-void-400"> (current: v{info.current})</span>
         </span>
       </div>
-      <code className="rounded bg-void-100 px-1.5 py-0.5 text-xs text-void-600 dark:bg-void-800 dark:text-void-400">
-        slycode update
-      </code>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-void-500 dark:text-void-400">run in terminal:</span>
+        <code className="rounded bg-void-100 px-1.5 py-0.5 text-xs text-void-600 dark:bg-void-800 dark:text-void-400">
+          slycode update
+        </code>
+      </div>
       <button
         onClick={handleDismiss}
         className="ml-1 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"

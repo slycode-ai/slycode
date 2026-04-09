@@ -234,13 +234,16 @@ async function logConfigStatus(channel: Channel | null, voiceConfig: VoiceConfig
 
 // --- Breadcrumb Helpers ---
 
-function getBreadcrumb(target: NavigationTarget, state: StateManager, kanban: KanbanClient): string {
+async function getBreadcrumb(target: NavigationTarget, state: StateManager, kanban: KanbanClient, bridge: BridgeClient): Promise<string> {
+  let crumb: string;
   switch (target.type) {
     case 'global':
-      return '📍 Global Terminal';
+      crumb = '📍 Global Terminal';
+      break;
     case 'project': {
       const project = state.getSelectedProject();
-      return `📍 ${project?.name || target.projectId} · Project Terminal`;
+      crumb = `📍 ${project?.name || target.projectId} · Project Terminal`;
+      break;
     }
     case 'card': {
       const project = state.getSelectedProject();
@@ -250,9 +253,24 @@ function getBreadcrumb(target: NavigationTarget, state: StateManager, kanban: Ka
       const stage = cardInfo?.stage || target.stage || '?';
       const title = cardInfo?.card.title || target.cardId || '?';
       const truncTitle = title.length > 55 ? title.slice(0, 52) + '...' : title;
-      return `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
+      crumb = `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
+      break;
     }
   }
+
+  // Append git branch info if available
+  try {
+    const cwd = state.getSessionCwd();
+    const git = await bridge.getGitStatus(cwd);
+    if (git?.branch) {
+      const uncommittedSuffix = git.uncommitted > 0 ? ` (${git.uncommitted} uncommitted)` : '';
+      crumb += `\nBranch: ${git.branch}${uncommittedSuffix}`;
+    }
+  } catch {
+    // Silent — branch info is best-effort
+  }
+
+  return crumb;
 }
 
 function truncate(text: string, max: number): string {
@@ -276,7 +294,7 @@ async function renderSwitchView(
   kanban: KanbanClient,
 ): Promise<void> {
   const target = state.getTarget();
-  const breadcrumb = getBreadcrumb(target, state, kanban);
+  const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
 
   if (target.type === 'global') {
     // Global level: show projects list
@@ -377,7 +395,7 @@ async function handleSessionLifecycle(
 ): Promise<void> {
   const target = ensureStage(state.getTarget(), kanban, state);
   const sessionName = state.getSessionName();
-  const breadcrumb = getBreadcrumb(target, state, kanban);
+  const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
 
   // Build provider line with model
   const currentProvider = state.getSelectedProvider();
@@ -745,7 +763,7 @@ function setupChannel(
     const target = ensureStage(state.getTarget(), kanban, state);
     const terminalClass = actionFilter.getTerminalClass(target);
     const cardType = getCardType(target, kanban);
-    const breadcrumb = getBreadcrumb(target, state, kanban);
+    const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
 
     const commands = actionFilter.filterActions(terminalClass, undefined, cardType);
     console.log(`[SLY] target: ${JSON.stringify(target)}, class: ${terminalClass}, cardType: ${cardType}, actions: ${Object.keys(commands).join(', ')}`);
@@ -791,9 +809,8 @@ function setupChannel(
   channel.onCommand('provider', async () => {
     const current = state.getSelectedProvider();
     const currentLabel = PROVIDER_LABELS[current] || current;
-    const others = ALL_PROVIDERS.filter(p => p !== current);
-    const buttons: InlineButton[][] = others.map(p => [{
-      label: PROVIDER_LABELS[p],
+    const buttons: InlineButton[][] = ALL_PROVIDERS.map(p => [{
+      label: (p === current ? '● ' : '') + PROVIDER_LABELS[p],
       callbackData: `cfg_${p}`,
     }]);
 
@@ -882,6 +899,18 @@ function setupChannel(
           }
         } catch {}
       }
+    }
+
+    // Git branch info
+    try {
+      const cwd = state.getSessionCwd();
+      const git = await bridge.getGitStatus(cwd);
+      if (git?.branch) {
+        const uncommittedSuffix = git.uncommitted > 0 ? ` (${git.uncommitted} uncommitted)` : '';
+        status += `Branch: ${git.branch}${uncommittedSuffix}\n`;
+      }
+    } catch {
+      // Silent — branch info is best-effort
     }
 
     const currentModel = state.getSelectedModel();

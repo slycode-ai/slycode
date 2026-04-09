@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority } from '@/lib/types';
+import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard, CardChangeType } from '@/lib/types';
 import { connectionManager } from '@/lib/connection-manager';
 import { tabSync } from '@/lib/tab-sync';
 import { usePolling } from '@/hooks/usePolling';
@@ -85,6 +85,8 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const [activeCards, setActiveCards] = useState<Set<string>>(new Set());
   const prevActiveCardsRef = useRef<Set<string>>(new Set());
   const consumedCardParamRef = useRef<string | null>(null);
+  const editedCardIdsRef = useRef<Set<string>>(new Set());
+  const movedCardIdsRef = useRef<Set<string>>(new Set());
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ position: { x: number; y: number }; card: KanbanCard; stage: KanbanStage } | null>(null);
@@ -376,8 +378,8 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     setSaveStatus('saving');
     isSavingRef.current = true;
     try {
-      // Compute which cards actually changed vs the clean baseline
-      const changedCardIds: string[] = [];
+      // Compute which cards actually changed vs the clean baseline, with typed changeset
+      const changedCards: ChangedCard[] = [];
       const baselineCards = new Map<string, string>();
       for (const stage of STAGE_ORDER) {
         for (const card of cleanBaselineRef.current[stage] || []) {
@@ -389,29 +391,51 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           const baselineKey = baselineCards.get(card.id);
           const currentKey = JSON.stringify(card) + '|' + stage;
           if (baselineKey !== currentKey) {
-            changedCardIds.push(card.id); // New, modified, or moved
+            if (editedCardIdsRef.current.has(card.id)) {
+              changedCards.push({ id: card.id, type: 'edit' }); // Edit wins over move
+            } else if (movedCardIdsRef.current.has(card.id)) {
+              changedCards.push({ id: card.id, type: 'move' });
+            }
+            // Untracked divergence (SSE timing, connection issues, normalizeOrder drift)
+            // — skip it. The server merge preserves disk truth for cards not in changedCards.
           }
           baselineCards.delete(card.id);
         }
       }
       // Cards in baseline but not in current = deleted
       for (const deletedId of baselineCards.keys()) {
-        changedCardIds.push(deletedId);
+        changedCards.push({ id: deletedId, type: 'delete' });
       }
+
+      // Clear tracking refs after building payload
+      editedCardIdsRef.current.clear();
+      movedCardIdsRef.current.clear();
 
       const res = await fetch('/api/kanban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, stages: stagesToSave, changedCardIds }),
+        body: JSON.stringify({ projectId: project.id, stages: stagesToSave, changedCards }),
       });
       if (res.ok) {
         const data = await res.json();
         lastSaveTimestampRef.current = data.last_updated;
-        cleanBaselineRef.current = stagesToSave;
+        // Use server's merged+normalized stages as baseline (eliminates normalizeOrder drift)
+        const serverStages = data.stages;
+        if (serverStages) {
+          cleanBaselineRef.current = serverStages;
+          // Sync React state with server truth if no new user edits happened during save.
+          // Without this, baseline and stages diverge — cards the user never touched appear
+          // "changed" in the next save cycle and get reverted to stale frontend positions.
+          if (stagesEqual(stagesRef.current, stagesToSave)) {
+            setStages(serverStages);
+          }
+        } else {
+          cleanBaselineRef.current = stagesToSave;
+        }
         // Only clear dirty if stages haven't changed during the save.
         // If the user made edits while the save was in flight, stay dirty
         // so SSE/polling won't overwrite their pending changes.
-        isDirtyRef.current = !stagesEqual(stagesRef.current, stagesToSave);
+        isDirtyRef.current = !stagesEqual(stagesRef.current, cleanBaselineRef.current);
         setSaveStatus('saved');
         // Notify other tabs immediately
         tabSync.broadcast('kanban-update', project.id);
@@ -544,6 +568,8 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
 
     if (!selectedStage) return;
 
+    editedCardIdsRef.current.add(updatedCard.id);
+
     // Update stages - selectedCard will be automatically derived from the updated stages
     setStages((prev) => ({
       ...prev,
@@ -577,6 +603,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   };
 
   const handleMoveCard = (cardId: string, newStage: KanbanStage, insertIndex?: number) => {
+    movedCardIdsRef.current.add(cardId);
     setStages((prev) => {
       // Find which stage the card is currently in
       let sourceStage: KanbanStage | null = null;
@@ -695,6 +722,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
               checked: p === card.priority,
               disabled: p === card.priority,
               onClick: () => {
+                editedCardIdsRef.current.add(card.id);
                 setStages((prev) => ({
                   ...prev,
                   [stage]: prev[stage].map((c) =>
@@ -731,6 +759,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             disabled: !!card.automation,
             onClick: () => {
               if (card.automation) return;
+              editedCardIdsRef.current.add(card.id);
               setStages((prev) => ({
                 ...prev,
                 [stage]: prev[stage].map((c) =>
@@ -767,6 +796,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
               checked: p === card.priority,
               disabled: p === card.priority,
               onClick: () => {
+                editedCardIdsRef.current.add(card.id);
                 setStages((prev) => ({
                   ...prev,
                   [stage]: prev[stage].map((c) =>

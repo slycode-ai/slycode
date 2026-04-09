@@ -8,7 +8,7 @@ placement: startup
 scope: global
 classes:
   global-terminal: 10
-  project-terminal: 30
+  project-terminal: 40
 ---
 
 {{projectContext}}

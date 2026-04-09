@@ -34,7 +34,7 @@ if (!PROJECT_ROOT) {
   console.error('Run this command from within a project that has a kanban board.');
   process.exit(1);
 }
-const PROJECT_NAME = path.basename(PROJECT_ROOT);
+const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/_/g, '-');
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
 const AREA_INDEX_PATH = path.join(PROJECT_ROOT, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
@@ -65,6 +65,8 @@ Commands:
   problem    Manage problems/issues
   notes      Manage cross-agent notes
   automation Manage card automations (scheduled prompt execution)
+  prompt     Send a prompt to another card's session (cross-card execution)
+  respond    Reply to a cross-card prompt (callback for --wait mode)
   areas      List available areas from context-priming
 
 Run 'kanban <command> --help' for command-specific options.
@@ -289,6 +291,38 @@ List available areas from context-priming area-index.md.
 These are valid values for the --areas option.
 `;
 
+const PROMPT_HELP = `
+Usage: kanban prompt <card-id> "prompt text" [options]
+
+Send a prompt to another card's session (cross-card execution).
+If no running session exists, one is created automatically.
+
+Options:
+  --provider <id>     Target provider (claude|codex|gemini). Default: stage default
+  --model <id>        Model for new sessions (e.g. opus, o3)
+  --wait              Wait for a response (sync mode with callback)
+  --timeout <secs>    Timeout for --wait mode (default: 120 seconds)
+  --force             Bypass session lock and busy checks
+  --fresh             Stop any existing session and start a clean one
+
+Modes:
+  Fire-and-forget:  kanban prompt <card-id> "do something"
+  Wait for response: kanban prompt <card-id> "analyze this" --wait --timeout 60
+  Fresh session:     kanban prompt <card-id> "review" --fresh --provider codex --wait
+
+When using --wait, the called card must run 'kanban respond <id> "response"' to return data.
+`;
+
+const RESPOND_HELP = `
+Usage: kanban respond <response-id> "response data"
+
+Reply to a cross-card prompt that used --wait mode.
+The response-id is provided in the callback instruction appended to the prompt.
+
+Example:
+  kanban respond abc-123-def "Analysis complete. Found 3 issues..."
+`;
+
 const BOARD_HELP = `
 Usage: kanban board [options]
 
@@ -364,6 +398,7 @@ function writeKanban(data) {
 }
 
 function findCard(kanban, cardId, includeArchived = false) {
+  // First try exact ID match
   for (const stage of VALID_STAGES) {
     const cards = kanban.stages[stage] || [];
     const card = cards.find(c => c.id === cardId);
@@ -374,6 +409,17 @@ function findCard(kanban, cardId, includeArchived = false) {
       return { card, stage };
     }
   }
+
+  // Fall back to exact title match (case-insensitive, non-archived only)
+  const titleLower = cardId.toLowerCase();
+  for (const stage of VALID_STAGES) {
+    const cards = kanban.stages[stage] || [];
+    const card = cards.find(c => !c.archived && c.title && c.title.toLowerCase() === titleLower);
+    if (card) {
+      return { card, stage };
+    }
+  }
+
   return null;
 }
 
@@ -1817,7 +1863,7 @@ function cmdAutomation(args) {
       const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
       const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
       const provider = auto.provider || 'claude';
-      const sessionName = `${PROJECT_NAME}:${provider}:card:${cardId}`;
+      const sessionName = `${PROJECT_NAME}:${provider}:card:${card.id}`;
 
       console.log(`Triggering automation: ${cardId}`);
       console.log(`  Session: ${sessionName}`);
@@ -2158,6 +2204,400 @@ function cmdReorder(args) {
 }
 
 // ============================================================================
+// Prompt Command (cross-card execution)
+// ============================================================================
+
+function cmdPrompt(args) {
+  const opts = parseArgs(args);
+
+  if (opts.help || args.length === 0) {
+    console.log(PROMPT_HELP);
+    return;
+  }
+
+  const cardId = opts._[0];
+  const promptText = opts._[1];
+
+  if (!cardId) {
+    console.error('Error: Card ID required');
+    process.exit(1);
+  }
+
+  if (!promptText) {
+    console.error('Error: Prompt text required');
+    console.error('Usage: kanban prompt <card-id> "your prompt text"');
+    process.exit(1);
+  }
+
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+
+  const { card, stage } = result;
+  const providerFlag = opts.provider;
+  const modelFlag = opts.model;
+  const create = opts.create || false;
+  const wait = opts.wait || false;
+  const timeout = parseInt(opts.timeout || '120', 10);
+  const force = opts.force || false;
+  const fresh = opts.fresh || false;
+
+  // Determine bridge URL
+  const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
+  const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
+
+  // Load providers.json for stage defaults
+  let providers = null;
+  try {
+    const providersPath = path.join(PROJECT_ROOT, 'data', 'providers.json');
+    providers = JSON.parse(fs.readFileSync(providersPath, 'utf-8'));
+  } catch { /* providers.json optional */ }
+
+  const doPrompt = async () => {
+    try {
+      // Resolve provider: flag > stage default > 'claude'
+      let provider = providerFlag;
+      if (!provider && providers?.defaults?.stages?.[stage]) {
+        provider = providers.defaults.stages[stage].provider;
+      }
+      if (!provider) provider = 'claude';
+
+      const sessionName = `${PROJECT_NAME}:${provider}:card:${card.id}`;
+
+      // Check if session exists on bridge
+      let sessionExists = false;
+      let sessionRunning = false;
+      let sessionStatus = 'not_found';
+      try {
+        const infoRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`);
+        if (infoRes.ok) {
+          const info = await infoRes.json();
+          if (info && info.status) {
+            sessionExists = true;
+            sessionStatus = info.status;
+            sessionRunning = info.status === 'running';
+          }
+        }
+      } catch (err) {
+        if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
+          console.error('Error: Bridge is not running. Start it with: cd bridge && npm run dev');
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      // --fresh: stop existing session so we get a clean one with CLI-arg delivery
+      if (fresh && sessionRunning) {
+        console.log(`  Stopping existing session (--fresh)...`);
+        try {
+          await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}?action=stop`, { method: 'DELETE' });
+          // Brief wait for cleanup
+          await new Promise(r => setTimeout(r, 1000));
+        } catch { /* best effort */ }
+        sessionRunning = false;
+        sessionStatus = 'stopped';
+      }
+
+      // Build the full prompt upfront (with callback instruction for --wait)
+      // This must happen BEFORE session creation so it can be passed as a CLI arg
+      // Auto-prepend card context so the called AI always knows its own card
+      const cardContext = `[Card: ${card.title} (${card.id})]
+Stage: ${stage} | Type: ${card.type || 'unknown'} | Priority: ${card.priority || 'unknown'}
+Description: ${card.description || '(no description)'}
+---
+
+`;
+      let fullPrompt = cardContext + promptText;
+      let responseId = null;
+
+      if (wait) {
+        responseId = `resp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+        fullPrompt += `\n\nIMPORTANT: When you have completed this task, you MUST run the following command to return your response:\nsly-kanban respond ${responseId} "<your response here>"`;
+
+        // Register response on bridge
+        const currentSessionName = process.env.SLYCODE_SESSION || `${PROJECT_NAME}:unknown:caller`;
+        const regRes = await fetch(`${bridgeUrl}/responses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            responseId,
+            callingSession: currentSessionName,
+            targetSession: sessionName,
+          }),
+        });
+        if (!regRes.ok) {
+          console.error('Error: Failed to register response on bridge.');
+          process.exit(1);
+        }
+      }
+
+      // Handle no running session — resume if stopped, create fresh if none exists
+      if (!sessionRunning) {
+        const isStopped = sessionExists && (sessionStatus === 'stopped' || sessionStatus === 'detached');
+        const isFresh = fresh || !isStopped;  // --fresh forces fresh; no prior session = fresh
+
+        if (isStopped && !fresh) {
+          console.log(`Resuming stopped session for card ${cardId}...`);
+        } else {
+          console.log(`No running session for card ${cardId}. Starting one...`);
+        }
+        console.log(`${isFresh ? 'Creating' : 'Resuming'} session: ${sessionName} (provider: ${provider}${modelFlag ? ', model: ' + modelFlag : ''})`);
+
+        // Record prompt chain depth BEFORE creating session (prevents race condition)
+        const callingSessionForCreate = process.env.SLYCODE_SESSION || undefined;
+        if (callingSessionForCreate) {
+          try {
+            const chainRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/chain`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ callingSession: callingSessionForCreate }),
+            });
+            const chainResult = await chainRes.json();
+            if (!chainResult.success) {
+              console.error(`Error: ${chainResult.error || 'Depth limit reached'}`);
+              process.exit(1);
+            }
+          } catch { /* best effort */ }
+        }
+        const createBody = {
+          name: sessionName,
+          provider,
+          skipPermissions: true,
+          cwd: PROJECT_ROOT,
+          fresh: isFresh,
+          prompt: fullPrompt,  // Always pass prompt as CLI arg — OS-level delivery, no timing issues
+        };
+        if (isFresh && modelFlag) createBody.model = modelFlag;  // Model only on fresh (resume reconnects to existing)
+
+        const createRes = await fetch(`${bridgeUrl}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createBody),
+        });
+
+        if (!createRes.ok) {
+          const errBody = await createRes.text();
+          console.error(`Error creating session: ${errBody}`);
+          process.exit(1);
+        }
+
+        // Wait for session to be alive (liveness check)
+        console.log('  Waiting for session to start...');
+        const livenessStart = Date.now();
+        const livenessTimeout = 20000; // 20s
+        let alive = false;
+        while (Date.now() - livenessStart < livenessTimeout) {
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            const checkRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`);
+            if (checkRes.ok) {
+              const checkInfo = await checkRes.json();
+              if (checkInfo && checkInfo.status === 'running') {
+                alive = true;
+                break;
+              }
+              if (checkInfo && checkInfo.status === 'stopped') {
+                console.error('Error: Session stopped during startup.');
+                process.exit(1);
+              }
+            }
+          } catch { /* retry */ }
+        }
+
+        if (!alive) {
+          console.error('Error: Session did not start within 20s.');
+          process.exit(1);
+        }
+        console.log('  Session started. Prompt delivered via CLI arg.');
+
+        // For fire-and-forget, prompt was passed as CLI arg — we're done
+        if (!wait) {
+          console.log(`Prompt delivered to ${cardId} via session creation.`);
+          emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'fire-and-forget', created: true });
+          return;
+        }
+
+        // For --wait, prompt was already delivered via CLI arg — skip to polling
+      } else {
+        // Session was already running — submit prompt via bridge submit endpoint
+        // Pass callingSession for depth tracking (derive from SLYCODE_SESSION env or best guess)
+        const callingSession = process.env.SLYCODE_SESSION || undefined;
+        const submitRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: fullPrompt, force, callingSession }),
+        });
+
+        const submitResult = await submitRes.json();
+
+        if (!submitRes.ok) {
+          if (submitResult.locked) {
+            console.error(`Error: ${submitResult.error}`);
+          } else if (submitResult.busy) {
+            console.error(`Warning: ${submitResult.error}`);
+          } else {
+            console.error(`Error: ${submitResult.error || 'Failed to submit prompt'}`);
+          }
+          process.exit(1);
+        }
+
+        // Fire-and-forget mode
+        if (!wait) {
+          console.log(`Prompt delivered to ${cardId} (session: ${sessionName}).`);
+          emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'fire-and-forget' });
+          return;
+        }
+      }
+
+      // --wait mode: poll for response
+      console.log(`Prompt sent to ${cardId}. Waiting for response (timeout: ${timeout}s)...`);
+      const pollStart = Date.now();
+      const pollInterval = 2000; // 2 seconds
+      const timeoutMs = timeout * 1000;
+
+      while (Date.now() - pollStart < timeoutMs) {
+        await new Promise(r => setTimeout(r, pollInterval));
+
+        try {
+          const pollRes = await fetch(`${bridgeUrl}/responses/${responseId}`);
+          if (pollRes.ok) {
+            const pollData = await pollRes.json();
+            if (pollData.status === 'received' && pollData.data) {
+              // Happy path: response received
+              console.log(pollData.data);
+              emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'wait', outcome: 'received' });
+              return;
+            }
+          }
+        } catch { /* retry */ }
+      }
+
+      // Timeout — determine which outcome
+      // Mark caller as timed out so bridge can inject late responses
+      try {
+        await fetch(`${bridgeUrl}/responses/${responseId}/timeout`, { method: 'POST' });
+      } catch { /* best effort */ }
+
+      // Check if target session is still active
+      let isActive = false;
+      try {
+        const statsRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`);
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          if (statsData && statsData.lastOutputAt) {
+            const outputAge = Date.now() - new Date(statsData.lastOutputAt).getTime();
+            isActive = outputAge < 3000; // active if output within 3s
+          }
+        }
+      } catch { /* ignore */ }
+
+      if (isActive) {
+        // Outcome 2: timeout + activity ongoing
+        console.error(`[TIMEOUT] Target session is still actively processing (active for ${Math.round((Date.now() - pollStart) / 1000)}s).`);
+        console.error('A response may still arrive — the session appears to be working.');
+        console.error('If you need the response, you can wait longer.');
+        console.error(`Session: ${sessionName}`);
+      } else {
+        // Outcome 3: timeout + activity stopped — fetch snapshot
+        let snapshot = '';
+        try {
+          const snapRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/snapshot?lines=20`);
+          if (snapRes.ok) {
+            const snapData = await snapRes.json();
+            snapshot = snapData.content || '';
+          }
+        } catch { /* ignore */ }
+
+        console.error(`[TIMEOUT] Target session stopped processing without responding (timeout: ${timeout}s).`);
+        if (snapshot) {
+          console.error('\nTerminal snapshot (last 20 lines):');
+          console.error('---');
+          console.error(snapshot);
+          console.error('---');
+        }
+        console.error('\nPossible cause: Permission prompt, user-facing question, or agent did not call respond.');
+        console.error(`Session: ${sessionName}`);
+      }
+
+      emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'wait', outcome: 'timeout', active: isActive });
+      process.exit(1);
+
+    } catch (err) {
+      if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
+        console.error('Error: Bridge is not running. Start it with: cd bridge && npm run dev');
+      } else {
+        console.error('Error:', err.message);
+      }
+      process.exit(1);
+    }
+  };
+
+  doPrompt();
+}
+
+// ============================================================================
+// Respond Command (cross-card callback)
+// ============================================================================
+
+function cmdRespond(args) {
+  const opts = parseArgs(args);
+
+  if (opts.help || args.length === 0) {
+    console.log(RESPOND_HELP);
+    return;
+  }
+
+  const responseId = opts._[0];
+  const responseData = opts._[1];
+
+  if (!responseId) {
+    console.error('Error: Response ID required');
+    process.exit(1);
+  }
+
+  if (!responseData) {
+    console.error('Error: Response data required');
+    console.error('Usage: kanban respond <response-id> "your response data"');
+    process.exit(1);
+  }
+
+  // Determine bridge URL
+  const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
+  const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
+
+  const doRespond = async () => {
+    try {
+      const res = await fetch(`${bridgeUrl}/responses/${encodeURIComponent(responseId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: responseData }),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: 'Unknown error' }));
+        console.error(`Error: ${errBody.error || 'Failed to deliver response'}`);
+        process.exit(1);
+      }
+
+      const result = await res.json();
+      console.log(`Response delivered.${result.lateInjection ? ' (late injection — caller had already timed out)' : ''}`);
+    } catch (err) {
+      if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
+        console.error('Error: Bridge is not running.');
+      } else {
+        console.error('Error:', err.message);
+      }
+      process.exit(1);
+    }
+  };
+
+  doRespond();
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -2207,6 +2647,12 @@ function main() {
       break;
     case 'automation':
       cmdAutomation(commandArgs);
+      break;
+    case 'prompt':
+      cmdPrompt(commandArgs);
+      break;
+    case 'respond':
+      cmdRespond(commandArgs);
       break;
     case 'areas':
       cmdAreas(commandArgs);

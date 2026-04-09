@@ -200,6 +200,16 @@ export class BridgeClient {
     }
   }
 
+  async getGitStatus(cwd: string): Promise<{ branch: string | null; uncommitted: number } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/git-status?cwd=${encodeURIComponent(cwd)}`);
+      if (!res.ok) return null;
+      return await res.json() as { branch: string | null; uncommitted: number };
+    } catch {
+      return null;
+    }
+  }
+
   async checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck> {
     try {
       const res = await fetch(
@@ -276,11 +286,21 @@ export class BridgeClient {
     }
 
     // Wait briefly, then send carriage return to submit
-    await new Promise(resolve => setTimeout(resolve, 600));
+    const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
+    await new Promise(resolve => setTimeout(resolve, submitDelay));
     const crSent = await this.sendInput(sessionName, '\r');
     if (!crSent) {
       debugLog(`[sendMessage] FAILED to send CR to ${sessionName} — message typed but not submitted`);
     }
+
+    // Double-submit: send a second Enter to catch swallowed keystrokes
+    if (process.env.PROMPT_DOUBLE_SUBMIT === 'true') {
+      const doubleDelay = parseInt(process.env.PROMPT_DOUBLE_SUBMIT_DELAY_MS || '300', 10);
+      await new Promise(resolve => setTimeout(resolve, doubleDelay));
+      const cr2Sent = await this.sendInput(sessionName, '\r');
+      debugLog(`[sendMessage] Double-submit: cr2=${cr2Sent}`);
+    }
+
     debugLog(`[sendMessage] Done: text=${textSent}, cr=${crSent}`);
     return {};
   }

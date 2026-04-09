@@ -3,6 +3,7 @@
   "/_not-found/page": "/_not-found",
   "/api/areas/route": "/api/areas",
   "/api/bridge/[...path]/route": "/api/bridge/[...path]",
+  "/api/changelog/route": "/api/changelog",
   "/api/cli-assets/assistant/route": "/api/cli-assets/assistant",
   "/api/cli-assets/fix/route": "/api/cli-assets/fix",
   "/api/cli-assets/import/route": "/api/cli-assets/import",

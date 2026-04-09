@@ -7,7 +7,7 @@ group: "Project"
 placement: startup
 scope: global
 classes:
-  project-terminal: 40
+  project-terminal: 50
 ---
 
 {{projectContext}}

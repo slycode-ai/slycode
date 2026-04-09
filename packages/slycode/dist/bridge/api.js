@@ -3,8 +3,9 @@ import path from 'path';
 import multer from 'multer';
 import { saveScreenshot } from './screenshot-utils.js';
 import { checkInstructionFile } from './provider-utils.js';
+import { getGitStatus } from './git-utils.js';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-export function createApiRouter(sessionManager) {
+export function createApiRouter(sessionManager, responseStore) {
     const router = Router();
     // Create or resume a session
     router.post('/sessions', async (req, res) => {
@@ -237,6 +238,24 @@ export function createApiRouter(sessionManager) {
             res.status(500).json({ error: 'Failed to check instruction file' });
         }
     });
+    // Get git branch and uncommitted count for a directory
+    router.get('/git-status', async (req, res) => {
+        const cwd = req.query.cwd;
+        if (!cwd) {
+            return res.status(400).json({ error: 'cwd query param is required' });
+        }
+        if (!path.isAbsolute(cwd)) {
+            return res.status(400).json({ error: 'cwd must be an absolute path' });
+        }
+        try {
+            const result = await getGitStatus(cwd);
+            res.json(result);
+        }
+        catch (err) {
+            console.error('Error getting git status:', err);
+            res.json({ branch: null, uncommitted: 0 });
+        }
+    });
     // Stop all running sessions (bulk action)
     router.post('/sessions/stop-all', async (req, res) => {
         try {
@@ -247,6 +266,100 @@ export function createApiRouter(sessionManager) {
             console.error('Error stopping all sessions:', err);
             res.status(500).json({ error: 'Failed to stop all sessions' });
         }
+    });
+    // --- Cross-card prompt execution endpoints ---
+    // Atomic prompt submission
+    router.post('/sessions/:name/submit', async (req, res) => {
+        const name = decodeURIComponent(req.params.name);
+        const request = req.body;
+        if (!request.prompt || typeof request.prompt !== 'string') {
+            return res.status(400).json({ error: 'prompt is required and must be a string' });
+        }
+        try {
+            const result = await sessionManager.submitPrompt(name, request);
+            if (!result.success) {
+                const status = result.locked || result.busy ? 409 : 404;
+                return res.status(status).json(result);
+            }
+            res.json(result);
+        }
+        catch (err) {
+            console.error('Error submitting prompt:', err);
+            res.status(500).json({ error: 'Failed to submit prompt' });
+        }
+    });
+    // Terminal snapshot for diagnostics
+    router.get('/sessions/:name/snapshot', (req, res) => {
+        const name = decodeURIComponent(req.params.name);
+        const lines = parseInt(req.query.lines) || 20;
+        const snapshot = sessionManager.getSnapshot(name, lines);
+        if (!snapshot) {
+            return res.status(404).json({ error: 'Session not found or no terminal data available' });
+        }
+        res.json(snapshot);
+    });
+    // --- Response store endpoints (for --wait callback protocol) ---
+    // Register a pending response
+    router.post('/responses', (req, res) => {
+        const { responseId, callingSession, targetSession } = req.body;
+        if (!responseId || !callingSession || !targetSession) {
+            return res.status(400).json({ error: 'responseId, callingSession, and targetSession are required' });
+        }
+        responseStore.register(responseId, callingSession, targetSession);
+        res.json({ success: true, responseId });
+    });
+    // Poll for a response
+    router.get('/responses/:id', (req, res) => {
+        const id = req.params.id;
+        const entry = responseStore.poll(id);
+        if (!entry) {
+            return res.status(404).json({ error: 'Response not found' });
+        }
+        res.json({ status: entry.status, data: entry.data || null });
+    });
+    // Deliver a response (called by sly-kanban respond)
+    router.post('/responses/:id', (req, res) => {
+        const id = req.params.id;
+        const { data } = req.body;
+        if (typeof data !== 'string') {
+            return res.status(400).json({ error: 'data is required and must be a string' });
+        }
+        const entry = responseStore.deliver(id, data);
+        if (!entry) {
+            return res.status(404).json({ error: 'Response not found or expired' });
+        }
+        // Late response injection: if caller has timed out, inject into calling session's PTY
+        // Uses submitPrompt for reliable delivery (bracketed paste + delay + Enter + double-submit)
+        if (entry.callerTimedOut && entry.callingSession) {
+            const lateMessage = `[LATE RESPONSE received]\nA previously timed-out cross-card prompt has received a response:\n---\n${data}\n---`;
+            sessionManager.submitPrompt(entry.callingSession, { prompt: lateMessage, force: true }).then(result => {
+                if (result.success) {
+                    console.log(`[responses] Late response injected into ${entry.callingSession} for response ${id}`);
+                }
+                else {
+                    console.warn(`[responses] Late response injection failed for ${entry.callingSession}: ${result.error}`);
+                }
+            }).catch(err => {
+                console.warn(`[responses] Late response injection error:`, err);
+            });
+        }
+        res.json({ success: true, lateInjection: entry.callerTimedOut || false });
+    });
+    // Mark caller as timed out (so bridge knows to inject late responses)
+    router.post('/responses/:id/timeout', (req, res) => {
+        const id = req.params.id;
+        responseStore.markCallerTimedOut(id);
+        res.json({ success: true });
+    });
+    // Record prompt chain (for depth tracking when session was created with CLI-arg prompt)
+    router.post('/sessions/:name/chain', (req, res) => {
+        const name = decodeURIComponent(req.params.name);
+        const { callingSession } = req.body;
+        if (!callingSession) {
+            return res.status(400).json({ error: 'callingSession is required' });
+        }
+        const result = sessionManager.recordPromptChain(name, callingSession);
+        res.json(result);
     });
     return router;
 }

@@ -27,7 +27,11 @@ import type {
   BridgeStats,
   SessionActivity,
   ActivityTransition,
+  SubmitRequest,
+  SubmitResult,
+  SnapshotResult,
 } from './types.js';
+import type { ResponseStore } from './response-store.js';
 import { constants as fsConstants } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
@@ -819,9 +823,9 @@ export class SessionManager {
       session.exitResolver = undefined;
     }
 
-    // Capture last terminal output for unexpected exits (non-zero, not user-initiated)
+    // Capture last terminal output on exit (for cross-card snapshot diagnostics + error reporting)
     let exitOutput: string | undefined;
-    if (code !== 0 && !session.stoppedByUser && session.serializeAddon) {
+    if (!session.stoppedByUser && session.serializeAddon) {
       try {
         const raw = session.serializeAddon.serialize({ scrollback: 20 });
         const stripped = stripAnsi(raw);
@@ -873,6 +877,9 @@ export class SessionManager {
       this.persistedState.sessions[name].lastActive = session.lastActive;
       this.persistedState.sessions[name].exitCode = code;
       this.persistedState.sessions[name].exitedAt = exitedAt;
+      if (session.exitOutput) {
+        this.persistedState.sessions[name].exitOutput = session.exitOutput;
+      }
       await this.savePersistedState();
     }
 
@@ -1492,5 +1499,206 @@ export class SessionManager {
 
     killPty(session.pty, signal);
     return true;
+  }
+
+  // --- Cross-card prompt execution ---
+
+  private responseStore: ResponseStore | null = null;
+  private submitMutexes = new Map<string, Promise<void>>();
+
+  // Prompt depth tracking: prevents runaway cross-card call chains
+  private static MAX_PROMPT_DEPTH = 4;
+  private static CHAIN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  private promptChains = new Map<string, { calledBy: string; depth: number; timestamp: number }>();
+
+  setResponseStore(store: ResponseStore): void {
+    this.responseStore = store;
+  }
+
+  /**
+   * Get the current prompt depth for a session by tracing the call chain.
+   */
+  private getPromptDepth(sessionName: string): number {
+    const entry = this.promptChains.get(sessionName);
+    if (!entry) return 0;
+    // Expire stale entries
+    if (Date.now() - entry.timestamp > SessionManager.CHAIN_TTL_MS) {
+      this.promptChains.delete(sessionName);
+      return 0;
+    }
+    return entry.depth;
+  }
+
+  /**
+   * Record a prompt chain link (for depth tracking when session was created with CLI-arg prompt).
+   * Returns the recorded depth or an error if max depth exceeded.
+   */
+  recordPromptChain(targetSession: string, callingSession: string): { success: boolean; depth: number; error?: string } {
+    const resolvedTarget = this.resolveSessionName(targetSession);
+    const callerDepth = this.getPromptDepth(callingSession);
+    const newDepth = callerDepth + 1;
+    if (newDepth > SessionManager.MAX_PROMPT_DEPTH) {
+      return { success: false, depth: newDepth, error: `Maximum prompt depth (${SessionManager.MAX_PROMPT_DEPTH}) reached.` };
+    }
+    this.promptChains.set(resolvedTarget, { calledBy: callingSession, depth: newDepth, timestamp: Date.now() });
+    return { success: true, depth: newDepth };
+  }
+
+  /**
+   * Atomically submit a prompt to a session: bracketed paste → delay → Enter.
+   * Enforces three-state guard: call-locked, active/busy, idle/ready.
+   * Per-session mutex prevents concurrent prompt interleaving.
+   * Depth tracking prevents runaway cross-card call chains (max 4 levels).
+   */
+  async submitPrompt(name: string, request: SubmitRequest): Promise<SubmitResult> {
+    const resolvedName = this.resolveSessionName(name);
+    const session = this.sessions.get(resolvedName);
+
+    // Check session exists and is running
+    if (!session) {
+      const persisted = this.persistedState.sessions[resolvedName];
+      const status = persisted ? 'stopped' : 'not_found';
+      return { success: false, sessionStatus: status as any, isActive: false, error: status === 'stopped' ? 'Session is stopped. Use --create to start a new session.' : 'Session not found.' };
+    }
+    if (session.status !== 'running') {
+      return { success: false, sessionStatus: session.status, isActive: false, error: `Session is ${session.status}. Cannot submit prompt.` };
+    }
+    if (!session.pty) {
+      return { success: false, sessionStatus: session.status, isActive: false, error: 'Session has no active PTY.' };
+    }
+
+    // Depth check — prevent runaway cross-card call chains (not bypassable with --force)
+    if (request.callingSession) {
+      const callerDepth = this.getPromptDepth(request.callingSession);
+      const newDepth = callerDepth + 1;
+      if (newDepth > SessionManager.MAX_PROMPT_DEPTH) {
+        return {
+          success: false, sessionStatus: session.status, isActive: false,
+          error: `Maximum prompt depth (${SessionManager.MAX_PROMPT_DEPTH}) reached. Call chain too deep — cannot call another card. This prevents runaway cross-card loops.`,
+        };
+      }
+      // Record this link in the chain
+      this.promptChains.set(resolvedName, { calledBy: request.callingSession, depth: newDepth, timestamp: Date.now() });
+    }
+
+    if (!request.force) {
+      // Check call lock
+      if (this.responseStore?.isSessionLocked(resolvedName)) {
+        const lock = this.responseStore.getActiveLock(resolvedName);
+        const lockAge = lock ? Math.round((Date.now() - lock.lockedAt) / 1000) : 0;
+        return {
+          success: false, sessionStatus: session.status, isActive: false, locked: true,
+          error: `Session is currently responding to a prompt from ${lock?.callingSession || 'another caller'} (locked ${lockAge}s ago). Try again later.`,
+        };
+      }
+
+      // Check if session is actively generating output
+      const active = this.isSessionActive(resolvedName);
+      if (active) {
+        const outputAge = Date.now() - new Date(session.lastOutputAt).getTime();
+        return {
+          success: false, sessionStatus: session.status, isActive: true, busy: true,
+          error: `Session is currently active (output ${Math.round(outputAge / 1000)}s ago). The AI may be mid-response. Use --force to send anyway.`,
+        };
+      }
+    }
+
+    // Acquire per-session mutex
+    const existingMutex = this.submitMutexes.get(resolvedName);
+    let releaseMutex: () => void;
+    const mutexPromise = new Promise<void>(resolve => { releaseMutex = resolve; });
+    this.submitMutexes.set(resolvedName, mutexPromise);
+    if (existingMutex) await existingMutex;
+
+    try {
+      const prompt = request.prompt;
+      if (!prompt || prompt.trim().length === 0) {
+        return { success: false, sessionStatus: session.status, isActive: false, error: 'Prompt cannot be empty.' };
+      }
+
+      const useBracketedPaste = request.bracketedPaste !== false;
+      const data = useBracketedPaste ? `\x1b[200~${prompt}\x1b[201~` : prompt;
+
+      // Write prompt to PTY
+      writeToPty(session.pty, data);
+
+      // Delay before first Enter
+      const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
+      await new Promise(r => setTimeout(r, submitDelay));
+
+      // First Enter
+      writeToPty(session.pty, '\r');
+
+      // Optional double-submit for reliability
+      if (process.env.PROMPT_DOUBLE_SUBMIT === 'true') {
+        const doubleDelay = parseInt(process.env.PROMPT_DOUBLE_SUBMIT_DELAY_MS || '300', 10);
+        await new Promise(r => setTimeout(r, doubleDelay));
+        writeToPty(session.pty, '\r');
+      }
+
+      const isActive = this.isSessionActive(resolvedName) || false;
+      return { success: true, sessionStatus: session.status, isActive };
+    } finally {
+      releaseMutex!();
+      // Clean up mutex if it's still ours
+      if (this.submitMutexes.get(resolvedName) === mutexPromise) {
+        this.submitMutexes.delete(resolvedName);
+      }
+    }
+  }
+
+  /**
+   * Get a terminal content snapshot for diagnostics.
+   * Uses serializeAddon to dump last N lines, strips ANSI codes.
+   */
+  getSnapshot(name: string, lines?: number): SnapshotResult | null {
+    const resolvedName = this.resolveSessionName(name);
+    const session = this.sessions.get(resolvedName);
+
+    // Fall back to exitOutput for stopped/exited sessions (in-memory or persisted)
+    if (!session || !session.serializeAddon) {
+      const exitOutput = session?.exitOutput
+        || this.persistedState.sessions[resolvedName]?.exitOutput;
+      if (exitOutput) {
+        const outputLines = exitOutput.split('\n');
+        const scrollback = lines || 20;
+        const lastLines = outputLines.slice(-scrollback).join('\n');
+        const lastOutputAt = session?.lastOutputAt
+          || session?.exitedAt
+          || this.persistedState.sessions[resolvedName]?.exitedAt
+          || '';
+        return {
+          content: lastLines,
+          lines: Math.min(outputLines.length, scrollback),
+          lastOutputAt,
+        };
+      }
+      return null;
+    }
+
+    try {
+      const scrollback = lines || 20;
+      const raw = session.serializeAddon.serialize({ scrollback });
+
+      // Strip ANSI escape codes
+      const stripped = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                         .replace(/\x1b\][^\x07]*\x07/g, '')  // OSC sequences
+                         .replace(/\x1b[()][A-Z0-9]/g, '')    // Character set
+                         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''); // Control chars (keep \n \r \t)
+
+      // Take last N lines
+      const allLines = stripped.split('\n');
+      const lastLines = allLines.slice(-scrollback).join('\n').trim();
+      const lineCount = lastLines.split('\n').length;
+
+      return {
+        content: lastLines,
+        lines: lineCount,
+        lastOutputAt: session.lastOutputAt,
+      };
+    } catch (err) {
+      console.warn(`[snapshot] Failed to serialize session ${name}:`, err);
+      return null;
+    }
   }
 }

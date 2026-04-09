@@ -11,7 +11,7 @@ classes:
   design: 90
   done: 30
   implementation: 60
-  project-terminal: 60
+  project-terminal: 10
   testing: 60
 ---
 

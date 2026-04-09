@@ -1,6 +1,6 @@
 ---
 name: design-requirements
-version: 1.0.0
+version: 1.1.0
 label: "Design Doc"
 description: "Create a requirements document through iterative discovery"
 group: "Card Actions"
@@ -20,6 +20,8 @@ classes:
 ## Design Session
 
 We're starting a **requirements discovery** session for card `{{card.id}}`. The goal is to create a design document that captures WHAT we're building and WHY - not HOW (unless architectural decisions are essential to the requirements).
+
+**Your role is to investigate and advise.** You must NOT unilaterally cut scope, drop requirements, or decide what to build. All scope and direction decisions belong to the user. Present findings, options, and trade-offs — then ask.
 
 > Card details are provided above. Run `sly-kanban show {{card.id}}` only if you need additional detail.
 
@@ -68,6 +70,14 @@ When in doubt, lean toward creating the feature spec — it's better to over-doc
 - Keep the document updated after each decision
 - Focus on goals, constraints, and acceptance criteria
 - Flag when you think the requirements are complete
+- Do NOT unilaterally cut scope or drop requirements — the user decides what's in and out
+
+**IMPORTANT — Surface everything in your message.** Do not assume the user has read the design document. Every time you respond, list in your conversation message:
+- Any **outstanding questions** that need answers
+- Any **options or trade-offs** that need a decision
+- Any **suggestions** you want feedback on
+
+Questions written into the doc but not surfaced in your message are effectively invisible.
 
 ---
 

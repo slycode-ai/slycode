@@ -666,7 +666,8 @@ async function checkAutomations(): Promise<void> {
                     result.error.includes('Session create failed') ||
                     result.error.includes('Session stopped') ||
                     result.error.includes('Input failed') ||
-                    result.error.includes('No automation config')
+                    result.error.includes('No automation config') ||
+                    result.error.includes('No activity detected')
                   );
                   if (isHardFailure) {
                     await sendErrorNotification(card.title, result.error || 'Unknown error', result.sessionName);

@@ -1,8 +1,8 @@
 ---
 name: kanban
-version: 1.4.0
-updated: 2026-03-11
-description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, and scheduled automations"
+version: 1.5.0
+updated: 2026-04-03
+description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, and cross-card prompt execution"
 provider: claude
 ---
 
@@ -26,7 +26,21 @@ Manage kanban cards via CLI: `sly-kanban <command>`
 | `problem` | Track issues on cards |
 | `notes` | Manage cross-agent notes |
 | `automation` | Configure and manage scheduled automations |
+| `prompt` | Send a prompt to another card's session (cross-card) |
+| `respond` | Reply to a cross-card prompt (--wait callback) |
 | `areas` | List available areas |
+
+## Card Identification
+
+All commands accept either a **card ID** or an **exact card title** (case-insensitive, non-archived cards only):
+
+```bash
+sly-kanban show card-1234567890      # By ID
+sly-kanban show "Test Card"          # By exact title
+sly-kanban prompt "Test Card" "do X" # Title works for prompt too
+```
+
+If a title doesn't match, use the card ID instead.
 
 ## Quick Reference
 
@@ -268,6 +282,66 @@ sly-kanban automation list --tag "deploy"
 - Schedule uses cron expressions (recurring) or ISO datetime (one-shot)
 - One-shot automations auto-disable after firing, config preserved
 - "Report via messaging" toggle appends instructions for the agent to send results
+
+## Cross-Card Prompt Execution
+
+Send prompts to other cards' sessions for orchestration, multi-provider review, and automation chains.
+
+**IMPORTANT:** Only use `sly-kanban prompt` when **explicitly instructed** to do so — either by a user, a card description, or an automation instruction. Never fire prompts at other cards on your own initiative (e.g., during testing, exploration, or as a "helpful" side-effect). Cross-card prompts start real sessions that consume resources and are hard to track if unexpected.
+
+### Fire-and-Forget (async)
+
+```bash
+sly-kanban prompt <card-id> "Your prompt text"
+sly-kanban prompt <card-id> "Your prompt" --provider codex
+sly-kanban prompt <card-id> "Your prompt" --provider codex --model o3
+sly-kanban prompt <card-id> "Your prompt" --fresh   # Stop existing session, start clean
+```
+
+Delivers the prompt and returns immediately. Session handling:
+- **Running session** → submits prompt to it directly
+- **Stopped session** → **resumes** it (preserves conversation context), then delivers the prompt
+- **No session** → creates a fresh one
+
+Use `--fresh` only when you explicitly want to discard the existing session and start clean. Without it, stopped sessions are always resumed to preserve context.
+
+**Card context is auto-injected.** Every prompt is automatically prepended with the target card's ID, title, stage, type, priority, and description. The called AI always knows its own card details without needing to look them up. Your prompt text follows after a `---` separator.
+
+### Wait-for-Response (sync)
+
+```bash
+sly-kanban prompt <card-id> "Analyze this design" --wait --timeout 120
+```
+
+Sends the prompt with an embedded callback instruction. The called card must run `sly-kanban respond` to return data. The CLI blocks until the response arrives or the timeout is reached.
+
+**Timeout outcomes:**
+- Response received → data printed to stdout (exit 0)
+- Timeout + session still active → message indicating work is ongoing (exit 1)
+- Timeout + session idle → terminal snapshot showing what blocked it (exit 1)
+
+Late responses are automatically injected into the calling session's terminal even after timeout.
+
+### Responding to a Prompt
+
+When your session receives a prompt with a callback instruction like:
+
+> When you have completed this task, you MUST run: `sly-kanban respond <response-id> "<your response>"`
+
+Run the respond command:
+
+```bash
+sly-kanban respond <response-id> "Your response data here"
+```
+
+### Session Guards
+
+The submit endpoint enforces three checks:
+1. **Call-locked** — another `--wait` prompt is active on the target session → rejected (409)
+2. **Active/busy** — the target session is mid-generation → rejected (409)
+3. **Idle/ready** — proceeds with submission
+
+Use `--force` to bypass all guards.
 
 ## Error Handling
 

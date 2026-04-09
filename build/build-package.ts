@@ -269,6 +269,7 @@ function copyTemplates(): void {
   const dataTemplates = [
     { src: 'data/commands.json', dest: 'commands.json' },
     { src: 'data/scaffold-templates/providers.json', dest: 'providers.json' },
+    { src: 'data/changelog.json', dest: 'changelog.json' },
   ];
 
   for (const t of dataTemplates) {

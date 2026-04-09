@@ -45,7 +45,7 @@ export function VoiceControlBar({
           onClick={onRecord}
           disabled={disabled}
           className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-500 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 disabled:opacity-50 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
-          title="Start recording (Ctrl+.)"
+          title="Start recording [Ctrl+.]"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />

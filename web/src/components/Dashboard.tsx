@@ -15,6 +15,7 @@ import { CliAssetsTab } from './CliAssetsTab';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
 import { VersionUpdateToast } from './VersionUpdateToast';
+import { ChangelogModal } from './ChangelogModal';
 import { useVoice } from '@/contexts/VoiceContext';
 
 interface DashboardProps {
@@ -35,6 +36,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const [slycodeVersion, setSlycodeVersion] = useState<string | null>(null);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   // Fetch SlyCode version on mount
   useEffect(() => {
@@ -472,6 +474,13 @@ export function Dashboard({ data: initialData }: DashboardProps) {
           <p className="mt-2 text-xs text-void-500 dark:text-void-400">
             &copy; 2026 SlyCode (<a href="https://slycode.ai" target="_blank" rel="noopener noreferrer" className="hover:text-neon-blue-500 dark:hover:text-neon-blue-400 transition-colors">slycode.ai</a>). All rights reserved.
             {slycodeVersion && <span className="ml-2 text-void-400 dark:text-void-500">v{slycodeVersion}</span>}
+            <button
+              type="button"
+              onClick={() => setShowChangelog(true)}
+              className="ml-2 text-void-400 hover:text-neon-blue-500 dark:text-void-500 dark:hover:text-neon-blue-400 transition-colors underline-offset-2 hover:underline"
+            >
+              Changelog
+            </button>
           </p>
         </footer>
       </main>
@@ -481,6 +490,8 @@ export function Dashboard({ data: initialData }: DashboardProps) {
         onClose={() => setShowAddModal(false)}
         onCreated={refreshData}
       />
+
+      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
 
       {/* Global Terminal */}
       <GlobalClaudePanel

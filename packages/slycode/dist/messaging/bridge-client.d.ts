@@ -18,6 +18,10 @@ export declare class BridgeClient {
         stopped: boolean;
         reason?: string;
     }>;
+    getGitStatus(cwd: string): Promise<{
+        branch: string | null;
+        uncommitted: number;
+    } | null>;
     checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck>;
     ensureSession(sessionName: string, cwd: string, provider?: string, prompt?: string, createInstructionFile?: boolean, model?: string): Promise<{
         session: BridgeSessionInfo;

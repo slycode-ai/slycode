@@ -205,13 +205,16 @@ async function logConfigStatus(channel, voiceConfig, bridgeUrl) {
     console.log(`  Bridge URL: ${bridgeUrl}`);
 }
 // --- Breadcrumb Helpers ---
-function getBreadcrumb(target, state, kanban) {
+async function getBreadcrumb(target, state, kanban, bridge) {
+    let crumb;
     switch (target.type) {
         case 'global':
-            return '📍 Global Terminal';
+            crumb = '📍 Global Terminal';
+            break;
         case 'project': {
             const project = state.getSelectedProject();
-            return `📍 ${project?.name || target.projectId} · Project Terminal`;
+            crumb = `📍 ${project?.name || target.projectId} · Project Terminal`;
+            break;
         }
         case 'card': {
             const project = state.getSelectedProject();
@@ -221,9 +224,23 @@ function getBreadcrumb(target, state, kanban) {
             const stage = cardInfo?.stage || target.stage || '?';
             const title = cardInfo?.card.title || target.cardId || '?';
             const truncTitle = title.length > 55 ? title.slice(0, 52) + '...' : title;
-            return `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
+            crumb = `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
+            break;
         }
     }
+    // Append git branch info if available
+    try {
+        const cwd = state.getSessionCwd();
+        const git = await bridge.getGitStatus(cwd);
+        if (git?.branch) {
+            const uncommittedSuffix = git.uncommitted > 0 ? ` (${git.uncommitted} uncommitted)` : '';
+            crumb += `\nBranch: ${git.branch}${uncommittedSuffix}`;
+        }
+    }
+    catch {
+        // Silent — branch info is best-effort
+    }
+    return crumb;
 }
 function truncate(text, max) {
     return text.length > max ? text.slice(0, max - 3) + '...' : text;
@@ -239,7 +256,7 @@ function latestDate(...dates) {
 // --- /switch Rendering ---
 async function renderSwitchView(channel, state, bridge, kanban) {
     const target = state.getTarget();
-    const breadcrumb = getBreadcrumb(target, state, kanban);
+    const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
     if (target.type === 'global') {
         // Global level: show projects list
         const projects = state.getProjects();
@@ -309,7 +326,7 @@ async function renderLaneDrilldown(channel, state, bridge, kanban, stage, offset
 async function handleSessionLifecycle(channel, state, bridge, kanban, actionFilter) {
     const target = ensureStage(state.getTarget(), kanban, state);
     const sessionName = state.getSessionName();
-    const breadcrumb = getBreadcrumb(target, state, kanban);
+    const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
     // Build provider line with model
     const currentProvider = state.getSelectedProvider();
     const providerLabel = PROVIDER_LABELS[currentProvider] || currentProvider;
@@ -610,7 +627,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         const target = ensureStage(state.getTarget(), kanban, state);
         const terminalClass = actionFilter.getTerminalClass(target);
         const cardType = getCardType(target, kanban);
-        const breadcrumb = getBreadcrumb(target, state, kanban);
+        const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
         const commands = actionFilter.filterActions(terminalClass, undefined, cardType);
         console.log(`[SLY] target: ${JSON.stringify(target)}, class: ${terminalClass}, cardType: ${cardType}, actions: ${Object.keys(commands).join(', ')}`);
         const buttons = actionsToButtons(commands);
@@ -645,9 +662,8 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     channel.onCommand('provider', async () => {
         const current = state.getSelectedProvider();
         const currentLabel = PROVIDER_LABELS[current] || current;
-        const others = ALL_PROVIDERS.filter(p => p !== current);
-        const buttons = others.map(p => [{
-                label: PROVIDER_LABELS[p],
+        const buttons = ALL_PROVIDERS.map(p => [{
+                label: (p === current ? '● ' : '') + PROVIDER_LABELS[p],
                 callbackData: `cfg_${p}`,
             }]);
         await channel.sendInlineKeyboard(`Provider: *${currentLabel}*`, buttons);
@@ -725,6 +741,18 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 }
                 catch { }
             }
+        }
+        // Git branch info
+        try {
+            const cwd = state.getSessionCwd();
+            const git = await bridge.getGitStatus(cwd);
+            if (git?.branch) {
+                const uncommittedSuffix = git.uncommitted > 0 ? ` (${git.uncommitted} uncommitted)` : '';
+                status += `Branch: ${git.branch}${uncommittedSuffix}\n`;
+            }
+        }
+        catch {
+            // Silent — branch info is best-effort
         }
         const currentModel = state.getSelectedModel();
         const modelLabel = currentModel

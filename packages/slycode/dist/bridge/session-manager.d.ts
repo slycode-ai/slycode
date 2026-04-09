@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
-import type { SessionInfo, CreateSessionRequest, BridgeConfig, BridgeRuntimeConfig, BridgeStats, ActivityTransition } from './types.js';
+import type { SessionInfo, CreateSessionRequest, BridgeConfig, BridgeRuntimeConfig, BridgeStats, ActivityTransition, SubmitRequest, SubmitResult, SnapshotResult } from './types.js';
+import type { ResponseStore } from './response-store.js';
 export declare class SessionManager {
     private sessions;
     private config;
@@ -122,4 +123,35 @@ export declare class SessionManager {
     private retryGuidDetection;
     resizeSession(name: string, cols: number, rows: number): boolean;
     sendSignal(name: string, signal: string): boolean;
+    private responseStore;
+    private submitMutexes;
+    private static MAX_PROMPT_DEPTH;
+    private static CHAIN_TTL_MS;
+    private promptChains;
+    setResponseStore(store: ResponseStore): void;
+    /**
+     * Get the current prompt depth for a session by tracing the call chain.
+     */
+    private getPromptDepth;
+    /**
+     * Record a prompt chain link (for depth tracking when session was created with CLI-arg prompt).
+     * Returns the recorded depth or an error if max depth exceeded.
+     */
+    recordPromptChain(targetSession: string, callingSession: string): {
+        success: boolean;
+        depth: number;
+        error?: string;
+    };
+    /**
+     * Atomically submit a prompt to a session: bracketed paste → delay → Enter.
+     * Enforces three-state guard: call-locked, active/busy, idle/ready.
+     * Per-session mutex prevents concurrent prompt interleaving.
+     * Depth tracking prevents runaway cross-card call chains (max 4 levels).
+     */
+    submitPrompt(name: string, request: SubmitRequest): Promise<SubmitResult>;
+    /**
+     * Get a terminal content snapshot for diagnostics.
+     * Uses serializeAddon to dump last N lines, strips ANSI codes.
+     */
+    getSnapshot(name: string, lines?: number): SnapshotResult | null;
 }

@@ -128,6 +128,13 @@ export interface KanbanStages {
   done: KanbanCard[];
 }
 
+export type CardChangeType = 'move' | 'edit' | 'create' | 'delete';
+
+export interface ChangedCard {
+  id: string;
+  type: CardChangeType;
+}
+
 export interface KanbanBoard {
   project_id: string;
   stages: KanbanStages;
@@ -161,6 +168,23 @@ export interface FeatureEntry {
   last_updated: string;
   // Extended
   projectId?: string;
+}
+
+// ============================================================================
+// Changelog Types
+// ============================================================================
+
+export type ChangelogChangeType = 'feature' | 'bugfix' | 'improvement' | 'chore';
+
+export interface ChangelogChange {
+  type: ChangelogChangeType;
+  description: string;
+}
+
+export interface ChangelogVersion {
+  version: string;
+  date: string; // YYYY-MM-DD
+  changes: ChangelogChange[];
 }
 
 // ============================================================================

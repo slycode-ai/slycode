@@ -99,6 +99,7 @@ export interface PersistedSession {
     model?: string;
     exitCode?: number;
     exitedAt?: string;
+    exitOutput?: string;
 }
 export interface PersistedState {
     sessions: Record<string, PersistedSession>;
@@ -157,4 +158,40 @@ export interface BridgeStats {
     connectedClients: number;
     activelyWorking: number;
     sessions: SessionActivity[];
+}
+export interface SubmitRequest {
+    prompt: string;
+    bracketedPaste?: boolean;
+    force?: boolean;
+    callingSession?: string;
+}
+export interface SubmitResult {
+    success: boolean;
+    sessionStatus: SessionStatus;
+    isActive: boolean;
+    error?: string;
+    locked?: boolean;
+    busy?: boolean;
+}
+export interface SnapshotResult {
+    content: string;
+    lines: number;
+    lastOutputAt: string;
+}
+export interface ResponseEntry {
+    responseId: string;
+    callingSession: string;
+    targetSession: string;
+    data?: string;
+    status: 'pending' | 'received' | 'expired';
+    createdAt: number;
+    callerTimedOut?: boolean;
+}
+export interface RegisterResponseRequest {
+    responseId: string;
+    callingSession: string;
+    targetSession: string;
+}
+export interface DeliverResponseRequest {
+    data: string;
 }

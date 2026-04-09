@@ -8,6 +8,7 @@ import {
 import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
 import { onTerminalPrompt } from '@/lib/terminal-events';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
+import { BranchTab } from './BranchTab';
 import { useVoice } from '@/contexts/VoiceContext';
 
 interface SessionInfo {
@@ -263,6 +264,11 @@ export function GlobalClaudePanel({
             onTerminalReady={onTerminalReady}
           />
         </div>
+      )}
+
+      {/* Git branch tab - positioned to the left of the panel */}
+      {cwd && (
+        <BranchTab projectPath={cwd} isTerminalExpanded={isExpanded} />
       )}
     </div>
   );

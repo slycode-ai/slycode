@@ -563,8 +563,9 @@ async function main(args) {
         }
         catch { /* config unreadable, proceed */ }
     }
-    // Check if directory exists and has content
-    if (fs.existsSync(resolvedDir)) {
+    // Check if directory exists and has content (validate before prompting)
+    const dirAlreadyExists = fs.existsSync(resolvedDir);
+    if (dirAlreadyExists) {
         const entries = fs.readdirSync(resolvedDir);
         if (entries.length > 0 && !entries.every(e => e.startsWith('.'))) {
             console.error(`  Error: ${resolvedDir} is not empty.`);
@@ -572,13 +573,23 @@ async function main(args) {
             process.exit(1);
         }
     }
-    else {
-        fs.mkdirSync(resolvedDir, { recursive: true });
-    }
-    // Interactive setup
+    // Create readline interface early — used for upfront confirmation and setup wizard
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     let answers;
     try {
+        // Upfront confirmation — verify the user is happy with the install location
+        if (!autoYes) {
+            const proceed = await promptYN(rl, 'Install SlyCode here?', true);
+            if (!proceed) {
+                console.log('  Cancelled.');
+                return;
+            }
+            console.log('');
+        }
+        // Create directory only after confirmation
+        if (!dirAlreadyExists) {
+            fs.mkdirSync(resolvedDir, { recursive: true });
+        }
         answers = await runSetup(rl, autoYes);
     }
     finally {
@@ -684,23 +695,59 @@ async function main(args) {
     console.log('  SlyCode is ready!');
     console.log('');
     if (targetDir !== '.') {
-        console.log(`  cd ${targetDir}`);
-    }
-    if (process.platform === 'win32') {
-        console.log('');
-        console.log('  ┌─────────────────────────────────────────────────────────┐');
-        console.log('  │  WINDOWS: Use npx to run SlyCode commands:             │');
-        console.log('  │                                                         │');
-        console.log('  │    npx slycode start       Start all services           │');
-        console.log('  │    npx slycode stop        Stop all services            │');
-        console.log('  │    npx slycode doctor      Check environment            │');
-        console.log('  │    npx slycode --help      See all commands             │');
-        console.log('  └─────────────────────────────────────────────────────────┘');
+        if (process.platform === 'win32') {
+            console.log('  ⚠  IMPORTANT: change into your workspace directory first:');
+            console.log('');
+            console.log(`     cd ${targetDir}`);
+            console.log('');
+            console.log('  Then run SlyCode commands:');
+            console.log('');
+            console.log('  ┌─────────────────────────────────────────────────────────┐');
+            console.log('  │  WINDOWS: Use npx to run SlyCode commands:             │');
+            console.log('  │                                                         │');
+            console.log('  │    npx slycode start       Start all services           │');
+            console.log('  │    npx slycode stop        Stop all services            │');
+            console.log('  │    npx slycode doctor      Check environment            │');
+            console.log('  │    npx slycode --help      See all commands             │');
+            console.log('  └─────────────────────────────────────────────────────────┘');
+        }
+        else if (process.platform === 'darwin') {
+            console.log('  ⚠  macOS: cd into your workspace before running slycode:');
+            console.log('');
+            console.log(`     cd ${targetDir}`);
+            console.log('     slycode start           Start all services');
+            console.log('');
+            console.log('  slycode doctor          Check environment');
+            console.log('  slycode --help          See all commands');
+        }
+        else {
+            console.log('  Next steps:');
+            console.log('');
+            console.log(`     cd ${targetDir}`);
+            console.log('     slycode start           Start all services');
+            console.log('');
+            console.log('  slycode doctor          Check environment');
+            console.log('  slycode --help          See all commands');
+        }
     }
     else {
-        console.log('  slycode start           Start all services');
-        console.log('  slycode doctor          Check environment');
-        console.log('  slycode --help          See all commands');
+        // Installed in current directory — no cd needed
+        if (process.platform === 'win32') {
+            console.log('');
+            console.log('  ┌─────────────────────────────────────────────────────────┐');
+            console.log('  │  WINDOWS: Use npx to run SlyCode commands:             │');
+            console.log('  │                                                         │');
+            console.log('  │    npx slycode start       Start all services           │');
+            console.log('  │    npx slycode stop        Stop all services            │');
+            console.log('  │    npx slycode doctor      Check environment            │');
+            console.log('  │    npx slycode --help      See all commands             │');
+            console.log('  └─────────────────────────────────────────────────────────┘');
+        }
+        else {
+            console.log('  slycode start           Start all services');
+            console.log('  slycode doctor          Check environment');
+            console.log('  slycode --help          See all commands');
+        }
     }
     console.log('');
 }

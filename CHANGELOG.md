@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.23] - 2026-04-09
+
+### Added
+- Show current git branch in the web dashboard and messaging responses
+- Changelog modal in the dashboard — view version history and what shipped in each release
+
+### Fixed
+- Preserve card fields when merging cards via drag-and-drop
+- Fix automation run notifications not being delivered via messaging
+
+### Changed
+- Clarify voice shortcut formatting in the tutorial template
+
 ## [0.2.22] - 2026-03-31
 
 ### Changed

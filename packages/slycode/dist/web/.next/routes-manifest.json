@@ -72,6 +72,12 @@
       "namedRegex": "^/api/areas(?:/)?$"
     },
     {
+      "page": "/api/changelog",
+      "regex": "^/api/changelog(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/changelog(?:/)?$"
+    },
+    {
       "page": "/api/cli-assets",
       "regex": "^/api/cli\\-assets(?:/)?$",
       "routeKeys": {},

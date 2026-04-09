@@ -114,6 +114,7 @@ export interface PersistedSession {
   model?: string;            // Model id the session was started with
   exitCode?: number;         // Last exit code (set by handlePtyExit)
   exitedAt?: string;         // When session last exited (ISO timestamp)
+  exitOutput?: string;       // Last ~20 lines of terminal output (ANSI-stripped, for snapshot diagnostics)
 }
 
 export interface PersistedState {
@@ -188,4 +189,48 @@ export interface BridgeStats {
   connectedClients: number;     // Total SSE/WS connections
   activelyWorking: number;      // Sessions with output in last 2s (sustained 1s+)
   sessions: SessionActivity[];  // Per-session activity info
+}
+
+// Cross-card prompt execution types
+
+export interface SubmitRequest {
+  prompt: string;
+  bracketedPaste?: boolean;  // default: true
+  force?: boolean;           // bypass lock + busy checks
+  callingSession?: string;   // session making this call (for depth tracking)
+}
+
+export interface SubmitResult {
+  success: boolean;
+  sessionStatus: SessionStatus;
+  isActive: boolean;
+  error?: string;
+  locked?: boolean;
+  busy?: boolean;
+}
+
+export interface SnapshotResult {
+  content: string;
+  lines: number;
+  lastOutputAt: string;
+}
+
+export interface ResponseEntry {
+  responseId: string;
+  callingSession: string;   // session name of the caller (for late injection)
+  targetSession: string;    // session name being prompted (for call locking)
+  data?: string;            // response data (set by respond)
+  status: 'pending' | 'received' | 'expired';
+  createdAt: number;        // Date.now() for TTL
+  callerTimedOut?: boolean; // set when caller stops polling
+}
+
+export interface RegisterResponseRequest {
+  responseId: string;
+  callingSession: string;
+  targetSession: string;
+}
+
+export interface DeliverResponseRequest {
+  data: string;
 }
