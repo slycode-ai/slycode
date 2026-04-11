@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.2.25",
+    "date": "2026-04-11",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Fix terminal classes not appearing in installed workspaces — seed from package template on sync/update"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix action updates not syncing to existing workspaces on slycode sync/update"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix package path mismatch in terminal-classes API fallback"
+      }
+    ]
+  },
+  {
     "version": "0.2.24",
     "date": "2026-04-11",
     "changes": [

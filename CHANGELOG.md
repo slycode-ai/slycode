@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.25] - 2026-04-11
+
+### Fixed
+- Fix terminal classes not appearing in installed workspaces — seed from package template on sync/update
+- Fix action updates not syncing to existing workspaces on slycode sync/update
+- Fix package path mismatch in terminal-classes API fallback
+
 ## [0.2.24] - 2026-04-11
 
 ### Added

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { resolveWorkspaceOrExit, getStateDir } from './workspace';
-import { refreshUpdates, refreshProviders, refreshTerminalClasses } from './sync';
+import { refreshUpdates, refreshActionUpdates, refreshProviders, refreshTerminalClasses } from './sync';
 import { SERVICES, detectRunMode } from '../platform/service-detect';
 import { linkClis } from '../platform/symlinks';
 
@@ -86,11 +86,22 @@ export async function update(_args: string[]): Promise<void> {
   // Step 1b: Re-link CLI commands to pick up updated binaries
   linkClis(workspace);
 
-  // Step 2: Refresh updates from new templates
+  // Step 2: Refresh skill updates from new templates
   const result = refreshUpdates(workspace);
   if (result.refreshed > 0) {
     console.log(`  Refreshed ${result.refreshed} skill update(s):`);
     for (const d of result.details) {
+      const label = d.from === '0.0.0' ? 'new' : `${d.from} → ${d.to}`;
+      console.log(`    ✓ ${d.name} (${label})`);
+    }
+    console.log('');
+  }
+
+  // Step 2a: Refresh action updates from new templates
+  const actionResult = refreshActionUpdates(workspace);
+  if (actionResult.refreshed > 0) {
+    console.log(`  Refreshed ${actionResult.refreshed} action update(s):`);
+    for (const d of actionResult.details) {
       const label = d.from === '0.0.0' ? 'new' : `${d.from} → ${d.to}`;
       console.log(`    ✓ ${d.name} (${label})`);
     }
@@ -133,6 +144,9 @@ export async function update(_args: string[]): Promise<void> {
   console.log(`SlyCode updated to v${version}.`);
   if (result.refreshed > 0) {
     console.log(`  ${result.refreshed} skill update(s) refreshed.`);
+  }
+  if (actionResult.refreshed > 0) {
+    console.log(`  ${actionResult.refreshed} action update(s) refreshed.`);
   }
   if (providersResult.updated) {
     console.log('  Providers refreshed.');

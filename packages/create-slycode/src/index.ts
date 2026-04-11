@@ -669,6 +669,16 @@ export async function main(args: string[]): Promise<void> {
     }
   }
 
+  // Seed terminal-classes.json from package templates
+  const tcTemplate = findTemplateFile(resolvedDir, 'terminal-classes.json');
+  if (tcTemplate) {
+    const tcDest = path.join(resolvedDir, 'documentation', 'terminal-classes.json');
+    if (!fs.existsSync(tcDest)) {
+      fs.mkdirSync(path.join(resolvedDir, 'documentation'), { recursive: true });
+      fs.copyFileSync(tcTemplate, tcDest);
+    }
+  }
+
   // Save workspace path to ~/.slycode/config.json
   try {
     const slycodeDir = path.join(require('os').homedir(), '.slycode');

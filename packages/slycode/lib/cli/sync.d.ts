@@ -14,6 +14,12 @@ export interface RefreshResult {
  */
 export declare function refreshUpdates(workspace: string): RefreshResult;
 /**
+ * Sync action updates from package templates/updates/actions/ to workspace updates/actions/.
+ * Uses content comparison — copies when file content differs or action is new.
+ * Removes workspace actions not in the package template (manifest is authoritative).
+ */
+export declare function refreshActionUpdates(workspace: string): RefreshResult;
+/**
  * Replace the providers block in workspace providers.json with the template version.
  * Preserves the defaults block (user preferences).
  */

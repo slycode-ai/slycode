@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.refreshUpdates = refreshUpdates;
+exports.refreshActionUpdates = refreshActionUpdates;
 exports.refreshProviders = refreshProviders;
 exports.refreshTerminalClasses = refreshTerminalClasses;
 exports.sync = sync;
@@ -116,6 +117,54 @@ function refreshUpdates(workspace) {
     return result;
 }
 /**
+ * Sync action updates from package templates/updates/actions/ to workspace updates/actions/.
+ * Uses content comparison — copies when file content differs or action is new.
+ * Removes workspace actions not in the package template (manifest is authoritative).
+ */
+function refreshActionUpdates(workspace) {
+    const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
+    if (!packageDir) {
+        return { refreshed: 0, removed: 0, skipped: 0, details: [] };
+    }
+    const templateActionsDir = path.join(packageDir, 'templates', 'updates', 'actions');
+    const workspaceActionsDir = path.join(workspace, 'updates', 'actions');
+    if (!fs.existsSync(templateActionsDir)) {
+        return { refreshed: 0, removed: 0, skipped: 0, details: [] };
+    }
+    fs.mkdirSync(workspaceActionsDir, { recursive: true });
+    const result = { refreshed: 0, removed: 0, skipped: 0, details: [] };
+    const templateActions = fs.readdirSync(templateActionsDir)
+        .filter(f => f.endsWith('.md'));
+    // Remove workspace actions not in the template
+    const templateSet = new Set(templateActions);
+    for (const file of fs.readdirSync(workspaceActionsDir)) {
+        if (file.endsWith('.md') && !templateSet.has(file)) {
+            fs.unlinkSync(path.join(workspaceActionsDir, file));
+            result.removed++;
+        }
+    }
+    for (const file of templateActions) {
+        const templatePath = path.join(templateActionsDir, file);
+        const workspacePath = path.join(workspaceActionsDir, file);
+        const name = file.replace(/\.md$/, '');
+        const templateContent = fs.readFileSync(templatePath, 'utf-8');
+        const workspaceContent = fs.existsSync(workspacePath)
+            ? fs.readFileSync(workspacePath, 'utf-8')
+            : '';
+        if (templateContent !== workspaceContent) {
+            fs.copyFileSync(templatePath, workspacePath);
+            const templateVersion = parseVersion(templatePath);
+            const workspaceVersion = workspaceContent ? parseVersion(workspacePath) : '0.0.0';
+            result.refreshed++;
+            result.details.push({ name, from: workspaceVersion, to: templateVersion });
+        }
+        else {
+            result.skipped++;
+        }
+    }
+    return result;
+}
+/**
  * Replace the providers block in workspace providers.json with the template version.
  * Preserves the defaults block (user preferences).
  */
@@ -167,20 +216,30 @@ function refreshTerminalClasses(workspace) {
 }
 async function sync(_args) {
     const workspace = (0, workspace_1.resolveWorkspaceOrExit)();
-    console.log('Refreshing skill updates...');
+    console.log('Refreshing updates...');
     console.log(`  Workspace: ${workspace}`);
     console.log('');
-    const result = refreshUpdates(workspace);
-    if (result.refreshed === 0) {
+    const skillResult = refreshUpdates(workspace);
+    if (skillResult.refreshed === 0) {
         console.log('All skill updates are current.');
     }
     else {
-        for (const d of result.details) {
+        for (const d of skillResult.details) {
             const label = d.from === '0.0.0' ? 'new' : `${d.from} → ${d.to}`;
             console.log(`  ✓ ${d.name} (${label})`);
         }
-        console.log('');
-        console.log(`Refreshed ${result.refreshed} skill update(s).`);
+        console.log(`Refreshed ${skillResult.refreshed} skill update(s).`);
+    }
+    const actionResult = refreshActionUpdates(workspace);
+    if (actionResult.refreshed === 0) {
+        console.log('All action updates are current.');
+    }
+    else {
+        for (const d of actionResult.details) {
+            const label = d.from === '0.0.0' ? 'new' : `${d.from} → ${d.to}`;
+            console.log(`  ✓ ${d.name} (${label})`);
+        }
+        console.log(`Refreshed ${actionResult.refreshed} action update(s).`);
     }
     // Seed terminal-classes.json if missing
     const tcResult = refreshTerminalClasses(workspace);
