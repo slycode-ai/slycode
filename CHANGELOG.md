@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.27] - 2026-04-11
+
+### Fixed
+- Fix static assets (JS/CSS) not loading in standalone web server build
+
 ## [0.2.26] - 2026-04-11
 
 ### Changed

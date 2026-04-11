@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.2.27",
+    "date": "2026-04-11",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Fix static assets (JS/CSS) not loading in standalone web server build"
+      }
+    ]
+  },
+  {
     "version": "0.2.26",
     "date": "2026-04-11",
     "changes": [
