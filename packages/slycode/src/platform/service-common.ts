@@ -18,6 +18,9 @@ export function resolveEntryPoint(service: string, workspace: string): string {
   const entryFile = service === 'web' ? 'server.js' : 'index.js';
 
   if (distDir) {
+    // Standalone Next.js output nests under web/web/ due to outputFileTracingRoot
+    const webPath = service === 'web' ? path.join(distDir, 'web', 'web', entryFile) : null;
+    if (webPath && fs.existsSync(webPath)) return webPath;
     const distPath = path.join(distDir, service, entryFile);
     if (fs.existsSync(distPath)) return distPath;
   }

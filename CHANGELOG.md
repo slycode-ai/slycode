@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.26] - 2026-04-11
+
+### Changed
+- Hardened export pipeline and safety checks for more thorough file validation
+
 ## [0.2.25] - 2026-04-11
 
 ### Fixed

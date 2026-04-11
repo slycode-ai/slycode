@@ -304,8 +304,9 @@ export async function start(_args: string[]): Promise<void> {
       port: config.ports.web,
       bindHost: host,
       // Standalone Next.js server or dev server
+      // Standalone output nests under web/web/ due to outputFileTracingRoot
       entryPoint: distDir
-        ? path.join(distDir, 'web', 'server.js')
+        ? path.join(distDir, 'web', 'web', 'server.js')
         : path.join(workspace, 'web', 'node_modules', '.bin', 'next'),
       extraEnv: {
         HOSTNAME: host,

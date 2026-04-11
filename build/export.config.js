@@ -68,6 +68,10 @@ module.exports = {
     '**/.env.*',
     '**/.env.example',
 
+    // Personal data that must never ship
+    '**/projects/registry.json',
+    '**/projects/registry.md',
+
     // Runtime state and logs (anywhere)
     '**/nohup.out',
     '**/bridge-sessions.json',

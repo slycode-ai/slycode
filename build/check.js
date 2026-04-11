@@ -129,21 +129,24 @@ const checks = [
   {
     name: 'No project registry with personal paths',
     run() {
-      const registryMd = path.join(PUB_ROOT, 'projects', 'registry.md');
-      if (fs.existsSync(registryMd)) {
-        return { status: 'fail', message: 'projects/registry.md exists — personal project list!' };
+      // Search recursively — Next.js standalone can bundle registry into dist/web/
+      const registryMdFiles = findFiles('**/registry.md', PUB_ROOT);
+      const projectRegistryMd = registryMdFiles.filter((f) => f.includes('projects/'));
+      if (projectRegistryMd.length > 0) {
+        return { status: 'fail', message: `Project registry found: ${projectRegistryMd.join(', ')}` };
       }
 
-      const registryJson = path.join(PUB_ROOT, 'projects', 'registry.json');
-      if (fs.existsSync(registryJson)) {
+      const registryJsonFiles = findFiles('**/registry.json', PUB_ROOT);
+      for (const relPath of registryJsonFiles) {
         try {
-          const content = JSON.parse(fs.readFileSync(registryJson, 'utf-8'));
+          const fullPath = path.join(PUB_ROOT, relPath);
+          const content = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
           const projects = content.projects || [];
           const hasPersonalPaths = projects.some(
             (p) => p.path && (p.path.includes('/home/') || p.path.includes('/Users/'))
           );
           if (hasPersonalPaths) {
-            return { status: 'fail', message: 'projects/registry.json contains personal paths!' };
+            return { status: 'fail', message: `${relPath} contains personal paths!` };
           }
         } catch {
           // Can't parse — allow it
