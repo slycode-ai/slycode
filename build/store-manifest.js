@@ -17,6 +17,8 @@ module.exports = {
   ],
   actions: [
     'approve',
+    'challenge',
+    'challenge-implementation',
     'checkpoint',
     'chore',
     'configure-commands',
@@ -38,6 +40,4 @@ module.exports = {
     'test-review',
     'update-priming',
   ],
-  agents: [],
-  mcp: [],
 };

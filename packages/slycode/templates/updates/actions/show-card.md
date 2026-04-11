@@ -8,10 +8,10 @@ placement: both
 scope: global
 classes:
   backlog: 30
-  design: 80
+  design: 90
   done: 40
   implementation: 70
-  testing: 70
+  testing: 80
 ---
 
 Show the full details of this card:

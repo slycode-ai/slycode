@@ -49,7 +49,7 @@ const SCAFFOLD_GROUPS = [
     id: 'project-mgmt',
     name: 'Project Management',
     description: 'Task tracking, event history, and archiving',
-    staticItems: ['documentation/kanban.json', 'documentation/events.json', 'documentation/archive'],
+    staticItems: ['documentation/kanban.json', 'documentation/events.json', 'documentation/terminal-classes.json', 'documentation/archive'],
   },
   {
     id: 'documentation',
@@ -415,6 +415,11 @@ function analyzeDirectory(targetPath, providers) {
     status: fileExists(path.join(targetPath, 'documentation', 'events.json')) ? 'present' : 'missing',
     group: 'project-mgmt',
   });
+  items.push({
+    path: 'documentation/terminal-classes.json',
+    status: fileExists(path.join(targetPath, 'documentation', 'terminal-classes.json')) ? 'present' : 'missing',
+    group: 'project-mgmt',
+  });
 
   // Check config files
   items.push({
@@ -742,6 +747,40 @@ function runCreate(args) {
       ensureDir(path.join(targetPath, 'documentation'));
       fs.writeFileSync(eventsPath, '[]\n', 'utf-8');
       results.push({ action: 'created', path: 'documentation/events.json', group: 'project-mgmt' });
+    }
+  }
+
+  // Step 5c: Create terminal-classes.json (skip if exists)
+  if (shouldProcess('documentation/terminal-classes.json')) {
+    const tcPath = path.join(targetPath, 'documentation', 'terminal-classes.json');
+    if (fs.existsSync(tcPath)) {
+      results.push({ action: 'skipped', path: 'documentation/terminal-classes.json (already exists)', group: 'project-mgmt' });
+    } else {
+      ensureDir(path.join(targetPath, 'documentation'));
+      // Try to copy from package templates, fall back to a minimal default
+      const templatePath = path.join(TEMPLATES_DIR, 'terminal-classes.json');
+      if (fs.existsSync(templatePath)) {
+        fs.copyFileSync(templatePath, tcPath);
+      } else {
+        // Minimal default with standard terminal classes
+        const defaultClasses = {
+          $schema: './terminal-classes.schema.json',
+          version: '1.0',
+          classes: [
+            { id: 'global-terminal', name: 'Global Terminal', description: 'Terminal on the dashboard screen' },
+            { id: 'project-terminal', name: 'Project Terminal', description: 'Terminal panel at the bottom of a project view' },
+            { id: 'backlog', name: 'Backlog', description: 'Card terminals in the Backlog stage' },
+            { id: 'design', name: 'Design', description: 'Card terminals in the Design stage' },
+            { id: 'implementation', name: 'Implementation', description: 'Card terminals in the Implementation stage' },
+            { id: 'testing', name: 'Testing', description: 'Card terminals in the Testing stage' },
+            { id: 'done', name: 'Done', description: 'Card terminals in the Done stage' },
+            { id: 'automation', name: 'Automation', description: 'Card terminals for automation cards' },
+            { id: 'action-assistant', name: 'Action Assistant', description: 'AI assistant in the Sly Action Configuration modal' },
+          ],
+        };
+        fs.writeFileSync(tcPath, JSON.stringify(defaultClasses, null, 2) + '\n', 'utf-8');
+      }
+      results.push({ action: 'created', path: 'documentation/terminal-classes.json', group: 'project-mgmt' });
     }
   }
 

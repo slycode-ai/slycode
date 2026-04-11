@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.refreshUpdates = refreshUpdates;
 exports.refreshProviders = refreshProviders;
+exports.refreshTerminalClasses = refreshTerminalClasses;
 exports.sync = sync;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -145,6 +146,25 @@ function refreshProviders(workspace) {
         return { updated: false };
     }
 }
+/**
+ * Seed terminal-classes.json from package templates if missing in workspace.
+ * This ensures existing installations get the file on first sync/update.
+ */
+function refreshTerminalClasses(workspace) {
+    const workspaceFile = path.join(workspace, 'documentation', 'terminal-classes.json');
+    if (fs.existsSync(workspaceFile)) {
+        return { seeded: false };
+    }
+    const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
+    if (!packageDir)
+        return { seeded: false };
+    const templateFile = path.join(packageDir, 'templates', 'terminal-classes.json');
+    if (!fs.existsSync(templateFile))
+        return { seeded: false };
+    fs.mkdirSync(path.join(workspace, 'documentation'), { recursive: true });
+    fs.copyFileSync(templateFile, workspaceFile);
+    return { seeded: true };
+}
 async function sync(_args) {
     const workspace = (0, workspace_1.resolveWorkspaceOrExit)();
     console.log('Refreshing skill updates...');
@@ -161,6 +181,11 @@ async function sync(_args) {
         }
         console.log('');
         console.log(`Refreshed ${result.refreshed} skill update(s).`);
+    }
+    // Seed terminal-classes.json if missing
+    const tcResult = refreshTerminalClasses(workspace);
+    if (tcResult.seeded) {
+        console.log('  ✓ Seeded terminal-classes.json');
     }
 }
 //# sourceMappingURL=sync.js.map

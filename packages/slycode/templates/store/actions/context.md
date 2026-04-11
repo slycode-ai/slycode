@@ -8,11 +8,11 @@ placement: both
 scope: global
 classes:
   backlog: 20
-  design: 90
+  design: 100
   done: 30
   implementation: 60
   project-terminal: 10
-  testing: 60
+  testing: 70
 ---
 
 {{cardContext}}

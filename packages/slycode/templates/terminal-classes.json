@@ -1,0 +1,51 @@
+{
+  "$schema": "./terminal-classes.schema.json",
+  "version": "1.0",
+  "classes": [
+    {
+      "id": "global-terminal",
+      "name": "Global Terminal",
+      "description": "Terminal on the dashboard screen"
+    },
+    {
+      "id": "project-terminal",
+      "name": "Project Terminal",
+      "description": "Terminal panel at the bottom of a project view"
+    },
+    {
+      "id": "backlog",
+      "name": "Backlog",
+      "description": "Card terminals in the Backlog stage"
+    },
+    {
+      "id": "design",
+      "name": "Design",
+      "description": "Card terminals in the Design stage"
+    },
+    {
+      "id": "implementation",
+      "name": "Implementation",
+      "description": "Card terminals in the Implementation stage"
+    },
+    {
+      "id": "testing",
+      "name": "Testing",
+      "description": "Card terminals in the Testing stage"
+    },
+    {
+      "id": "done",
+      "name": "Done",
+      "description": "Card terminals in the Done stage"
+    },
+    {
+      "id": "automation",
+      "name": "Automation",
+      "description": "Card terminals for automation cards"
+    },
+    {
+      "id": "action-assistant",
+      "name": "Action Assistant",
+      "description": "AI assistant in the Sly Action Configuration modal"
+    }
+  ]
+}

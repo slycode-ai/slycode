@@ -7,11 +7,11 @@ group: "Session"
 placement: startup
 scope: global
 classes:
-  design: 50
+  design: 60
   done: 20
   implementation: 50
   project-terminal: 30
-  testing: 50
+  testing: 60
 ---
 
 {{cardContext}}

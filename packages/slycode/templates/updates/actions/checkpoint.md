@@ -7,7 +7,7 @@ group: "Utilities"
 placement: both
 scope: global
 classes:
-  design: 60
+  design: 70
   implementation: 30
   project-terminal: 60
 ---

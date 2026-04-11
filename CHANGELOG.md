@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.24] - 2026-04-11
+
+### Added
+- Seed terminal-classes.json on sync and update for existing workspaces
+- Cross-agent challenge actions: send designs or implementations to another AI provider for adversarial review
+
+### Changed
+- Scaffold includes terminal-classes.json in new projects
+- Terminal classes API hardening and error handling
+
+### Fixed
+- Minor action priority and metadata fixes across store actions
+
 ## [0.2.23] - 2026-04-09
 
 ### Added

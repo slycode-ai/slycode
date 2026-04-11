@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { resolveWorkspaceOrExit, getStateDir } from './workspace';
-import { refreshUpdates, refreshProviders } from './sync';
+import { refreshUpdates, refreshProviders, refreshTerminalClasses } from './sync';
 import { SERVICES, detectRunMode } from '../platform/service-detect';
 import { linkClis } from '../platform/symlinks';
 
@@ -104,6 +104,13 @@ export async function update(_args: string[]): Promise<void> {
     console.log('');
   }
 
+  // Step 2c: Seed terminal-classes.json if missing
+  const tcResult = refreshTerminalClasses(workspace);
+  if (tcResult.seeded) {
+    console.log('  ✓ Seeded terminal-classes.json');
+    console.log('');
+  }
+
   // Step 3: Restart services using the detected run mode
   if (runMode !== 'none') {
     switch (runMode) {
@@ -129,6 +136,9 @@ export async function update(_args: string[]): Promise<void> {
   }
   if (providersResult.updated) {
     console.log('  Providers refreshed.');
+  }
+  if (tcResult.seeded) {
+    console.log('  Terminal classes seeded.');
   }
   if (runMode !== 'none') {
     console.log(`  Services restarted (${runMode}).`);

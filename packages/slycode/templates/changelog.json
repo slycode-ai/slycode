@@ -1,5 +1,31 @@
 [
   {
+    "version": "0.2.24",
+    "date": "2026-04-11",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "Seed terminal-classes.json on sync and update for existing workspaces"
+      },
+      {
+        "type": "improvement",
+        "description": "Scaffold includes terminal-classes.json in new projects"
+      },
+      {
+        "type": "improvement",
+        "description": "Terminal classes API hardening and error handling"
+      },
+      {
+        "type": "bugfix",
+        "description": "Minor action priority and metadata fixes across store actions"
+      },
+      {
+        "type": "feature",
+        "description": "Cross-agent challenge actions: send designs or implementations to another AI provider for adversarial review"
+      }
+    ]
+  },
+  {
     "version": "0.2.23",
     "date": "2026-04-09",
     "changes": [

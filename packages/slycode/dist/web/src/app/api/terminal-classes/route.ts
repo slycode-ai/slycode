@@ -1,10 +1,27 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
-import { getSlycodeRoot } from '@/lib/paths';
+import { getSlycodeRoot, getPackageDir } from '@/lib/paths';
 
 function getClassesFile(): string {
   return path.join(getSlycodeRoot(), 'documentation', 'terminal-classes.json');
+}
+
+/**
+ * Find the terminal-classes.json template from the package.
+ * In prod: node_modules/@slycode/slycode/dist/templates/terminal-classes.json
+ * In dev: falls back to documentation/terminal-classes.json at repo root
+ */
+function getPackageTemplate(): string | null {
+  const pkgDir = getPackageDir();
+  // Prod: check templates/ in the package dist
+  const templatePath = path.join(pkgDir, 'templates', 'terminal-classes.json');
+  if (fsSync.existsSync(templatePath)) return templatePath;
+  // Dev fallback: the source file at repo root
+  const devPath = path.join(getSlycodeRoot(), 'documentation', 'terminal-classes.json');
+  if (fsSync.existsSync(devPath)) return devPath;
+  return null;
 }
 
 export interface TerminalClass {
@@ -20,12 +37,34 @@ export interface TerminalClassesConfig {
 }
 
 export async function GET() {
+  const classesFile = getClassesFile();
+
   try {
-    const content = await fs.readFile(getClassesFile(), 'utf-8');
+    const content = await fs.readFile(classesFile, 'utf-8');
     const config: TerminalClassesConfig = JSON.parse(content);
     return NextResponse.json(config);
-  } catch (_err) {
-    // Return empty config if file doesn't exist
+  } catch {
+    // Workspace file missing — try to seed from package template
+    const templatePath = getPackageTemplate();
+    if (templatePath) {
+      try {
+        const templateContent = await fs.readFile(templatePath, 'utf-8');
+        const config: TerminalClassesConfig = JSON.parse(templateContent);
+
+        // Auto-seed to workspace so future reads don't need the fallback
+        try {
+          await fs.mkdir(path.dirname(classesFile), { recursive: true });
+          await fs.writeFile(classesFile, templateContent);
+        } catch {
+          // Seed failed (read-only fs, etc.) — still serve the template
+        }
+
+        return NextResponse.json(config);
+      } catch {
+        // Template unreadable — fall through to empty
+      }
+    }
+
     return NextResponse.json({
       version: '1.0',
       classes: [],

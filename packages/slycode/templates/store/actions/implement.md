@@ -7,7 +7,7 @@ group: "Card Actions"
 placement: both
 scope: global
 classes:
-  design: 70
+  design: 80
   implementation: 10
 ---
 

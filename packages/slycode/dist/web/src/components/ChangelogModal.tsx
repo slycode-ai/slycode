@@ -41,7 +41,6 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
   // Fetch changelog on mount
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     fetch('/api/changelog')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);

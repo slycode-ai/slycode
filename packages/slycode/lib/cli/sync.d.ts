@@ -20,5 +20,12 @@ export declare function refreshUpdates(workspace: string): RefreshResult;
 export declare function refreshProviders(workspace: string): {
     updated: boolean;
 };
+/**
+ * Seed terminal-classes.json from package templates if missing in workspace.
+ * This ensures existing installations get the file on first sync/update.
+ */
+export declare function refreshTerminalClasses(workspace: string): {
+    seeded: boolean;
+};
 export declare function sync(_args: string[]): Promise<void>;
 //# sourceMappingURL=sync.d.ts.map

@@ -32,12 +32,12 @@ export async function GET() {
       const raw = readFileSync(p, 'utf-8');
       const data = JSON.parse(raw);
       if (!Array.isArray(data)) {
-        // Malformed shape — fall through to empty
+        console.warn(`[changelog] ${p}: root is not an array, skipping`);
         continue;
       }
       return NextResponse.json(data as ChangelogVersion[]);
-    } catch {
-      // Malformed JSON — fall through to next candidate or empty
+    } catch (err) {
+      console.warn(`[changelog] ${p}: failed to parse:`, err instanceof Error ? err.message : err);
     }
   }
 

@@ -137,6 +137,12 @@ async function update(_args) {
         console.log('  ✓ Providers updated');
         console.log('');
     }
+    // Step 2c: Seed terminal-classes.json if missing
+    const tcResult = (0, sync_1.refreshTerminalClasses)(workspace);
+    if (tcResult.seeded) {
+        console.log('  ✓ Seeded terminal-classes.json');
+        console.log('');
+    }
     // Step 3: Restart services using the detected run mode
     if (runMode !== 'none') {
         switch (runMode) {
@@ -170,6 +176,9 @@ async function update(_args) {
     }
     if (providersResult.updated) {
         console.log('  Providers refreshed.');
+    }
+    if (tcResult.seeded) {
+        console.log('  Terminal classes seeded.');
     }
     if (runMode !== 'none') {
         console.log(`  Services restarted (${runMode}).`);

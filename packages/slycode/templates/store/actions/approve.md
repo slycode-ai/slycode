@@ -7,7 +7,7 @@ group: "Card Actions"
 placement: both
 scope: global
 classes:
-  testing: 30
+  testing: 40
 ---
 
 {{cardContext}}

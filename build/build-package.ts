@@ -262,6 +262,15 @@ function copyTemplates(): void {
     console.warn('  ! updates/actions/ not found — skipping');
   }
 
+  // Terminal classes — ships as a template for scaffold seeding and update delivery
+  const terminalClassesSrc = path.join(ROOT, 'documentation', 'terminal-classes.json');
+  if (fs.existsSync(terminalClassesSrc)) {
+    fs.copyFileSync(terminalClassesSrc, path.join(TEMPLATES_DIR, 'terminal-classes.json'));
+    console.log('  \u2713 terminal-classes.json');
+  } else {
+    console.warn('  ! documentation/terminal-classes.json not found — skipping');
+  }
+
   // Data templates — sourced from scaffold-templates/, NOT data/.
   // The scaffold-templates/ versions are the blessed defaults for new workspaces.
   // Your working data/ copies may have local changes you don't want to propagate.
