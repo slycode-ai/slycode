@@ -4,10 +4,10 @@ import path from 'path';
 import os from 'os';
 /**
  * Get the Claude projects directory path for a given working directory.
- * Claude transforms /path/to/project into ~/.claude/projects/-path-to-project/
- * On Linux: forward slashes and underscores become hyphens.
- * On Windows: backslashes, colons, forward slashes, and underscores become hyphens.
- *   e.g. D:\Dev\Projects\slycode -> D--Dev-Projects-slycode
+ * Claude CLI replaces every non-alphanumeric character (except hyphens) with a
+ * hyphen, preserving case. e.g.:
+ *   /home/user/my.project   -> -home-user-my-project
+ *   D:\Dev\wondrs.com.au    -> D--Dev-wondrs-com-au
  *
  * IMPORTANT: Resolve symlinks before transforming, because Claude CLI uses
  * realpathSync internally. Without this, a symlinked CWD (e.g. /home/user/link
@@ -17,7 +17,7 @@ import os from 'os';
 export function getClaudeProjectDir(cwd) {
     const claudeBase = path.join(os.homedir(), '.claude', 'projects');
     const resolvedCwd = realpathSync(cwd);
-    const transformedPath = resolvedCwd.replace(/[\\/:_]/g, '-');
+    const transformedPath = resolvedCwd.replace(/[^a-zA-Z0-9-]/g, '-');
     return path.join(claudeBase, transformedPath);
 }
 /**

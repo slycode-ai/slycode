@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.29] - 2026-04-13
+
+### Fixed
+- Fix Claude session path transform to replace all non-alphanumeric characters (fixes session resume with dotted project names)
+
+### Changed
+- Simplified challenge and challenge-implementation actions (v1.1.0)
+
 ## [0.2.28] - 2026-04-13
 
 ### Fixed
