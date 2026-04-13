@@ -36,7 +36,7 @@ export async function convertToOgg(mp3Buffer) {
             '-b:a', '64k', // Bitrate
             '-f', 'ogg', // OGG container
             'pipe:1', // Write to stdout
-        ], { stdio: ['pipe', 'pipe', 'pipe'] });
+        ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         const chunks = [];
         ffmpeg.stdout.on('data', (chunk) => chunks.push(chunk));
         ffmpeg.stderr.on('data', () => { }); // Suppress ffmpeg stderr

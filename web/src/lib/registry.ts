@@ -80,6 +80,7 @@ function getUncommittedCount(projectPath: string): number {
       cwd: projectPath,
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     });
     return output.split('\n').filter(line => line.trim().length > 0).length;
   } catch {

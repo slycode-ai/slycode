@@ -60,6 +60,7 @@ function startService(
     cwd: workspace,
     stdio: ['ignore', logStream, logStream],
     detached: true,
+    windowsHide: true,
   });
 
   child.unref();

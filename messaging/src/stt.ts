@@ -74,6 +74,7 @@ function transcribeLocal(filePath: string, cliPath: string, modelPath: string): 
   try {
     execFileSync('ffmpeg', ['-i', filePath, '-ar', '16000', '-ac', '1', '-y', wavPath], {
       stdio: 'pipe',
+      windowsHide: true,
     });
   } catch (err) {
     throw new Error(`ffmpeg conversion failed. Is ffmpeg installed? ${(err as Error).message}`);
@@ -85,6 +86,7 @@ function transcribeLocal(filePath: string, cliPath: string, modelPath: string): 
       stdio: 'pipe',
       encoding: 'utf-8',
       timeout: 120_000, // 2 minute timeout for long clips
+      windowsHide: true,
     });
 
     // whisper-cli prints transcription to stdout

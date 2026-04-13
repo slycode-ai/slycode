@@ -23,6 +23,7 @@ export declare class ResponseStore {
      * Returns the entry so the caller can check if late injection is needed.
      */
     deliver(responseId: string, data: string): ResponseEntry | null;
+    onResponseDelivered: ((targetSession: string) => void) | null;
     /**
      * Mark that the caller has timed out and stopped polling.
      * Late responses should be injected into the calling session's PTY.

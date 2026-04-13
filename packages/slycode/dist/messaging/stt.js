@@ -63,6 +63,7 @@ function transcribeLocal(filePath, cliPath, modelPath) {
     try {
         execFileSync('ffmpeg', ['-i', filePath, '-ar', '16000', '-ac', '1', '-y', wavPath], {
             stdio: 'pipe',
+            windowsHide: true,
         });
     }
     catch (err) {
@@ -74,6 +75,7 @@ function transcribeLocal(filePath, cliPath, modelPath) {
             stdio: 'pipe',
             encoding: 'utf-8',
             timeout: 120_000, // 2 minute timeout for long clips
+            windowsHide: true,
         });
         // whisper-cli prints transcription to stdout
         return output.trim();

@@ -610,6 +610,7 @@ async function main(args) {
         (0, child_process_1.execSync)('npm install', {
             cwd: resolvedDir,
             stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
         });
         console.log('  \u2713 Dependencies installed');
     }
@@ -692,6 +693,7 @@ async function main(args) {
                 (0, child_process_1.execSync)('npx slycode service install', {
                     cwd: resolvedDir,
                     stdio: 'inherit',
+                    windowsHide: true,
                 });
             }
         }

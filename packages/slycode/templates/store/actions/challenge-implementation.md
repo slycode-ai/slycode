@@ -1,6 +1,6 @@
 ---
 name: challenge-implementation
-version: 1.0.0
+version: 1.1.0
 label: "Challenge Impl"
 description: "Send implementation to another AI provider for adversarial code review and methodology analysis"
 group: "Card Actions"
@@ -10,140 +10,100 @@ classes:
   testing: 30
 ---
 
-{{cardContext}}
-
----
-
 ## Your Task — Challenge Implementation
 
-You are initiating a **cross-agent implementation challenge** for card `{{card.id}}`. The goal is to send the completed implementation to a different AI provider for adversarial code review and methodology analysis, then synthesize their feedback.
+Send the completed implementation for card `{{card.id}}` to a different AI provider for adversarial code review and methodology analysis, then synthesize their feedback.
 
 ---
 
-### Phase 1 — Gather Context
+### Phase 1 — Determine Target Provider and Send
 
-1. **Read the full card details** (notes, problems, checklist):
-   ```bash
-   sly-kanban show {{card.id}}
-   ```
+**Use what you already have.** You most likely already have the card details, code, design docs, and implementation context from the current session. Don't re-read or re-fetch unless you genuinely lack something. If you do need card details, run `sly-kanban show {{card.id}}`.
 
-2. **Prime area context** — use `/context-priming` with the card's **Areas** to understand the codebase architecture and patterns.
+**Pick the target provider** (must be different from yourself):
+- **Claude** → send to `codex`
+- **Codex** → send to `claude`
+- **Gemini** → try `claude` first; if that fails, try `codex`
 
-3. **Read the design document** (if linked):
-   {{#if card.design_ref}}
-   Read `{{card.design_ref}}`
-   {{/if}}
-
-4. **Read the feature spec** (if linked):
-   {{#if card.feature_ref}}
-   Read `{{card.feature_ref}}`
-   {{/if}}
-
-5. **Identify the changed files** — use git to find what was changed for this card:
-   ```bash
-   git log --oneline --all | head -20
-   ```
-   Look at recent commits related to this card's work. Read the key files that were added or modified.
-
-6. **Read all card notes** — these contain implementation context and prior agent observations.
-
----
-
-### Phase 2 — Determine Target Provider
-
-Send the challenge to a **different** provider than yourself.
-
-- If you are **Claude** → send to `codex`
-- If you are **Codex** → send to `claude`
-- If you are **Gemini** → try `claude` first; if that fails, try `codex`
-
-To determine who you are: Claude models start with "claude-", Codex/OpenAI models are o3, o4-mini, codex-mini, etc., Gemini models start with "gemini-".
-
----
-
-### Phase 3 — Prepare and Send
-
-Before sending, optionally add a context note:
-
+**Optionally** add a context note before sending:
 ```bash
 sly-kanban notes {{card.id}} add "Implementation challenge context: <summary of what was built, key files, architectural decisions>" --agent "<your-provider-name>"
 ```
 
-Now construct a detailed prompt for the other agent. The prompt must include:
+**Construct a prompt** for the other agent that includes:
+1. The design document / feature spec content (paste inline) so they know the intent
+2. The key implementation code — paste the actual source of the most important changed/added files (core logic, not boilerplate)
+3. A file list of everything that was changed, so they can request more if needed
+4. Key notes or decisions from the card that explain why things were done a certain way
+5. Clear instructions asking them to review:
 
-1. **The design document content** (paste inline) so they know what was intended
-2. **The feature spec content** if one exists (paste inline)
-3. **The key implementation files** — paste the actual code of the most important changed/added files. Focus on the core logic, not boilerplate.
-4. **A file list** of everything that was changed, so they can request more if needed
-5. **Key notes from the card** that explain decisions made during implementation
-6. **Clear instructions** asking the other agent to:
+   **Code Quality:**
+   - Bugs, logic errors, edge cases
+   - Error handling and failure modes
+   - Security concerns (injection, XSS, auth gaps, data leaks)
+   - Performance (unnecessary loops, missing caching, N+1 queries, memory leaks)
+   - Naming, structure, readability
 
-   **Code Quality Review:**
-   - Analyse the code for bugs, logic errors, and edge cases
-   - Evaluate error handling and failure modes
-   - Check for security concerns (injection, XSS, auth gaps, data leaks)
-   - Assess performance — unnecessary loops, missing caching, N+1 queries, memory leaks
-   - Review naming, structure, and readability
-
-   **Methodology Review:**
+   **Methodology:**
    - Does the implementation match the design intent? Any drift?
-   - Are the chosen patterns and abstractions appropriate?
-   - Is there unnecessary complexity that could be simplified?
-   - Are there better approaches that would achieve the same goals?
-   - Is the code testable? Are there untested critical paths?
-   - Does it follow the existing codebase conventions?
+   - Are the patterns and abstractions appropriate?
+   - Unnecessary complexity that could be simplified?
+   - Better approaches that achieve the same goals?
+   - Testability and untested critical paths
+   - Adherence to existing codebase conventions
 
-   **Perspective Analysis:**
-   - Review from the perspective of a future maintainer reading this code for the first time
-   - Consider what happens when requirements change — how rigid or flexible is this?
-   - Think about what could go wrong in production under real usage patterns
+   **Perspective:**
+   - Future maintainer reading this for the first time
+   - What happens when requirements change — how rigid or flexible?
+   - What could go wrong in production under real usage
 
    - Use `sly-kanban respond <response-id> "..."` to send back a structured response
 
-**Send the prompt:**
-
+**Send immediately:**
 ```bash
 sly-kanban prompt {{card.id}} "<your constructed prompt>" --provider <target-provider> --wait --timeout 180
 ```
 
-Use `--timeout 180` (3 minutes). Do **not** use `--fresh`.
+Do **not** use `--fresh` unless the user explicitly asks for it. Send to the existing session.
 
 If the prompt times out, tell the user you're waiting — the response will arrive asynchronously.
 
 ---
 
-### Phase 4 — Synthesize Feedback
+### Phase 2 — Synthesize Feedback
+
+**IMPORTANT: Do NOT make any code changes based on the feedback without the user's approval.** You may agree with findings and log problems, but all actual code modifications must be presented to the user first with a clear explanation of what you'd change and why. Wait for their go-ahead before touching any files.
 
 When the response arrives, critically evaluate each point:
 
 1. **Categorise each finding** as:
-   - **Valid bug/issue** — real problem that should be fixed before approval
-   - **Valid improvement** — correct observation, worth doing but not blocking
-   - **Disagree** — you believe the implementation is correct, explain why
+   - **Valid bug/issue** — real problem, should be fixed before approval
+   - **Valid improvement** — worth doing but not blocking
+   - **Disagree** — implementation is correct, explain why
    - **Needs discussion** — legitimate trade-off, user should decide
 
-2. **For valid bugs**: Fix them immediately or log as problems:
+2. **For valid bugs**: Log as problems (do NOT fix yet):
    ```bash
    sly-kanban problem {{card.id}} add "description" --severity <minor|major|critical>
    ```
 
-3. **For valid improvements**: Propose the changes. If they're small, offer to make them now.
-
+3. **For valid improvements**: Describe the proposed change and why it's worthwhile.
 4. **For disagreements**: Explain your reasoning clearly.
-
 5. **For ambiguous points**: Present both perspectives and ask the user.
 
-6. **Add a summary note** to the card:
+6. **Add a summary note**:
    ```bash
-   sly-kanban notes {{card.id}} add "Implementation challenge complete: <N> bugs found, <N> improvements suggested, <N> disagreements, <N> need user input." --agent "<your-provider-name>"
+   sly-kanban notes {{card.id}} add "Implementation challenge complete: <N> bugs, <N> improvements, <N> disagreements, <N> need user input." --agent "<your-provider-name>"
    ```
 
-7. **Present the synthesis to the user** with:
-   - Any bugs that need fixing (blockers for approval)
-   - Improvements worth making (non-blocking)
+7. **Present the full synthesis to the user** with:
+   - Bugs found — what they are, where, and your proposed fix for each
+   - Improvements — what you'd change and why
    - Disagreements with your reasoning
-   - Open questions for the user
+   - Open questions
+
+Then **ask the user** which items to action. Only make code changes after they confirm.
 
 ---
 
-**Start now** — begin Phase 1.
+**Start now** — determine the target provider and send the challenge prompt.

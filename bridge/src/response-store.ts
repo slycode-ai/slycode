@@ -51,11 +51,20 @@ export class ResponseStore {
   deliver(responseId: string, data: string): ResponseEntry | null {
     const entry = this.responses.get(responseId);
     if (!entry) return null;
+    // One-shot: only pending responses can transition to received
+    if (entry.status !== 'pending') return null;
 
     entry.data = data;
     entry.status = 'received';
+    // Notify depth clearing callback if registered
+    if (this.onResponseDelivered) {
+      this.onResponseDelivered(entry.targetSession);
+    }
     return entry;
   }
+
+  // Callback for clearing depth tracking when a response is delivered
+  onResponseDelivered: ((targetSession: string) => void) | null = null;
 
   /**
    * Mark that the caller has timed out and stopped polling.

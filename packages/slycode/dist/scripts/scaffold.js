@@ -511,7 +511,7 @@ function runCreate(args) {
 
   // Warn if global CLIs are not available (CLI-only, goes to stderr)
   try {
-    execSync('which sly-kanban', { stdio: 'pipe' });
+    execSync('which sly-kanban', { stdio: 'pipe', windowsHide: true });
   } catch {
     console.error("Warning: 'sly-kanban' not found globally. Run setup.sh to install global CLIs.");
   }
@@ -787,7 +787,7 @@ function runCreate(args) {
   // Step 6: git init
   if (shouldProcess('.git') && !dirExists(path.join(targetPath, '.git'))) {
     try {
-      execSync('git init', { cwd: targetPath, stdio: 'pipe' });
+      execSync('git init', { cwd: targetPath, stdio: 'pipe', windowsHide: true });
       results.push({ action: 'initialized', path: '.git', group: 'config' });
     } catch (e) {
       results.push({ action: 'failed', path: '.git', error: e.message, group: 'config' });

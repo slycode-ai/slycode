@@ -73,6 +73,7 @@ function startService(name, entryPoint, port, env, logFile, workspace) {
         cwd: workspace,
         stdio: ['ignore', logStream, logStream],
         detached: true,
+        windowsHide: true,
     });
     child.unref();
     fs.closeSync(logStream);

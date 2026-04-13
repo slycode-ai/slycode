@@ -595,6 +595,7 @@ async function sendErrorNotification(cardTitle: string, error: string, sessionNa
     execSync(`sly-messaging send "${msg}"`, {
       timeout: 10_000,
       stdio: 'pipe',
+      windowsHide: true,
     });
   } catch {
     console.error(`[scheduler] Failed to send error notification for "${cardTitle}"`);

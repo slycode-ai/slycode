@@ -45,6 +45,7 @@ const child = spawn(process.execPath, [cliScript, ...process.argv.slice(2)], {
   cwd: workspace,
   env: { ...process.env, SLYCODE_HOME: workspace },
   stdio: 'inherit',
+  windowsHide: true,
 });
 
 child.on('exit', (code) => {

@@ -137,6 +137,7 @@ export declare class SessionManager {
      * Record a prompt chain link (for depth tracking when session was created with CLI-arg prompt).
      * Returns the recorded depth or an error if max depth exceeded.
      */
+    clearPromptChain(sessionName: string): void;
     recordPromptChain(targetSession: string, callingSession: string): {
         success: boolean;
         depth: number;

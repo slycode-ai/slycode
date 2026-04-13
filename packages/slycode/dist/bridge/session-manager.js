@@ -1348,6 +1348,9 @@ export class SessionManager {
      * Record a prompt chain link (for depth tracking when session was created with CLI-arg prompt).
      * Returns the recorded depth or an error if max depth exceeded.
      */
+    clearPromptChain(sessionName) {
+        this.promptChains.delete(this.resolveSessionName(sessionName));
+    }
     recordPromptChain(targetSession, callingSession) {
         const resolvedTarget = this.resolveSessionName(targetSession);
         const callerDepth = this.getPromptDepth(callingSession);
@@ -1392,27 +1395,7 @@ export class SessionManager {
             // Record this link in the chain
             this.promptChains.set(resolvedName, { calledBy: request.callingSession, depth: newDepth, timestamp: Date.now() });
         }
-        if (!request.force) {
-            // Check call lock
-            if (this.responseStore?.isSessionLocked(resolvedName)) {
-                const lock = this.responseStore.getActiveLock(resolvedName);
-                const lockAge = lock ? Math.round((Date.now() - lock.lockedAt) / 1000) : 0;
-                return {
-                    success: false, sessionStatus: session.status, isActive: false, locked: true,
-                    error: `Session is currently responding to a prompt from ${lock?.callingSession || 'another caller'} (locked ${lockAge}s ago). Try again later.`,
-                };
-            }
-            // Check if session is actively generating output
-            const active = this.isSessionActive(resolvedName);
-            if (active) {
-                const outputAge = Date.now() - new Date(session.lastOutputAt).getTime();
-                return {
-                    success: false, sessionStatus: session.status, isActive: true, busy: true,
-                    error: `Session is currently active (output ${Math.round(outputAge / 1000)}s ago). The AI may be mid-response. Use --force to send anyway.`,
-                };
-            }
-        }
-        // Acquire per-session mutex
+        // Acquire per-session mutex BEFORE guard checks (prevents two callers both passing idle check)
         const existingMutex = this.submitMutexes.get(resolvedName);
         let releaseMutex;
         const mutexPromise = new Promise(resolve => { releaseMutex = resolve; });
@@ -1420,6 +1403,26 @@ export class SessionManager {
         if (existingMutex)
             await existingMutex;
         try {
+            if (!request.force) {
+                // Check call lock (inside mutex to prevent race)
+                if (this.responseStore?.isSessionLocked(resolvedName)) {
+                    const lock = this.responseStore.getActiveLock(resolvedName);
+                    const lockAge = lock ? Math.round((Date.now() - lock.lockedAt) / 1000) : 0;
+                    return {
+                        success: false, sessionStatus: session.status, isActive: false, locked: true,
+                        error: `Session is currently responding to a prompt from ${lock?.callingSession || 'another caller'} (locked ${lockAge}s ago). Try again later.`,
+                    };
+                }
+                // Check if session is actively generating output
+                const active = this.isSessionActive(resolvedName);
+                if (active) {
+                    const outputAge = Date.now() - new Date(session.lastOutputAt).getTime();
+                    return {
+                        success: false, sessionStatus: session.status, isActive: true, busy: true,
+                        error: `Session is currently active (output ${Math.round(outputAge / 1000)}s ago). The AI may be mid-response. Use --force to send anyway.`,
+                    };
+                }
+            }
             const prompt = request.prompt;
             if (!prompt || prompt.trim().length === 0) {
                 return { success: false, sessionStatus: session.status, isActive: false, error: 'Prompt cannot be empty.' };

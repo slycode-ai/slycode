@@ -34,7 +34,7 @@ if (!PROJECT_ROOT) {
   console.error('Run this command from within a project that has a kanban board.');
   process.exit(1);
 }
-const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/_/g, '-');
+const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/[^a-zA-Z0-9-]/g, '-');
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
 const AREA_INDEX_PATH = path.join(PROJECT_ROOT, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
@@ -2334,6 +2334,13 @@ Description: ${card.description || '(no description)'}
         }
       }
 
+      // Helper: release response lock on error (prevents lock leak)
+      const cleanupResponseLock = async () => {
+        if (responseId) {
+          try { await fetch(`${bridgeUrl}/responses/${responseId}/timeout`, { method: 'POST' }); } catch { /* best effort */ }
+        }
+      };
+
       // Handle no running session — resume if stopped, create fresh if none exists
       if (!sessionRunning) {
         const isStopped = sessionExists && (sessionStatus === 'stopped' || sessionStatus === 'detached');
@@ -2381,6 +2388,7 @@ Description: ${card.description || '(no description)'}
         if (!createRes.ok) {
           const errBody = await createRes.text();
           console.error(`Error creating session: ${errBody}`);
+          await cleanupResponseLock();
           process.exit(1);
         }
 
@@ -2401,6 +2409,7 @@ Description: ${card.description || '(no description)'}
               }
               if (checkInfo && checkInfo.status === 'stopped') {
                 console.error('Error: Session stopped during startup.');
+                await cleanupResponseLock();
                 process.exit(1);
               }
             }
@@ -2409,6 +2418,7 @@ Description: ${card.description || '(no description)'}
 
         if (!alive) {
           console.error('Error: Session did not start within 20s.');
+          await cleanupResponseLock();
           process.exit(1);
         }
         console.log('  Session started. Prompt delivered via CLI arg.');
@@ -2441,6 +2451,7 @@ Description: ${card.description || '(no description)'}
           } else {
             console.error(`Error: ${submitResult.error || 'Failed to submit prompt'}`);
           }
+          await cleanupResponseLock();
           process.exit(1);
         }
 

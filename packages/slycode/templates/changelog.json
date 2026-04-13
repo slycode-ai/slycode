@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.2.28",
+    "date": "2026-04-13",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Add windowsHide to all spawn/exec calls to prevent console window flashing on Windows"
+      },
+      {
+        "type": "improvement",
+        "description": "Clearer update notification with explicit slycode update command"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix project names with dots causing bridge errors — sanitize to valid session name characters"
+      }
+    ]
+  },
+  {
     "version": "0.2.27",
     "date": "2026-04-11",
     "changes": [

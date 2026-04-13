@@ -645,6 +645,7 @@ export async function main(args: string[]): Promise<void> {
     execSync('npm install', {
       cwd: resolvedDir,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     console.log('  \u2713 Dependencies installed');
   } catch (err) {
@@ -727,6 +728,7 @@ export async function main(args: string[]): Promise<void> {
         execSync('npx slycode service install', {
           cwd: resolvedDir,
           stdio: 'inherit',
+          windowsHide: true,
         });
       }
     } catch {

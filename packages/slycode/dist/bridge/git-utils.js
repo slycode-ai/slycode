@@ -24,7 +24,7 @@ export async function getGitStatus(cwd) {
 }
 function gitBranch(cwd) {
     return new Promise((resolve) => {
-        execFile('git', ['symbolic-ref', '--short', 'HEAD'], { cwd, timeout: 5000 }, (err, stdout) => {
+        execFile('git', ['symbolic-ref', '--short', 'HEAD'], { cwd, timeout: 5000, windowsHide: true }, (err, stdout) => {
             if (err) {
                 resolve(null);
                 return;
@@ -36,7 +36,7 @@ function gitBranch(cwd) {
 }
 function gitUncommitted(cwd) {
     return new Promise((resolve) => {
-        execFile('git', ['status', '--porcelain'], { cwd, timeout: 5000 }, (err, stdout) => {
+        execFile('git', ['status', '--porcelain'], { cwd, timeout: 5000, windowsHide: true }, (err, stdout) => {
             if (err) {
                 resolve(0);
                 return;

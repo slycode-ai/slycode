@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-04-13
+
+### Fixed
+- Add windowsHide to all spawn/exec calls to prevent console window flashing on Windows
+- Fix project names with dots causing bridge errors — sanitize to valid session name characters
+
+### Changed
+- Clearer update notification with explicit slycode update command
+
 ## [0.2.27] - 2026-04-11
 
 ### Fixed

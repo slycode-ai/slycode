@@ -60,8 +60,8 @@ export class ProjectResolutionError extends Error {
  */
 export async function resolveProjectRoot(projectId: string): Promise<string> {
   // Special case: workspace project is always the repo root
-  // Normalize underscores to hyphens (directory names use _ but project IDs use -)
-  const workspaceId = path.basename(getRepoRoot()).replace(/_/g, '-');
+  // Normalize to valid session name chars (strip dots, underscores, spaces, etc.)
+  const workspaceId = path.basename(getRepoRoot()).replace(/[^a-zA-Z0-9-]/g, '-');
   if (projectId === workspaceId) {
     return getRepoRoot();
   }

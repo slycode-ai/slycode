@@ -97,6 +97,7 @@ async function install(workspace: string, config: SlyCodeConfig): Promise<void> 
     try {
       execSync(`schtasks /Create /TN "${taskName(svc)}" /XML "${xmlPath}" /F`, {
         stdio: 'pipe',
+        windowsHide: true,
       });
       console.log(`  \u2713 ${taskName(svc)} installed`);
     } catch (err) {
@@ -110,7 +111,7 @@ async function install(workspace: string, config: SlyCodeConfig): Promise<void> 
   // Start tasks
   for (const svc of SERVICES) {
     try {
-      execSync(`schtasks /Run /TN "${taskName(svc)}"`, { stdio: 'pipe' });
+      execSync(`schtasks /Run /TN "${taskName(svc)}"`, { stdio: 'pipe', windowsHide: true });
       console.log(`  \u2713 ${taskName(svc)} started`);
     } catch {
       console.warn(`  ! ${taskName(svc)} could not be started`);
@@ -126,7 +127,7 @@ async function remove(): Promise<void> {
 
   for (const svc of SERVICES) {
     try {
-      execSync(`schtasks /Delete /TN "${taskName(svc)}" /F`, { stdio: 'pipe' });
+      execSync(`schtasks /Delete /TN "${taskName(svc)}" /F`, { stdio: 'pipe', windowsHide: true });
       console.log(`  \u2713 ${taskName(svc)} removed`);
     } catch {
       console.log(`  ${taskName(svc)} was not installed`);
@@ -140,6 +141,7 @@ async function status(): Promise<void> {
       const output = execSync(`schtasks /Query /TN "${taskName(svc)}" /FO CSV /NH`, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       const fields = output.trim().split(',').map(f => f.replace(/"/g, ''));
       const state = fields[2] || 'Unknown';

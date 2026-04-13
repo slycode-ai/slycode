@@ -119,6 +119,7 @@ async function install(workspace, config) {
         try {
             (0, child_process_1.execSync)(`schtasks /Create /TN "${taskName(svc)}" /XML "${xmlPath}" /F`, {
                 stdio: 'pipe',
+                windowsHide: true,
             });
             console.log(`  \u2713 ${taskName(svc)} installed`);
         }
@@ -131,7 +132,7 @@ async function install(workspace, config) {
     // Start tasks
     for (const svc of SERVICES) {
         try {
-            (0, child_process_1.execSync)(`schtasks /Run /TN "${taskName(svc)}"`, { stdio: 'pipe' });
+            (0, child_process_1.execSync)(`schtasks /Run /TN "${taskName(svc)}"`, { stdio: 'pipe', windowsHide: true });
             console.log(`  \u2713 ${taskName(svc)} started`);
         }
         catch {
@@ -145,7 +146,7 @@ async function remove() {
     console.log('Removing Windows Task Scheduler tasks...');
     for (const svc of SERVICES) {
         try {
-            (0, child_process_1.execSync)(`schtasks /Delete /TN "${taskName(svc)}" /F`, { stdio: 'pipe' });
+            (0, child_process_1.execSync)(`schtasks /Delete /TN "${taskName(svc)}" /F`, { stdio: 'pipe', windowsHide: true });
             console.log(`  \u2713 ${taskName(svc)} removed`);
         }
         catch {
@@ -159,6 +160,7 @@ async function status() {
             const output = (0, child_process_1.execSync)(`schtasks /Query /TN "${taskName(svc)}" /FO CSV /NH`, {
                 encoding: 'utf-8',
                 stdio: ['pipe', 'pipe', 'pipe'],
+                windowsHide: true,
             });
             const fields = output.trim().split(',').map(f => f.replace(/"/g, ''));
             const state = fields[2] || 'Unknown';

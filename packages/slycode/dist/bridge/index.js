@@ -73,6 +73,10 @@ async function main() {
     const responseStore = new ResponseStore();
     responseStore.start();
     sessionManager.setResponseStore(responseStore);
+    // Clear depth tracking when a response is delivered (prevents stale depth poisoning)
+    responseStore.onResponseDelivered = (targetSession) => {
+        sessionManager.clearPromptChain(targetSession);
+    };
     // API routes
     app.use('/api', createApiRouter(sessionManager, responseStore));
     // Also mount at root for convenience
