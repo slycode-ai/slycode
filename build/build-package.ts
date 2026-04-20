@@ -99,17 +99,22 @@ function buildWeb(): void {
   if (fs.existsSync(standaloneDir)) {
     // Standalone output is self-contained — include node_modules and .next
     copyDirRecursive(standaloneDir, destDir, { includeAll: true });
-    // Copy static assets — must go inside the web/ subdirectory where server.js lives
-    // (standalone output nests under web/ due to outputFileTracingRoot)
-    const destStatic = path.join(destDir, 'web', '.next', 'static');
+    // Find where server.js landed — may be at destDir/ (flat) or destDir/web/ (nested)
+    // depending on Next.js outputFileTracingRoot behavior
+    const serverDir = fs.existsSync(path.join(destDir, 'server.js'))
+      ? destDir
+      : fs.existsSync(path.join(destDir, 'web', 'server.js'))
+        ? path.join(destDir, 'web')
+        : destDir;
+    // Copy static assets next to server.js (Next.js standalone never includes them)
+    const destStatic = path.join(serverDir, '.next', 'static');
     if (fs.existsSync(staticDir)) {
       copyDirRecursive(staticDir, destStatic);
     }
-    // The standalone server entry is at web/web/server.js (relative to standalone root)
-    // Copy the public directory into the web/ subdirectory where server.js lives
+    // Copy the public directory next to server.js
     const publicDir = path.join(ROOT, 'web', 'public');
     if (fs.existsSync(publicDir)) {
-      copyDirRecursive(publicDir, path.join(destDir, 'web', 'public'));
+      copyDirRecursive(publicDir, path.join(serverDir, 'public'));
     }
   } else {
     console.warn('  ! Next.js standalone output not found.');

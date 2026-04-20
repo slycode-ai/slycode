@@ -186,6 +186,7 @@ export interface BridgeSessionInfo {
   hasHistory: boolean;
   resumed: boolean;
   lastActive?: string;
+  createdAt?: string;
   provider?: string;
   skipPermissions?: boolean;
   model?: string;

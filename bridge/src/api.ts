@@ -118,8 +118,8 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
     });
   });
 
-  // Terminal input
-  router.post('/sessions/:name/input', (req, res) => {
+  // Terminal input — async to support chunked writes on Windows
+  router.post('/sessions/:name/input', async (req, res) => {
     const name = decodeURIComponent(req.params.name);
     const { data } = req.body;
 
@@ -127,7 +127,7 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
       return res.status(400).json({ error: 'data must be a string' });
     }
 
-    const success = sessionManager.writeToSession(name, data);
+    const success = await sessionManager.writeToSession(name, data);
     if (!success) {
       return res.status(404).json({ error: 'Session not found or not running' });
     }
@@ -182,7 +182,7 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
   });
 
   // Quick actions
-  router.post('/sessions/:name/action', (req, res) => {
+  router.post('/sessions/:name/action', async (req, res) => {
     const name = decodeURIComponent(req.params.name);
     const { action } = req.body;
 
@@ -190,10 +190,10 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
 
     switch (action) {
       case 'compact':
-        success = sessionManager.writeToSession(name, '/compact\n');
+        success = await sessionManager.writeToSession(name, '/compact\n');
         break;
       case 'clear':
-        success = sessionManager.writeToSession(name, '/clear\n');
+        success = await sessionManager.writeToSession(name, '/clear\n');
         break;
       case 'interrupt':
         success = sessionManager.sendSignal(name, 'SIGINT');
@@ -226,7 +226,7 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
   });
 
   // Stop (send Escape) to an active session
-  router.post('/sessions/:name/stop', (req, res) => {
+  router.post('/sessions/:name/stop', async (req, res) => {
     const name = decodeURIComponent(req.params.name);
 
     const isActive = sessionManager.isSessionActive(name);
@@ -239,7 +239,7 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
       return res.json({ stopped: false, reason: 'already_stopped' });
     }
 
-    const success = sessionManager.writeToSession(name, '\x1b');
+    const success = await sessionManager.writeToSession(name, '\x1b');
     if (!success) {
       return res.status(500).json({ error: 'Failed to send escape to session' });
     }

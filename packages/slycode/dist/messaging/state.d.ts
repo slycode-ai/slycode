@@ -7,6 +7,7 @@ export declare class StateManager {
     private voiceTone;
     private selectedProvider;
     private selectedModel;
+    private providerOverrides;
     private _pendingInstructionFileConfirm;
     private chatId;
     constructor();
@@ -39,6 +40,10 @@ export declare class StateManager {
     setSelectedProvider(provider: string): void;
     getSelectedModel(): string;
     setSelectedModel(model: string): void;
+    private getOverrideKey;
+    getProviderOverride(): string | null;
+    setProviderOverride(provider: string): void;
+    clearProviderOverride(): void;
     getChatId(): number | null;
     setChatId(chatId: number): void;
     getPendingInstructionFileConfirm(): PendingInstructionFileConfirm | null;

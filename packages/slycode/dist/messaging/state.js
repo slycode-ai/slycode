@@ -21,6 +21,7 @@ export class StateManager {
     voiceTone = null;
     selectedProvider = 'claude';
     selectedModel = ''; // '' = Default (no flag)
+    providerOverrides = {}; // per-target provider overrides (sticky)
     _pendingInstructionFileConfirm = null;
     chatId = null;
     constructor() {
@@ -95,6 +96,9 @@ export class StateManager {
             if (data.chatId) {
                 this.chatId = data.chatId;
             }
+            if (data.providerOverrides && typeof data.providerOverrides === 'object') {
+                this.providerOverrides = data.providerOverrides;
+            }
         }
         catch {
             // No persisted state, that's fine
@@ -113,6 +117,7 @@ export class StateManager {
                 voiceTone: this.voiceTone,
                 selectedProvider: this.selectedProvider,
                 selectedModel: this.selectedModel,
+                providerOverrides: this.providerOverrides,
                 chatId: this.chatId,
             }, null, 2));
         }
@@ -268,6 +273,33 @@ export class StateManager {
     }
     setSelectedModel(model) {
         this.selectedModel = model;
+        this.saveState();
+    }
+    // --- Per-Target Provider Overrides (sticky across navigations) ---
+    getOverrideKey() {
+        const target = this.getTarget();
+        switch (target.type) {
+            case 'card': return target.projectId && target.cardId ? `card:${target.projectId}:${target.cardId}` : null;
+            case 'project': return target.projectId ? `project:${target.projectId}` : null;
+            case 'global': return 'global';
+        }
+    }
+    getProviderOverride() {
+        const key = this.getOverrideKey();
+        return key ? this.providerOverrides[key] || null : null;
+    }
+    setProviderOverride(provider) {
+        const key = this.getOverrideKey();
+        if (!key)
+            return;
+        this.providerOverrides[key] = provider;
+        this.saveState();
+    }
+    clearProviderOverride() {
+        const key = this.getOverrideKey();
+        if (!key)
+            return;
+        delete this.providerOverrides[key];
         this.saveState();
     }
     // --- Chat ID (persisted across restarts) ---

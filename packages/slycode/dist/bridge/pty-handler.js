@@ -193,6 +193,46 @@ export function spawnPty(options) {
 export function writeToPty(ptyProcess, data) {
     ptyProcess.write(data);
 }
+/**
+ * Write data to PTY with chunking on Windows to avoid ConPTY truncation.
+ *
+ * ConPTY silently truncates PTY writes larger than ~4KB. This function splits
+ * large writes into 1024-byte chunks with delays between them, giving ConPTY
+ * time to drain each chunk. On Linux/Mac, writes pass through directly (kernel
+ * handles backpressure natively).
+ *
+ * **Convention:** Any code path that writes potentially large text (>1KB) to a
+ * PTY must use this function instead of raw `writeToPty()` / `pty.write()`.
+ * Keystroke input and short control sequences can use `writeToPty()` directly.
+ *
+ * @see documentation/designs/windows_conpty_chunked_writes.md
+ * @see documentation/designs/fix_windows_paste_truncation.md
+ */
+export const CHUNKED_WRITE_SIZE = 1024;
+export const CHUNKED_WRITE_DELAY_MS = 200;
+export async function writeChunkedToPty(ptyProcess, data) {
+    if (os.platform() !== 'win32' || data.length <= CHUNKED_WRITE_SIZE) {
+        // Unix or small write — pass through directly
+        ptyProcess.write(data);
+        return;
+    }
+    // Windows: chunk to avoid ConPTY truncation at ~4KB
+    for (let i = 0; i < data.length;) {
+        let end = Math.min(i + CHUNKED_WRITE_SIZE, data.length);
+        // Don't split surrogate pairs (emoji, some CJK) at chunk boundaries
+        if (end < data.length) {
+            const lastChar = data.charCodeAt(end - 1);
+            if (lastChar >= 0xD800 && lastChar <= 0xDBFF) {
+                end++;
+            }
+        }
+        ptyProcess.write(data.slice(i, end));
+        i = end;
+        if (i < data.length) {
+            await new Promise(r => setTimeout(r, CHUNKED_WRITE_DELAY_MS));
+        }
+    }
+}
 export function resizePty(ptyProcess, cols, rows) {
     ptyProcess.resize(cols, rows);
 }

@@ -9,7 +9,7 @@ scope: global
 classes:
   design: 60
   done: 20
-  implementation: 50
+  implementation: 40
   project-terminal: 30
   testing: 60
 ---

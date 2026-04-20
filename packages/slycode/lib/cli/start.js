@@ -318,9 +318,11 @@ async function start(_args) {
             port: config.ports.web,
             bindHost: host,
             // Standalone Next.js server or dev server
-            // Standalone output nests under web/web/ due to outputFileTracingRoot
+            // Standalone output may be flat (dist/web/server.js) or nested (dist/web/web/server.js)
             entryPoint: distDir
-                ? path.join(distDir, 'web', 'web', 'server.js')
+                ? (fs.existsSync(path.join(distDir, 'web', 'server.js'))
+                    ? path.join(distDir, 'web', 'server.js')
+                    : path.join(distDir, 'web', 'web', 'server.js'))
                 : path.join(workspace, 'web', 'node_modules', '.bin', 'next'),
             extraEnv: {
                 HOSTNAME: host,

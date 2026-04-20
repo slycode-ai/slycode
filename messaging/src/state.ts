@@ -26,6 +26,7 @@ export class StateManager {
   private voiceTone: string | null = null;
   private selectedProvider: string = 'claude';
   private selectedModel: string = '';  // '' = Default (no flag)
+  private providerOverrides: Record<string, string> = {};  // per-target provider overrides (sticky)
   private _pendingInstructionFileConfirm: PendingInstructionFileConfirm | null = null;
   private chatId: number | null = null;
 
@@ -105,6 +106,9 @@ export class StateManager {
       if (data.chatId) {
         this.chatId = data.chatId;
       }
+      if (data.providerOverrides && typeof data.providerOverrides === 'object') {
+        this.providerOverrides = data.providerOverrides;
+      }
     } catch {
       // No persisted state, that's fine
     }
@@ -123,6 +127,7 @@ export class StateManager {
         voiceTone: this.voiceTone,
         selectedProvider: this.selectedProvider,
         selectedModel: this.selectedModel,
+        providerOverrides: this.providerOverrides,
         chatId: this.chatId,
       }, null, 2));
     } catch (err) {
@@ -300,6 +305,36 @@ export class StateManager {
 
   setSelectedModel(model: string): void {
     this.selectedModel = model;
+    this.saveState();
+  }
+
+  // --- Per-Target Provider Overrides (sticky across navigations) ---
+
+  private getOverrideKey(): string | null {
+    const target = this.getTarget();
+    switch (target.type) {
+      case 'card': return target.projectId && target.cardId ? `card:${target.projectId}:${target.cardId}` : null;
+      case 'project': return target.projectId ? `project:${target.projectId}` : null;
+      case 'global': return 'global';
+    }
+  }
+
+  getProviderOverride(): string | null {
+    const key = this.getOverrideKey();
+    return key ? this.providerOverrides[key] || null : null;
+  }
+
+  setProviderOverride(provider: string): void {
+    const key = this.getOverrideKey();
+    if (!key) return;
+    this.providerOverrides[key] = provider;
+    this.saveState();
+  }
+
+  clearProviderOverride(): void {
+    const key = this.getOverrideKey();
+    if (!key) return;
+    delete this.providerOverrides[key];
     this.saveState();
   }
 

@@ -1,11 +1,11 @@
 import { execFile } from 'child_process';
 import fs from 'fs/promises';
 /**
- * Get the current git branch and uncommitted file count for a directory.
- * Never throws — returns { branch: null, uncommitted: 0 } on any error.
+ * Get the current git branch, uncommitted file count, and changed file details.
+ * Never throws — returns { branch: null, uncommitted: 0, files: [] } on any error.
  */
 export async function getGitStatus(cwd) {
-    const result = { branch: null, uncommitted: 0 };
+    const result = { branch: null, uncommitted: 0, files: [] };
     // Validate CWD exists
     try {
         await fs.access(cwd);
@@ -14,12 +14,13 @@ export async function getGitStatus(cwd) {
         return result;
     }
     // Run both git commands in parallel
-    const [branch, uncommitted] = await Promise.all([
+    const [branch, filesData] = await Promise.all([
         gitBranch(cwd),
-        gitUncommitted(cwd),
+        gitChangedFiles(cwd),
     ]);
     result.branch = branch;
-    result.uncommitted = uncommitted;
+    result.files = filesData.files;
+    result.uncommitted = filesData.uncommitted;
     return result;
 }
 function gitBranch(cwd) {
@@ -34,15 +35,65 @@ function gitBranch(cwd) {
         });
     });
 }
-function gitUncommitted(cwd) {
+/**
+ * Parse `git status --porcelain` output into structured file entries.
+ *
+ * Porcelain v1 format: XY filename
+ *   X = staged status, Y = unstaged status
+ *   ?? = untracked, !! = ignored
+ *   Renamed: R  old -> new
+ *
+ * A file with changes in both index and worktree (e.g. MM) produces
+ * two entries (one staged, one unstaged) but counts as one uncommitted file.
+ */
+function gitChangedFiles(cwd) {
     return new Promise((resolve) => {
         execFile('git', ['status', '--porcelain'], { cwd, timeout: 5000, windowsHide: true }, (err, stdout) => {
             if (err) {
-                resolve(0);
+                resolve({ files: [], uncommitted: 0 });
                 return;
             }
-            const lines = stdout.trim();
-            resolve(lines ? lines.split('\n').length : 0);
+            // trimEnd only — leading spaces are significant (X=' ' means not staged)
+            const output = stdout.trimEnd();
+            if (!output) {
+                resolve({ files: [], uncommitted: 0 });
+                return;
+            }
+            const lines = output.split('\n').filter(l => l.length > 0);
+            const files = [];
+            const uniquePaths = new Set();
+            for (const line of lines) {
+                if (line.length < 3)
+                    continue; // Minimum: "XYf" or "XY f"
+                const x = line[0]; // staged status
+                const y = line[1]; // unstaged status
+                // Porcelain format is "XY PATH" (separator space at index 2).
+                // Robustly handle edge cases where separator may be absent.
+                const pathStart = line[2] === ' ' ? 3 : 2;
+                const rawPath = line.slice(pathStart);
+                // Extract the display path (for renames: "old -> new", use new)
+                const filePath = rawPath.includes(' -> ')
+                    ? rawPath.split(' -> ')[1]
+                    : rawPath;
+                if (x === '?' && y === '?') {
+                    // Untracked
+                    files.push({ status: '?', path: filePath, category: 'untracked' });
+                    uniquePaths.add(filePath);
+                }
+                else {
+                    // Staged change (X is not space and not ?)
+                    if (x !== ' ' && x !== '?') {
+                        files.push({ status: x, path: filePath, category: 'staged' });
+                        uniquePaths.add(filePath);
+                    }
+                    // Unstaged change (Y is not space)
+                    if (y !== ' ') {
+                        files.push({ status: y, path: filePath, category: 'unstaged' });
+                        uniquePaths.add(filePath);
+                    }
+                }
+            }
+            resolve({ files, uncommitted: uniquePaths.size });
         });
     });
 }

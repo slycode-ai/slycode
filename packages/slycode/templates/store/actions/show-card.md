@@ -10,7 +10,7 @@ classes:
   backlog: 30
   design: 90
   done: 40
-  implementation: 70
+  implementation: 60
   testing: 80
 ---
 

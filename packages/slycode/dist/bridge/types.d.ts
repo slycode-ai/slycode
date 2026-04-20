@@ -88,6 +88,7 @@ export interface SessionInfo {
     model?: string;
     exitCode?: number;
     exitedAt?: string;
+    createdAt?: string;
 }
 export interface PersistedSession {
     claudeSessionId: string | null;

@@ -1,7 +1,7 @@
 import os from 'os';
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
-import { spawnPty, writeToPty, resizePty, killPty } from './pty-handler.js';
+import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty } from './pty-handler.js';
 import {
   getProviderSessionDir,
   listProviderSessionFiles,
@@ -76,11 +76,8 @@ const SSE_HEARTBEAT_INTERVAL_MS = 15 * 1000; // 15 seconds
 const DEFERRED_PROMPT_SETTLE_MS = 1500;       // 1.5s of quiet after last output = settled
 const DEFERRED_PROMPT_MAX_TIMEOUT_MS = 30000; // Safety net: deliver after 30s regardless
 
-// Chunked write constants for Windows ConPTY truncation fix.
-// ConPTY silently truncates PTY writes larger than ~4-5KB. Writing in smaller chunks
-// with delays between them gives ConPTY time to drain each chunk before the next arrives.
-const CHUNKED_WRITE_SIZE = 1024;     // ConPTY needs small chunks to avoid truncation
-const CHUNKED_WRITE_DELAY_MS = 500;  // ConPTY needs significant delay to drain between chunks
+// Chunked write constants (CHUNKED_WRITE_SIZE, CHUNKED_WRITE_DELAY_MS) are in pty-handler.ts.
+// writeChunkedToPty handles Windows ConPTY truncation for all large write paths.
 
 // Grace period before a detached session becomes eligible for idle timeout (prevents race condition)
 const DETACH_GRACE_PERIOD = 5 * 1000; // 5 seconds
@@ -387,8 +384,12 @@ export class SessionManager {
         // Reuse existing session — paste prompt into it using bracketed paste mode.
         // Claude Code's TUI expects paste brackets for multi-line input; without them,
         // \n characters in the prompt may not be handled correctly and \r may not submit.
+        // Markers are sent atomically; inner content uses writeChunkedToPty to avoid
+        // ConPTY truncation on Windows (>4KB payloads silently dropped).
         if (prompt && existing.pty) {
-          writeToPty(existing.pty, `\x1b[200~${prompt}\x1b[201~`);
+          writeToPty(existing.pty, '\x1b[200~');
+          await writeChunkedToPty(existing.pty, prompt);
+          writeToPty(existing.pty, '\x1b[201~');
           // Delay before Enter to let the provider process the paste
           await new Promise(r => setTimeout(r, 600));
           writeToPty(existing.pty, '\r');
@@ -722,57 +723,29 @@ export class SessionManager {
     }
 
     try {
-      if (os.platform() === 'win32') {
-        // Windows/ConPTY: use bracketed paste with chunked content.
-        // Bracketed paste markers tell the TUI to treat the input as a single paste
-        // (without them, \n chars are interpreted as individual inputs).
-        // Markers are sent atomically; only the inner content is chunked to avoid
-        // ConPTY's ~4KB truncation limit.
-        // Open bracket — atomic write
-        session.pty.write('\x1b[200~');
-
-        if (prompt.length > CHUNKED_WRITE_SIZE) {
-          const totalChunks = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
-          for (let i = 0; i < prompt.length; ) {
-            if (!session.pty) break;
-            let end = Math.min(i + CHUNKED_WRITE_SIZE, prompt.length);
-            // Don't split surrogate pairs (emoji, some CJK) at chunk boundaries
-            if (end < prompt.length) {
-              const lastChar = prompt.charCodeAt(end - 1);
-              if (lastChar >= 0xD800 && lastChar <= 0xDBFF) {
-                end++;
-              }
-            }
-            session.pty.write(prompt.slice(i, end));
-            i = end;
-            if (i < prompt.length) {
-              await new Promise(r => setTimeout(r, CHUNKED_WRITE_DELAY_MS));
-            }
-          }
-          console.log(`Deferred prompt: chunked ${prompt.length} chars → ${totalChunks} × ${CHUNKED_WRITE_SIZE}`);
-        } else {
-          session.pty.write(prompt);
-        }
-
-        // Close bracket — atomic write
-        if (session.pty) {
-          session.pty.write('\x1b[201~');
-        }
-      } else {
-        // Linux/Mac: direct write (no chunking needed, kernel handles backpressure)
-        if (session.pty) session.pty.write(prompt);
+      // Use bracketed paste with chunked content via shared utility.
+      // Markers sent atomically; writeChunkedToPty handles ConPTY chunking on Windows,
+      // passes through directly on Linux/Mac.
+      if (session.pty) {
+        writeToPty(session.pty, '\x1b[200~');
+        await writeChunkedToPty(session.pty, prompt);
+        writeToPty(session.pty, '\x1b[201~');
       }
 
       // Wait for write to settle, then send Enter
       await new Promise(r => setTimeout(r, 600));
       if (session.pty) {
-        session.pty.write('\r');
+        writeToPty(session.pty, '\r');
       }
     } catch (err) {
       console.error(`Failed to deliver prompt to ${name}:`, err);
       return;
     }
 
+    if (prompt.length > CHUNKED_WRITE_SIZE && os.platform() === 'win32') {
+      const totalChunks = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
+      console.log(`Deferred prompt: chunked ${prompt.length} chars → ${totalChunks} × ${CHUNKED_WRITE_SIZE}`);
+    }
     console.log(`Deferred prompt delivered to ${name} (${prompt.length} chars)`);
   }
 
@@ -912,6 +885,7 @@ export class SessionManager {
           model: persisted.model,
           exitCode: persisted.exitCode,
           exitedAt: persisted.exitedAt,
+          createdAt: persisted.createdAt,
         };
       }
       return null;
@@ -933,6 +907,7 @@ export class SessionManager {
       model: session.model,
       exitCode: session.exitCode,
       exitedAt: session.exitedAt,
+      createdAt: session.createdAt,
     };
   }
 
@@ -1338,11 +1313,16 @@ export class SessionManager {
   }
 
   // PTY operations
-  writeToSession(name: string, data: string): boolean {
+  /**
+   * Write data to a session's PTY.
+   * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
+   * Small writes (keystrokes, short control sequences) pass through instantly.
+   */
+  async writeToSession(name: string, data: string): Promise<boolean> {
     const session = this.sessions.get(this.resolveSessionName(name));
     if (!session || !session.pty) return false;
 
-    writeToPty(session.pty, data);
+    await writeChunkedToPty(session.pty, data);
 
     // If this session doesn't have a GUID yet, try to detect it (any provider)
     if (!session.claudeSessionId) {
@@ -1621,10 +1601,15 @@ export class SessionManager {
       }
 
       const useBracketedPaste = request.bracketedPaste !== false;
-      const data = useBracketedPaste ? `\x1b[200~${prompt}\x1b[201~` : prompt;
 
-      // Write prompt to PTY
-      writeToPty(session.pty, data);
+      // Write prompt to PTY — markers atomic, inner content chunked for ConPTY safety
+      if (useBracketedPaste) {
+        writeToPty(session.pty, '\x1b[200~');
+        await writeChunkedToPty(session.pty, prompt);
+        writeToPty(session.pty, '\x1b[201~');
+      } else {
+        await writeChunkedToPty(session.pty, prompt);
+      }
 
       // Delay before first Enter
       const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);

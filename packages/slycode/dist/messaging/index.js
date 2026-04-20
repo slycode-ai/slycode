@@ -15,8 +15,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // --- Shared Provider Labels ---
 const PROVIDER_LABELS = {
     claude: 'Claude Code',
-    gemini: 'Gemini CLI',
     codex: 'Codex CLI',
+    gemini: 'Gemini CLI',
 };
 const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS);
 function getProviderDefault(stage) {
@@ -58,21 +58,15 @@ function updateGlobalProviderDefault(provider) {
         // Best-effort — don't break on failure
     }
 }
-/** Resolve provider for a card from bridge sessions. Returns provider string or null. */
+/** Resolve provider for a card from bridge sessions. Picks the earliest-created session. */
 async function resolveProviderFromBridge(bridge, projectId, cardId) {
     try {
         const sessions = await bridge.getProjectSessions(projectId);
         const cardPattern = new RegExp(`^${projectId}:([^:]+):card:${cardId}$`);
-        const matches = [];
-        for (const s of sessions) {
-            if (cardPattern.test(s.name)) {
-                matches.push(s);
-            }
-        }
+        const matches = sessions.filter(s => cardPattern.test(s.name));
         if (matches.length === 0)
             return null;
-        // Pick the most recently active session
-        matches.sort((a, b) => (b.lastActive || '').localeCompare(a.lastActive || ''));
+        matches.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
         const match = matches[0].name.match(cardPattern);
         return match ? match[1] : null;
     }
@@ -80,20 +74,15 @@ async function resolveProviderFromBridge(bridge, projectId, cardId) {
         return null;
     }
 }
-/** Resolve provider for a project-level target from bridge sessions. */
+/** Resolve provider for a project-level target from bridge sessions. Picks the earliest-created session. */
 async function resolveProjectProviderFromBridge(bridge, projectId) {
     try {
         const sessions = await bridge.getProjectSessions(projectId);
         const projPattern = new RegExp(`^${projectId}:([^:]+):global$`);
-        const matches = [];
-        for (const s of sessions) {
-            if (projPattern.test(s.name)) {
-                matches.push(s);
-            }
-        }
+        const matches = sessions.filter(s => projPattern.test(s.name));
         if (matches.length === 0)
             return null;
-        matches.sort((a, b) => (b.lastActive || '').localeCompare(a.lastActive || ''));
+        matches.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
         const match = matches[0].name.match(projPattern);
         return match ? match[1] : null;
     }
@@ -335,7 +324,9 @@ async function handleSessionLifecycle(channel, state, bridge, kanban, actionFilt
     const modelLabel = currentModel
         ? (await getProviderModels(currentProvider)).find(m => m.id === currentModel)?.label || currentModel
         : null;
-    const providerLine = `Provider: ${providerLabel}${modelLabel ? ` · ${modelLabel}` : ''}${explicit ? '' : ' (default)'}`;
+    const defaultProvider = getProviderDefault().provider;
+    const defaultDiffers = defaultProvider !== currentProvider;
+    const providerLine = `Provider: ${providerLabel}${modelLabel ? ` · ${modelLabel}` : ''}${explicit ? '' : ' (default)'}${defaultDiffers ? `\nDefault: ${PROVIDER_LABELS[defaultProvider] || defaultProvider}` : ''}`;
     let session;
     try {
         session = await bridge.getSession(sessionName);
@@ -640,7 +631,8 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     // --- /global ---
     channel.onCommand('global', async () => {
         state.selectGlobal();
-        state.setSelectedProvider(getProviderDefault().provider);
+        const override = state.getProviderOverride();
+        state.setSelectedProvider(override || getProviderDefault().provider);
         updateKeyboard(channel, state);
         await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
     });
@@ -649,8 +641,14 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         const target = state.getTarget();
         if (target.projectId) {
             state.selectProject(target.projectId);
-            const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId);
-            state.setSelectedProvider(projProvider || getProviderDefault().provider);
+            const override = state.getProviderOverride();
+            if (override) {
+                state.setSelectedProvider(override);
+            }
+            else {
+                const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId);
+                state.setSelectedProvider(projProvider || getProviderDefault().provider);
+            }
             updateKeyboard(channel, state);
             await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
         }
@@ -662,11 +660,15 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     channel.onCommand('provider', async () => {
         const current = state.getSelectedProvider();
         const currentLabel = PROVIDER_LABELS[current] || current;
-        const buttons = ALL_PROVIDERS.map(p => [{
-                label: (p === current ? '● ' : '') + PROVIDER_LABELS[p],
-                callbackData: `cfg_${p}`,
-            }]);
-        await channel.sendInlineKeyboard(`Provider: *${currentLabel}*`, buttons);
+        const defaultProvider = getProviderDefault().provider;
+        const defaultLabel = PROVIDER_LABELS[defaultProvider] || defaultProvider;
+        const target = state.getTarget();
+        const contextLabel = target.type === 'card' ? 'card' : 'terminal';
+        const buttons = [
+            [{ label: `Change ${contextLabel} provider`, callbackData: 'prov_scope_current' }],
+            [{ label: 'Change default provider', callbackData: 'prov_scope_default' }],
+        ];
+        await channel.sendInlineKeyboard(`Provider: *${currentLabel}*\nDefault: *${defaultLabel}*`, buttons);
     });
     // --- /model ---
     channel.onCommand('model', async () => {
@@ -893,18 +895,25 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         state.setVoiceTone(tone);
         await channel.sendText(`Voice tone set to: ${tone}`);
     });
-    // --- Configure Callbacks (cfg_ prefix) ---
-    channel.onCallback('cfg_', async (data) => {
-        const provider = data.replace('cfg_', '');
+    // --- Provider Scope Selection (prov_scope_ prefix) ---
+    channel.onCallback('prov_scope_', async (data) => {
+        const scope = data.replace('prov_scope_', ''); // 'current' or 'default'
+        const prefix = scope === 'default' ? 'prov_def_' : 'prov_cur_';
+        const selected = scope === 'default' ? getProviderDefault().provider : state.getSelectedProvider();
+        const buttons = ALL_PROVIDERS.map(p => [{
+                label: (p === selected ? '● ' : '') + PROVIDER_LABELS[p],
+                callbackData: `${prefix}${p}`,
+            }]);
+        const heading = scope === 'default' ? 'Change default provider:' : 'Change current provider:';
+        await channel.sendInlineKeyboard(heading, buttons);
+    });
+    // --- Change Current Provider (prov_cur_ prefix) ---
+    channel.onCallback('prov_cur_', async (data) => {
+        const provider = data.replace('prov_cur_', '');
         if (!ALL_PROVIDERS.includes(provider))
             return;
-        // If the current target was using an inherited default (no bridge session),
-        // also update the global default in providers.json
-        const explicit = await hasExplicitSession(bridge, state);
-        state.setSelectedProvider(provider); // Also resets model to ''
-        if (!explicit) {
-            updateGlobalProviderDefault(provider);
-        }
+        state.setProviderOverride(provider);
+        state.setSelectedProvider(provider);
         // Pre-fill model from stage default if applicable
         const target = state.getTarget();
         const stageDefault = getProviderDefault(target.stage);
@@ -923,6 +932,17 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         else {
             await channel.sendText(`Provider set to: ${PROVIDER_LABELS[provider]}`);
         }
+    });
+    // --- Change Default Provider (prov_def_ prefix) ---
+    channel.onCallback('prov_def_', async (data) => {
+        const provider = data.replace('prov_def_', '');
+        if (!ALL_PROVIDERS.includes(provider))
+            return;
+        updateGlobalProviderDefault(provider);
+        // Don't change the current session — default only affects future navigations
+        const currentProvider = state.getSelectedProvider();
+        const currentLabel = PROVIDER_LABELS[currentProvider] || currentProvider;
+        await channel.sendText(`Default provider set to: ${PROVIDER_LABELS[provider]}\nCurrent session: ${currentLabel} (unchanged)`);
     });
     // --- Model Selection Callbacks (mdl_ prefix) ---
     channel.onCallback('mdl_', async (data) => {
@@ -991,7 +1011,8 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     channel.onCallback('sw_', async (data) => {
         if (data === 'sw_global') {
             state.selectGlobal();
-            state.setSelectedProvider(getProviderDefault().provider);
+            const override = state.getProviderOverride();
+            state.setSelectedProvider(override || getProviderDefault().provider);
             currentDrilldownStage = null;
             updateKeyboard(channel, state);
             await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
@@ -1011,9 +1032,15 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         if (data.startsWith('sw_proj_')) {
             const projectId = data.replace('sw_proj_', '');
             state.selectProject(projectId);
-            // Resolve provider: bridge session > global default
-            const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId);
-            state.setSelectedProvider(projBridgeProvider || getProviderDefault().provider);
+            // Resolve provider: sticky override > earliest bridge session > global default
+            const override = state.getProviderOverride();
+            if (override) {
+                state.setSelectedProvider(override);
+            }
+            else {
+                const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId);
+                state.setSelectedProvider(projBridgeProvider || getProviderDefault().provider);
+            }
             currentDrilldownStage = null;
             kanban.updateProjects(state.getProjects());
             updateKeyboard(channel, state);
@@ -1046,10 +1073,16 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             const cardInfo = kanban.getCard(projectId, cardId);
             const cardStage = cardInfo?.stage;
             state.selectCard(projectId, cardId, cardStage);
-            // Resolve provider: bridge session > stage default > global default
-            const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId);
+            // Resolve provider: sticky override > earliest bridge session > stage default > global default
+            const override = state.getProviderOverride();
             const stageDefault = getProviderDefault(cardStage);
-            state.setSelectedProvider(bridgeProvider || stageDefault.provider);
+            if (override) {
+                state.setSelectedProvider(override);
+            }
+            else {
+                const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId);
+                state.setSelectedProvider(bridgeProvider || stageDefault.provider);
+            }
             // Resolve model: bridge session > stage default > Default
             const sessionName = state.getSessionName();
             try {

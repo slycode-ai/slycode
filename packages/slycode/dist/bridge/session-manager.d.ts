@@ -105,7 +105,12 @@ export declare class SessionManager {
     addSSEClient(name: string, res: Response): boolean;
     removeSSEClient(name: string, res: Response): void;
     private updateClientCount;
-    writeToSession(name: string, data: string): boolean;
+    /**
+     * Write data to a session's PTY.
+     * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
+     * Small writes (keystrokes, short control sequences) pass through instantly.
+     */
+    writeToSession(name: string, data: string): Promise<boolean>;
     /**
      * Watch for a new unclaimed session file.
      * Uses live getClaimedGuids() checks on each poll iteration to prevent

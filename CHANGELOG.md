@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.30] - 2026-04-20
+
+### Added
+- Per-provider terminal tabs — open secondary terminals with different AI providers on the same card
+- Branch tab shows changed files list on hover with staged/unstaged/untracked breakdown
+- Selection-aware Ctrl+C copy in terminal — copies selected text instead of sending SIGINT
+- Sticky per-target provider overrides in messaging — provider choice persists per card/project
+- Dynamic sly action overflow in terminal footer — actions adapt to available space
+
+### Fixed
+- Fix double paste on Ctrl+V in terminal
+- Fix messaging provider resolution to prefer earliest session, not most recent
+- Fix paste bracketing and chunked PTY writes for reliable multi-line paste on Windows
+
+### Changed
+- Provider-specific color theming for terminal tabs and UI elements
+
 ## [0.2.29] - 2026-04-13
 
 ### Fixed

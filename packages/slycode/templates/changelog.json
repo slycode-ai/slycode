@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.2.30",
+    "date": "2026-04-20",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "Per-provider terminal tabs — open secondary terminals with different AI providers on the same card"
+      },
+      {
+        "type": "feature",
+        "description": "Branch tab shows changed files list on hover with staged/unstaged/untracked breakdown"
+      },
+      {
+        "type": "feature",
+        "description": "Selection-aware Ctrl+C copy in terminal — copies selected text instead of sending SIGINT"
+      },
+      {
+        "type": "feature",
+        "description": "Sticky per-target provider overrides in messaging — provider choice persists per card/project"
+      },
+      {
+        "type": "feature",
+        "description": "Dynamic sly action overflow in terminal footer — actions adapt to available space"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix double paste on Ctrl+V in terminal"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix messaging provider resolution to prefer earliest session, not most recent"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix paste bracketing and chunked PTY writes for reliable multi-line paste on Windows"
+      },
+      {
+        "type": "improvement",
+        "description": "Provider-specific color theming for terminal tabs and UI elements"
+      }
+    ]
+  },
+  {
     "version": "0.2.29",
     "date": "2026-04-13",
     "changes": [
