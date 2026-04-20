@@ -108,7 +108,8 @@ export declare class SessionManager {
     /**
      * Write data to a session's PTY.
      * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
-     * Small writes (keystrokes, short control sequences) pass through instantly.
+     * If data is wrapped in bracketed paste markers, sends markers atomically
+     * and only chunks the inner content to avoid splitting escape sequences.
      */
     writeToSession(name: string, data: string): Promise<boolean>;
     /**

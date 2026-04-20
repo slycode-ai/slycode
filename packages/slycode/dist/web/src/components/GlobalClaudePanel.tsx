@@ -141,15 +141,15 @@ export function GlobalClaudePanel({
     if (actuallyRunning) {
       // Session is running — send input directly via bridge API
       try {
+        // Wrap in bracketed paste markers so the TUI buffers the entire input
+        // as a single paste (required for chunked writes on Windows ConPTY)
         await fetch(`/api/bridge/sessions/${encodeURIComponent(providerSessionName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: event.prompt }),
+          body: JSON.stringify({ data: `\x1b[200~${event.prompt}\x1b[201~` }),
         });
         if (event.autoSubmit !== false) {
-          // Delay before Enter — multi-line pastes trigger bracket paste mode
-          // and need time to process before \r can submit
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 600));
           await fetch(`/api/bridge/sessions/${encodeURIComponent(providerSessionName)}/input`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

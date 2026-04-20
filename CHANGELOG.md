@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.31] - 2026-04-21
+
+### Fixed
+- Fix bracketed paste handling — send markers atomically and only chunk inner content to prevent split escape sequences
+- Wrap terminal action commands and prompt input in bracketed paste markers for reliable delivery
+
 ## [0.2.30] - 2026-04-20
 
 ### Added

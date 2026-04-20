@@ -1162,13 +1162,29 @@ export class SessionManager {
     /**
      * Write data to a session's PTY.
      * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
-     * Small writes (keystrokes, short control sequences) pass through instantly.
+     * If data is wrapped in bracketed paste markers, sends markers atomically
+     * and only chunks the inner content to avoid splitting escape sequences.
      */
     async writeToSession(name, data) {
         const session = this.sessions.get(this.resolveSessionName(name));
         if (!session || !session.pty)
             return false;
-        await writeChunkedToPty(session.pty, data);
+        // Detect bracketed paste wrapping — send markers atomically, chunk inner content
+        const OPEN = '\x1b[200~';
+        const CLOSE = '\x1b[201~';
+        if (data.startsWith(OPEN) && data.endsWith(CLOSE)) {
+            const inner = data.slice(OPEN.length, data.length - CLOSE.length);
+            console.log(`[writeToSession] ${name}: bracketed paste detected, ${inner.length} chars inner content`);
+            writeToPty(session.pty, OPEN);
+            await writeChunkedToPty(session.pty, inner);
+            writeToPty(session.pty, CLOSE);
+        }
+        else {
+            if (data.length > 100) {
+                console.log(`[writeToSession] ${name}: raw write, ${data.length} chars (no bracketed paste)`);
+            }
+            await writeChunkedToPty(session.pty, data);
+        }
         // If this session doesn't have a GUID yet, try to detect it (any provider)
         if (!session.claudeSessionId) {
             this.retryGuidDetection(name);

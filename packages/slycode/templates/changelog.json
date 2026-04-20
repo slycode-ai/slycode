@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.2.31",
+    "date": "2026-04-21",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Fix bracketed paste handling — send markers atomically and only chunk inner content to prevent split escape sequences"
+      },
+      {
+        "type": "bugfix",
+        "description": "Wrap terminal action commands and prompt input in bracketed paste markers for reliable delivery"
+      }
+    ]
+  },
+  {
     "version": "0.2.30",
     "date": "2026-04-20",
     "changes": [

@@ -612,15 +612,16 @@ export function ClaudeTerminalPanel({
         command = `${action.command} ${cardId}`;
       }
       setShowActionsMenu(false);
-      // Send command text first
+      // Send command text wrapped in bracketed paste markers.
+      // Without markers, the TUI processes each chunk as it arrives (on Windows,
+      // writeChunkedToPty sends 1KB chunks with 200ms delays). Bracketed paste
+      // tells the TUI to buffer the entire input as a single paste operation.
       await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: command }),
+        body: JSON.stringify({ data: `\x1b[200~${command}\x1b[201~` }),
       });
       // Then send Enter separately if submitting
-      // Delay before Enter — multi-line pastes trigger bracket paste mode
-      // and need time to process before \r can submit
       if (submit) {
         await new Promise(r => setTimeout(r, 600));
         await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
