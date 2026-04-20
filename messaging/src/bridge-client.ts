@@ -278,9 +278,11 @@ export class BridgeClient {
       return { permissionMismatch: true };
     }
 
-    // Active session — send via input
+    // Active session — send via input with bracketed paste markers.
+    // Without markers, ConPTY on Windows processes each chunk separately
+    // instead of buffering the entire input as a single paste operation.
     debugLog(`[sendMessage] Sending to ${sessionName} (status: ${existing!.status}, clients: ${existing!.connectedClients})`);
-    const textSent = await this.sendInput(sessionName, message);
+    const textSent = await this.sendInput(sessionName, `\x1b[200~${message}\x1b[201~`);
     if (!textSent) {
       throw new Error(`Failed to send input to session ${sessionName}`);
     }

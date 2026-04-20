@@ -509,9 +509,10 @@ async function executeQuickCommand(
         );
         return;
       }
-      // Active session — inject via sendInput
-      await bridge.sendInput(sessionName, formatted);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Active session — inject via sendInput with bracketed paste markers
+      // (ConPTY on Windows needs markers to buffer chunked input as a single paste)
+      await bridge.sendInput(sessionName, `\x1b[200~${formatted}\x1b[201~`);
+      await new Promise(resolve => setTimeout(resolve, 600));
       await bridge.sendInput(sessionName, '\r');
     } else {
       // Pre-flight: check instruction file before creating a new session

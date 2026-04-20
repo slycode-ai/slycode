@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.2.32",
+    "date": "2026-04-21",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Wrap all remaining input paths in bracketed paste markers — messaging bridge client, quick commands, and scheduler automation"
+      }
+    ]
+  },
+  {
     "version": "0.2.31",
     "date": "2026-04-21",
     "changes": [

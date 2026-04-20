@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.32] - 2026-04-21
+
+### Fixed
+- Wrap all remaining input paths in bracketed paste markers — messaging bridge client, quick commands, and scheduler automation
+
 ## [0.2.31] - 2026-04-21
 
 ### Fixed

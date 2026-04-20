@@ -457,7 +457,7 @@ export async function triggerAutomation(
       const inputRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: fullPrompt }),
+        body: JSON.stringify({ data: `\x1b[200~${fullPrompt}\x1b[201~` }),
       });
       if (inputRes.ok) {
         // Delay before Enter to let PTY process the text
