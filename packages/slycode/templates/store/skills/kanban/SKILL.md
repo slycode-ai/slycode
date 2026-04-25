@@ -324,15 +324,64 @@ Late responses are automatically injected into the calling session's terminal ev
 
 ### Responding to a Prompt
 
-When your session receives a prompt with a callback instruction like:
+When your session receives a prompt with a callback instruction asking you to run `sly-kanban respond`, **default to the heredoc form**. The shell mangles double-quoted payloads that contain backticks, `$(...)`, backslashes, or embedded quotes, and the CLI cannot tell from argv that the bytes were corrupted before they arrived.
 
-> When you have completed this task, you MUST run: `sly-kanban respond <response-id> "<your response>"`
-
-Run the respond command:
+**Recommended (safe for any payload):**
 
 ```bash
-sly-kanban respond <response-id> "Your response data here"
+sly-kanban respond <response-id> --stdin <<'EOF'
+Your response data here.
+Backticks `like this`, $(command substitution), and "embedded quotes"
+are all safe inside a single-quoted heredoc.
+EOF
 ```
+
+The single-quoted `'EOF'` delimiter prevents the shell from interpreting anything inside the body. Multi-line content and special characters pass through verbatim.
+
+**Auto-detection:** if you pipe or redirect into `respond` without the flag, stdin is read automatically:
+
+```bash
+cat reply.txt | sly-kanban respond <response-id>
+echo "short reply" | sly-kanban respond <response-id>
+```
+
+**Windows / PowerShell equivalent** (no heredoc; use a here-string or a file):
+
+```powershell
+# PowerShell here-string (the closest thing to a bash heredoc):
+@'
+Your response data here.
+Backticks, $(...), and "quotes" are all safe inside a single-quoted here-string.
+'@ | sly-kanban respond <response-id>
+
+# Or read from a file:
+Get-Content reply.txt | sly-kanban respond <response-id>
+```
+
+**PowerShell encoding gotcha:** older PowerShell versions (pre-7) default `$OutputEncoding` to the OS code page, which can produce UTF-16 bytes on the pipe and arrive at the Node CLI as mojibake. If you see garbled text in the success-line preview, set UTF-8 first:
+
+```powershell
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+```
+
+**Heredoc delimiter collision:** `<<'EOF' ... EOF` terminates the heredoc the moment it encounters a line that is *exactly* `EOF`. If your response body might literally contain a line of `EOF`, pick a less common delimiter (e.g. `<<'KANBAN_END'`) or use the file/pipe form instead.
+
+**Positional form** — fine for short, single-line replies with no special characters:
+
+```bash
+sly-kanban respond <response-id> "Analysis complete. Found 3 issues."
+```
+
+If the positional payload contains backticks, `$(`, or unbalanced quotes, the CLI prints a warning suggesting the heredoc form. Delivery is not blocked — the warning exists so you can verify the bytes that reached the bridge match what you intended.
+
+**Verifying the right bytes were delivered:** the success line includes the byte count and a sanitised single-line preview:
+
+```
+Response delivered. (1247 bytes — preview: "Analysis complete. Found 3 issues...")
+```
+
+Use the byte count and preview to spot truncation or shell-quoting damage immediately. If the preview doesn't match what you intended to send, re-run `respond` with the same response ID — re-delivery within the 10-minute TTL is allowed and the latest payload wins (especially useful if the calling session has already timed out, since the corrected payload will be late-injected into its terminal).
 
 ### Session Guards
 

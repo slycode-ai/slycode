@@ -314,13 +314,40 @@ When using --wait, the called card must run 'kanban respond <id> "response"' to 
 `;
 
 const RESPOND_HELP = `
-Usage: kanban respond <response-id> "response data"
+Usage:
+  kanban respond <response-id> "response data"
+  kanban respond <response-id> --stdin <<'EOF'
+  ...response text...
+  EOF
+  cat response.txt | kanban respond <response-id>
 
 Reply to a cross-card prompt that used --wait mode.
 The response-id is provided in the callback instruction appended to the prompt.
 
-Example:
-  kanban respond abc-123-def "Analysis complete. Found 3 issues..."
+Input modes (choose ONE):
+  positional            Pass the response as a quoted argument. Suitable for
+                        short, single-line replies without backticks, $(...),
+                        backslashes, or embedded quotes — those characters are
+                        mangled by the shell before this CLI sees them.
+  --stdin               Read the payload from stdin. Recommended for any
+                        non-trivial reply. Combine with a single-quoted heredoc
+                        to bypass shell quoting entirely.
+  (auto)                If no positional payload is given and stdin is piped
+                        or redirected, stdin is read automatically.
+
+Diagnostics:
+  On success the CLI prints:  Response delivered. (NN bytes — preview: "...")
+  Use the byte count and preview to confirm the right bytes were delivered.
+
+Limits:
+  Payload must be non-empty. Maximum size is 1 MB.
+
+Examples:
+  kanban respond abc-123 "Analysis complete. Found 3 issues."
+  kanban respond abc-123 --stdin <<'EOF'
+  Multi-line response with \`backticks\`, $(safe), and "quotes".
+  EOF
+  cat reply.txt | kanban respond abc-123
 `;
 
 const BOARD_HELP = `
@@ -2315,7 +2342,29 @@ Description: ${card.description || '(no description)'}
 
       if (wait) {
         responseId = `resp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        fullPrompt += `\n\nIMPORTANT: When you have completed this task, you MUST run the following command to return your response:\nsly-kanban respond ${responseId} "<your response here>"`;
+        fullPrompt += `\n\nIMPORTANT: When you have completed this task, you MUST return your response by running sly-kanban respond.
+
+For ANY response that may contain backticks, $(...), backslashes, embedded quotes, code, or multiple lines, use the heredoc form to avoid shell-quoting corruption.
+
+Bash / zsh / Git Bash / WSL (preferred):
+
+sly-kanban respond ${responseId} --stdin <<'EOF'
+<your response here — backticks, $(...), quotes, and multi-line content are all safe inside this single-quoted heredoc>
+EOF
+
+PowerShell or cmd.exe (no heredoc — pipe a here-string or a file instead):
+
+@'
+<your response here>
+'@ | sly-kanban respond ${responseId}
+
+# or:  Get-Content reply.txt | sly-kanban respond ${responseId}
+
+For SHORT, single-line responses with no special characters, the positional form also works on any shell:
+
+sly-kanban respond ${responseId} "your response"
+
+Either way, the CLI will print a success line with the byte count and a preview so you can verify the right bytes were delivered.`;
 
         // Register response on bridge
         const currentSessionName = process.env.SLYCODE_SESSION || `${PROJECT_NAME}:unknown:caller`;
@@ -2553,6 +2602,105 @@ Description: ${card.description || '(no description)'}
 // Respond Command (cross-card callback)
 // ============================================================================
 
+// Hex-escape control bytes and C1 codes; escape backslash and double-quote so
+// the result can safely sit inside a quoted preview. Tab/newline/CR get the
+// readable two-char form rather than \xNN. Truncates to roughly maxChars
+// visible width with an ellipsis. Used both on the success line and (mirrored
+// in the bridge) on late-injection content.
+function sanitisePreview(payload, maxChars = 80) {
+  let out = '';
+  for (let i = 0; i < payload.length; i++) {
+    if (out.length >= maxChars * 4) break;
+    const code = payload.charCodeAt(i);
+    if (code === 0x09) { out += '\\t'; continue; }
+    if (code === 0x0A) { out += '\\n'; continue; }
+    if (code === 0x0D) { out += '\\r'; continue; }
+    if (code < 0x20 || code === 0x7F || (code >= 0x80 && code <= 0x9F)) {
+      out += '\\x' + code.toString(16).padStart(2, '0');
+      continue;
+    }
+    if (code === 0x22) { out += '\\"'; continue; }
+    if (code === 0x5C) { out += '\\\\'; continue; }
+    out += payload[i];
+  }
+  if (out.length > maxChars) out = out.slice(0, maxChars - 1) + '…';
+  return out;
+}
+
+function normalisePayload(payload) {
+  if (payload.charCodeAt(0) === 0xFEFF) payload = payload.slice(1);
+  payload = payload.replace(/\r\n/g, '\n');
+  if (payload.endsWith('\n')) payload = payload.slice(0, -1);
+  return payload;
+}
+
+// Heuristic — flags payloads that may have been mangled by the shell before
+// reaching argv. False positives are possible on legitimate code-as-payload;
+// this only triggers a warning, never blocks delivery.
+function containsShellHostileChars(payload) {
+  if (/`/.test(payload)) return true;
+  if (/\$\(/.test(payload)) return true;
+  const dq = (payload.match(/(?<!\\)"/g) || []).length;
+  if (dq % 2 === 1) return true;
+  return false;
+}
+
+function readStdinUtf8() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', err => reject(err));
+  });
+}
+
+function parseResponseIdTimestamp(responseId) {
+  const match = /^resp-(\d+)-/.exec(responseId);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function formatDuration(ms) {
+  if (ms < 0) ms = 0;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remSec = seconds % 60;
+  return `${minutes}m ${remSec}s`;
+}
+
+function formatRespondError(responseId, errBody) {
+  const reason = errBody && errBody.reason;
+  const issuedAtFromBridge = errBody && errBody.issuedAt;
+  const issuedAt = issuedAtFromBridge || parseResponseIdTimestamp(responseId);
+  const expiredAt = errBody && errBody.expiredAt;
+  const now = Date.now();
+
+  if (reason === 'expired') {
+    if (issuedAt) {
+      const age = now - issuedAt;
+      let msg = `Response ID was issued ${formatDuration(age)} ago, exceeded the 10-minute TTL.`;
+      if (expiredAt) msg += ` (Expired ${formatDuration(now - expiredAt)} ago.)`;
+      return msg;
+    }
+    return 'Response ID has expired (10-minute TTL exceeded).';
+  }
+
+  if (reason === 'consumed') {
+    return 'Response ID was already delivered to the calling session.';
+  }
+
+  // Unknown reason or older bridge that doesn't return one.
+  if (issuedAt) {
+    const age = now - issuedAt;
+    if (age > 10 * 60 * 1000) {
+      return `Response ID was issued ${formatDuration(age)} ago — likely expired (10-minute TTL).`;
+    }
+    return `Response ID not recognised by the bridge (issued ${formatDuration(age)} ago) — typo, or the bridge restarted since it was issued.`;
+  }
+  return (errBody && errBody.error) || 'Response not found or expired';
+}
+
 function cmdRespond(args) {
   const opts = parseArgs(args);
 
@@ -2562,24 +2710,74 @@ function cmdRespond(args) {
   }
 
   const responseId = opts._[0];
-  const responseData = opts._[1];
-
   if (!responseId) {
     console.error('Error: Response ID required');
     process.exit(1);
   }
 
-  if (!responseData) {
-    console.error('Error: Response data required');
-    console.error('Usage: kanban respond <response-id> "your response data"');
+  const positionalData = opts._[1];
+  const useStdinFlag = opts.stdin === true;
+
+  if (positionalData !== undefined && useStdinFlag) {
+    console.error('Error: Cannot combine a positional payload with --stdin. Pick one.');
     process.exit(1);
   }
 
-  // Determine bridge URL
-  const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
-  const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
-
   const doRespond = async () => {
+    let responseData;
+
+    const stdinIsTty = process.stdin.isTTY;
+    const useStdin = useStdinFlag || (positionalData === undefined && !stdinIsTty);
+
+    if (useStdinFlag && stdinIsTty) {
+      console.error('Error: --stdin requires piped or redirected input.');
+      console.error('Examples:');
+      console.error('  echo "response" | sly-kanban respond <id> --stdin');
+      console.error("  sly-kanban respond <id> --stdin <<'EOF'");
+      console.error('  multi-line response here');
+      console.error('  EOF');
+      process.exit(1);
+    }
+
+    if (useStdin) {
+      try {
+        responseData = await readStdinUtf8();
+      } catch (err) {
+        console.error(`Error: Failed to read stdin: ${err.message}`);
+        process.exit(1);
+      }
+      responseData = normalisePayload(responseData);
+    } else if (positionalData !== undefined) {
+      responseData = positionalData;
+      if (containsShellHostileChars(responseData)) {
+        console.error('warning: payload contains characters that may indicate shell expansion');
+        console.error('         (backticks, $(, or unbalanced quotes). If the delivered bytes');
+        console.error("         look wrong, use --stdin <<'EOF' ... EOF for safer delivery.");
+      }
+    } else {
+      console.error('Error: Response data required.');
+      console.error('Usage: sly-kanban respond <response-id> "your response data"');
+      console.error("   or: sly-kanban respond <response-id> --stdin <<'EOF' ... EOF");
+      process.exit(1);
+    }
+
+    if (responseData.length === 0) {
+      console.error('Error: payload is empty.');
+      console.error('If you intended to deliver an empty response, pass a non-empty placeholder');
+      console.error('such as "no response" or "(none)" so the receiving agent has something to read.');
+      process.exit(1);
+    }
+
+    const byteLength = Buffer.byteLength(responseData, 'utf8');
+    const MAX_BYTES = 1024 * 1024;
+    if (byteLength > MAX_BYTES) {
+      console.error(`Error: payload is ${byteLength} bytes; max allowed is ${MAX_BYTES} bytes (1 MB).`);
+      process.exit(1);
+    }
+
+    const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
+    const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
+
     try {
       const res = await fetch(`${bridgeUrl}/responses/${encodeURIComponent(responseId)}`, {
         method: 'POST',
@@ -2589,12 +2787,14 @@ function cmdRespond(args) {
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({ error: 'Unknown error' }));
-        console.error(`Error: ${errBody.error || 'Failed to deliver response'}`);
+        console.error(`Error: ${formatRespondError(responseId, errBody)}`);
         process.exit(1);
       }
 
       const result = await res.json();
-      console.log(`Response delivered.${result.lateInjection ? ' (late injection — caller had already timed out)' : ''}`);
+      const preview = sanitisePreview(responseData, 80);
+      const lateSuffix = result.lateInjection ? ' (late injection — caller had already timed out)' : '';
+      console.log(`Response delivered. (${byteLength} bytes — preview: "${preview}")${lateSuffix}`);
     } catch (err) {
       if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
         console.error('Error: Bridge is not running.');

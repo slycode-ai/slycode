@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.33] - 2026-04-25
+
+### Added
+- Harden sly-kanban respond against shell-quoting corruption — `--stdin` mode with heredoc support for safe multi-line responses with backticks and quotes
+- Late response injection — recover responses delivered after polling timeout via PTY injection into the original calling session
+
+### Changed
+- Canonical session-key derivation from project folder path — keeps web UI, messaging, and CLI session names in lockstep regardless of project ID shape
+- Better expiry diagnostics on cross-card responses — distinguish expired/consumed/unknown when delivery fails
+- Sanitize injected response payloads to escape control bytes that could mangle the terminal
+- Rewrite `slycode update` CLI for clearer service detection and restart behavior
+- Deep design action v1.2.0 — clearer self-contained message guidance
+
+### Fixed
+- Dismiss kanban card hover tooltip when drag starts (prevented tooltip lingering during drag)
+
 ## [0.2.32] - 2026-04-21
 
 ### Fixed

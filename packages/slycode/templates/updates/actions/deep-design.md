@@ -1,6 +1,6 @@
 ---
 name: deep-design
-version: 1.1.0
+version: 1.2.0
 label: "Deep Design"
 description: "Thorough design with parallel analysis agents for creative, risk, and quality perspectives"
 group: "Card Actions"
@@ -96,12 +96,40 @@ Now begin the normal design iteration:
 - Update the design doc as decisions are made
 - Focus on goals, constraints, and acceptance criteria
 
-**IMPORTANT — Surface everything in your message.** Do not assume the user has read the design document. Every time you respond, list in your conversation message:
-- Any **outstanding questions** that need answers
-- Any **options or trade-offs** that need a decision
-- Any **suggestions** you want feedback on
+---
 
-Questions written into the doc but not surfaced in your message are effectively invisible.
+### IMPORTANT — Self-Contained Messages
+
+**Assume the user has NOT read the design document.** Every message you send must stand on its own. Do not ask questions that rely on the user having read the doc.
+
+For every outstanding question, option, trade-off, or suggestion you surface, include in the message itself:
+
+1. **The problem / context** — what is this decision about, and why does it matter? A sentence or two describing what's at stake.
+2. **The options** — each option spelled out with enough detail that the user can evaluate it without opening the doc. Include:
+   - What the option actually means in practice
+   - Pros and cons / trade-offs
+   - Any implications (scope, complexity, cost, UX impact)
+3. **Your recommendation** (if you have one) and why.
+4. **What you need from the user** — a clear, specific question.
+
+**Bad:**
+> Question 1: Should we go with approach B or C?
+
+**Good:**
+> **Question 1 — Storage strategy**
+>
+> The card adds session persistence, which needs a storage layer. Two candidates emerged:
+>
+> - **Option B: SQLite file** — simple, zero deps, good for single-machine use. Downside: no cross-machine sync, file locking issues under concurrent writes.
+> - **Option C: Redis** — handles concurrency natively, supports TTL out of the box. Downside: another service to run; the Unintended Consequences agent flagged that we don't currently have Redis anywhere in the stack.
+>
+> I lean toward B because our session volume is low and adding a new infra component for this feels heavy. But C is the safer choice if we expect multi-machine scenarios later.
+>
+> **Which direction do you want to take?**
+
+Apply this structure to every question, option, or suggestion you surface — during synthesis and throughout the Q&A iteration. If a question depends on something in the doc (a requirement, a constraint, an earlier decision), restate that thing in the message. Questions written into the doc but not surfaced with full context in your message are effectively invisible.
+
+**Be concise where it makes sense.** The goal is *enough* context to decide, not exhaustive explanation. A simple question with an obvious framing needs one or two sentences of setup, not a full problem/options/recommendation block. Use the full structure when the decision genuinely has trade-offs; skip it when it doesn't. Match the weight of the explanation to the weight of the decision.
 
 **When design is complete — assess complexity:**
 

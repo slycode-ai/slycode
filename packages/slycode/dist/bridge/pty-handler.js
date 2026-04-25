@@ -213,16 +213,11 @@ export const CHUNKED_WRITE_DELAY_MS = 200;
 export async function writeChunkedToPty(ptyProcess, data) {
     if (os.platform() !== 'win32' || data.length <= CHUNKED_WRITE_SIZE) {
         // Unix or small write — pass through directly
-        if (data.length > CHUNKED_WRITE_SIZE) {
-            console.log(`[writeChunkedToPty] passthrough (${os.platform()}): ${data.length} chars`);
-        }
         ptyProcess.write(data);
         return;
     }
     // Windows: chunk to avoid ConPTY truncation at ~4KB
-    const totalChunks = Math.ceil(data.length / CHUNKED_WRITE_SIZE);
-    console.log(`[writeChunkedToPty] chunking: ${data.length} chars → ${totalChunks} × ${CHUNKED_WRITE_SIZE} (${CHUNKED_WRITE_DELAY_MS}ms delay)`);
-    for (let i = 0, chunkNum = 1; i < data.length; chunkNum++) {
+    for (let i = 0; i < data.length;) {
         let end = Math.min(i + CHUNKED_WRITE_SIZE, data.length);
         // Don't split surrogate pairs (emoji, some CJK) at chunk boundaries
         if (end < data.length) {
@@ -231,15 +226,12 @@ export async function writeChunkedToPty(ptyProcess, data) {
                 end++;
             }
         }
-        const chunk = data.slice(i, end);
-        console.log(`[writeChunkedToPty] chunk ${chunkNum}/${totalChunks}: ${chunk.length} chars, starts="${chunk.slice(0, 30).replace(/\n/g, '\\n')}..."`);
-        ptyProcess.write(chunk);
+        ptyProcess.write(data.slice(i, end));
         i = end;
         if (i < data.length) {
             await new Promise(r => setTimeout(r, CHUNKED_WRITE_DELAY_MS));
         }
     }
-    console.log(`[writeChunkedToPty] complete: ${data.length} chars written in ${totalChunks} chunks`);
 }
 export function resizePty(ptyProcess, cols, rows) {
     ptyProcess.resize(cols, rows);

@@ -36,46 +36,32 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.update = update;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
+const net = __importStar(require("net"));
 const child_process_1 = require("child_process");
 const workspace_1 = require("./workspace");
 const sync_1 = require("./sync");
 const service_detect_1 = require("../platform/service-detect");
 const symlinks_1 = require("../platform/symlinks");
-function restartSystemd() {
-    console.log('  Restarting systemd services...');
-    try {
-        (0, child_process_1.execSync)('systemctl --user daemon-reload', { stdio: 'pipe', windowsHide: true });
-    }
-    catch { /* ok */ }
-    for (const svc of service_detect_1.SERVICES) {
-        const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', `slycode-${svc}.service`);
-        if (!fs.existsSync(unitPath))
-            continue;
-        try {
-            (0, child_process_1.execSync)(`systemctl --user restart slycode-${svc}`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
-            console.log(`    ✓ slycode-${svc} restarted`);
-        }
-        catch {
-            console.warn(`    ! slycode-${svc} failed to restart`);
-        }
-    }
+const service_common_1 = require("../platform/service-common");
+function isPortInUse(port, host = '127.0.0.1') {
+    return new Promise((resolve) => {
+        const server = net.createServer();
+        server.once('error', () => resolve(true));
+        server.once('listening', () => {
+            server.close();
+            resolve(false);
+        });
+        server.listen(port, host);
+    });
 }
-function restartLaunchd() {
-    console.log('  Restarting launchd agents...');
-    const uid = process.getuid?.() ?? 501;
-    for (const svc of service_detect_1.SERVICES) {
-        const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
-        if (!fs.existsSync(plistPath))
-            continue;
-        try {
-            (0, child_process_1.execSync)(`launchctl kickstart -k gui/${uid}/com.slycode.${svc}`, { stdio: 'pipe', timeout: 10000, windowsHide: true });
-            console.log(`    ✓ com.slycode.${svc} restarted`);
-        }
-        catch {
-            console.warn(`    ! com.slycode.${svc} failed to restart`);
-        }
+async function waitForPort(port, host = '127.0.0.1', timeoutMs = 15000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        if (await isPortInUse(port, host))
+            return true;
+        await new Promise((r) => setTimeout(r, 500));
     }
+    return false;
 }
 function restartWindowsTasks() {
     console.log('  Restarting Windows tasks...');
@@ -94,19 +80,56 @@ function restartWindowsTasks() {
         }
     }
 }
-async function restartBackground() {
-    console.log('  Restarting background services...');
-    const { stop } = await Promise.resolve().then(() => __importStar(require('./stop')));
-    await stop([]);
-    console.log('');
-    const { start } = await Promise.resolve().then(() => __importStar(require('./start')));
-    await start([]);
+function logHintFor(service, runMode) {
+    switch (runMode) {
+        case 'systemd': return `journalctl --user -u slycode-${service} --no-pager -n 40`;
+        case 'launchd': return `~/.slycode/logs/${service}.log`;
+        case 'windows-task': return `Event Viewer → Task Scheduler history, task "SlyCode-${service}"`;
+        case 'background': return `~/.slycode/logs/${service}.log`;
+        default: return 'check service logs';
+    }
+}
+async function verifyServicesUp(workspace, config, runMode) {
+    const envVars = (0, service_common_1.loadEnvFile)(workspace);
+    // Mirror install-time enablement logic so we don't warn on services that were
+    // intentionally skipped (e.g. messaging without a channel token).
+    const enabled = [];
+    for (const svc of service_detect_1.SERVICES) {
+        if (!config.services[svc])
+            continue;
+        if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN)
+            continue;
+        enabled.push({ name: svc, port: config.ports[svc] });
+    }
+    const failures = [];
+    for (const svc of enabled) {
+        const ready = await waitForPort(svc.port, '127.0.0.1', 15000);
+        if (!ready)
+            failures.push(svc.name);
+    }
+    if (failures.length > 0) {
+        console.log('');
+        for (const name of failures) {
+            console.error(`  ✗ ${name} did not come up on its port after restart`);
+            console.error(`    Logs: ${logHintFor(name, runMode)}`);
+        }
+    }
 }
 async function update(_args) {
     const workspace = (0, workspace_1.resolveWorkspaceOrExit)();
+    const config = (0, workspace_1.resolveConfig)(workspace);
     const stateFile = path.join((0, workspace_1.getStateDir)(), 'state.json');
     // Detect how services are running before we update anything
     const runMode = (0, service_detect_1.detectRunMode)(stateFile);
+    // On Windows background mode, the running node.exe holds file locks on dist/*.js.
+    // npm update cannot overwrite those files while the service is running — so stop
+    // first, then update, then restart (instead of the usual restart-after-update).
+    if (runMode === 'background' && process.platform === 'win32') {
+        console.log('Stopping services before update (Windows file locks)...');
+        const { stop } = await Promise.resolve().then(() => __importStar(require('./stop')));
+        await stop([]);
+        console.log('');
+    }
     // Step 1: npm update @slycode/slycode
     console.log('Updating SlyCode...');
     console.log('');
@@ -153,23 +176,43 @@ async function update(_args) {
         console.log('  ✓ Seeded terminal-classes.json');
         console.log('');
     }
-    // Step 3: Restart services using the detected run mode
+    // Step 3: Restart services using the detected run mode.
+    // For systemd/launchd we call the platform install function instead of a plain
+    // restart: it regenerates the unit/plist with current binary paths, so a stale
+    // unit pointing at an old dist layout can't leave the service broken.
     if (runMode !== 'none') {
         switch (runMode) {
-            case 'systemd':
-                restartSystemd();
+            case 'systemd': {
+                const { serviceLinux } = await Promise.resolve().then(() => __importStar(require('../platform/service-linux')));
+                await serviceLinux('install', workspace, config);
                 break;
-            case 'launchd':
-                restartLaunchd();
+            }
+            case 'launchd': {
+                const { serviceMacos } = await Promise.resolve().then(() => __importStar(require('../platform/service-macos')));
+                await serviceMacos('install', workspace, config);
                 break;
+            }
             case 'windows-task':
                 restartWindowsTasks();
                 break;
-            case 'background':
-                await restartBackground();
+            case 'background': {
+                console.log('  Restarting background services...');
+                // On Windows we already stopped before npm update to release file locks.
+                // Everywhere else, stop now.
+                if (process.platform !== 'win32') {
+                    const { stop } = await Promise.resolve().then(() => __importStar(require('./stop')));
+                    await stop([]);
+                    console.log('');
+                }
+                const { start } = await Promise.resolve().then(() => __importStar(require('./start')));
+                await start([]);
                 break;
+            }
         }
         console.log('');
+        // Step 4: Verify services actually came up. Silent on success; prints one
+        // error line per failed service with a log pointer.
+        await verifyServicesUp(workspace, config, runMode);
     }
     // Summary
     const pkgPath = path.join(workspace, 'node_modules', '@slycode', 'slycode', 'package.json');

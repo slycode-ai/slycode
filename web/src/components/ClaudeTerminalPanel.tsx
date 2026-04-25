@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { buildPrompt, renderTemplate, type SlyActionsConfig, type SlyActionItem } from '@/lib/sly-actions';
 import { usePolling } from '@/hooks/usePolling';
@@ -76,6 +76,14 @@ export interface TerminalContext {
 
 interface ClaudeTerminalPanelProps {
   sessionName: string;
+  /**
+   * Alternative base session-name prefixes to try when the primary name 404s.
+   * Populated by the parent from project.sessionKeyAliases so pre-migration
+   * sessions (stored under the legacy project.id form) can still be resolved.
+   * Each entry is a base name (without provider segment), same shape as
+   * `sessionName`. Provider insertion is applied consistently.
+   */
+  sessionNameAliases?: string[];
   cwd: string;
   actionsConfig: SlyActionsConfig;
   actions: SlyActionItem[];
@@ -107,6 +115,7 @@ const BRIDGE_API = '/api/bridge';
 
 export function ClaudeTerminalPanel({
   sessionName: baseSessionName,
+  sessionNameAliases = [],
   cwd,
   actionsConfig,
   actions,
@@ -165,10 +174,31 @@ export function ClaudeTerminalPanel({
   const [instructionFileCheck, setInstructionFileCheck] = useState<{ needed: boolean; targetFile?: string; copySource?: string } | null>(null);
   const [createInstructionFile, setCreateInstructionFile] = useState(true);
 
-  // Build session name with provider segment
-  const sessionName = baseSessionName.includes(':card:') || baseSessionName.endsWith(':global')
-    ? baseSessionName.replace(/:card:/, `:${selectedProvider}:card:`).replace(/:global$/, `:${selectedProvider}:global`)
-    : baseSessionName;
+  // Build session name with provider segment. Same transform applied to primary
+  // and aliases so direct-fetch fallback can try them in order.
+  const applyProviderSegment = (base: string): string =>
+    base.includes(':card:') || base.endsWith(':global')
+      ? base.replace(/:card:/, `:${selectedProvider}:card:`).replace(/:global$/, `:${selectedProvider}:global`)
+      : base;
+  const sessionName = applyProviderSegment(baseSessionName);
+  // Stable key for deps so useCallback doesn't churn when the parent passes a
+  // fresh array literal each render.
+  const aliasKey = sessionNameAliases.join('|');
+  // Full candidate list: primary first, then aliases in order. Deduped.
+  const sessionNameCandidates = useMemo(() => {
+    const all = [sessionName, ...sessionNameAliases.map(applyProviderSegment)];
+    return Array.from(new Set(all));
+    // applyProviderSegment closes over selectedProvider; list is recomputed when that changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionName, aliasKey, selectedProvider]);
+
+  // Resolved session name — the first candidate that the bridge actually has.
+  // Starts null; set by fetchSessionInfo once we confirm existence. All direct
+  // operations (stop, input, image, relink, SSE, delete) use this resolved name
+  // so ops land on the legacy-named session if that's where the state lives.
+  const [resolvedSessionName, setResolvedSessionName] = useState<string | null>(null);
+  // Effective name for operations: resolved if known, else primary.
+  const activeSessionName = resolvedSessionName ?? sessionName;
 
   // Use ref for callback to avoid re-creating fetchSessionInfo on every render
   const onSessionChangeRef = useRef(onSessionChange);
@@ -271,19 +301,30 @@ export function ClaudeTerminalPanel({
       .catch(() => { /* ignore — non-critical */ });
   }, [selectedProvider, cwd, bridgeUrl, isRunning]);
 
-  // Fetch session info
+  // Fetch session info — tries primary sessionName first, then aliases. The
+  // first candidate that returns 200 wins; resolvedSessionName is updated so
+  // subsequent ops (input/stop/image/SSE) use the actual stored name.
   const fetchSessionInfo = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`, { signal });
-      if (res.ok) {
-        const data = await res.json();
-        setSessionInfo(data);
-        onSessionChangeRef.current?.(data);
+    for (const candidate of sessionNameCandidates) {
+      try {
+        const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(candidate)}`, { signal });
+        if (res.ok) {
+          const data = await res.json();
+          setSessionInfo(data);
+          setResolvedSessionName(prev => (prev === candidate ? prev : candidate));
+          onSessionChangeRef.current?.(data);
+          return;
+        }
+        // 404 from this candidate — try next alias (don't clear state yet).
+      } catch {
+        // Network error — abort. Don't try further candidates; usePolling retries.
+        return;
       }
-    } catch {
-      // Silently ignore — network errors are expected during sleep/wake
     }
-  }, [sessionName, bridgeUrl]);
+    // None of the candidates existed. Clear any stale resolution so future
+    // fetches start fresh with the primary.
+    setResolvedSessionName(null);
+  }, [sessionNameCandidates, bridgeUrl]);
 
   usePolling(fetchSessionInfo, 5000);
 
@@ -478,7 +519,7 @@ export function ClaudeTerminalPanel({
   const stopSession = async () => {
     setIsStopping(true);
     try {
-      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}?action=stop`, {
+      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}?action=stop`, {
         method: 'DELETE',
       });
       setShowTerminal(false);
@@ -500,7 +541,7 @@ export function ClaudeTerminalPanel({
   const relinkSession = async () => {
     setIsRelinking(true);
     try {
-      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/relink`, {
+      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/relink`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -553,7 +594,7 @@ export function ClaudeTerminalPanel({
       const formData = new FormData();
       formData.append('image', file);
 
-      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/image`, {
+      const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/image`, {
         method: 'POST',
         body: formData,
       });
@@ -568,7 +609,7 @@ export function ClaudeTerminalPanel({
       const { filename } = await res.json();
 
       // Inject bracketed reference into PTY (insert only, no submit)
-      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: `[Screenshot: screenshots/${filename}]` }),
@@ -592,7 +633,7 @@ export function ClaudeTerminalPanel({
       setScreenshotToast({ filename: '', previewUrl, status: 'error', message: 'Network error' });
       imagePasteInProgressRef.current = false;
     }
-  }, [bridgeUrl, sessionName]);
+  }, [bridgeUrl, activeSessionName]);
 
   const connectToSession = () => {
     setShowTerminal(true);
@@ -616,7 +657,7 @@ export function ClaudeTerminalPanel({
       // Without markers, the TUI processes each chunk as it arrives (on Windows,
       // writeChunkedToPty sends 1KB chunks with 200ms delays). Bracketed paste
       // tells the TUI to buffer the entire input as a single paste operation.
-      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: `\x1b[200~${command}\x1b[201~` }),
@@ -624,7 +665,7 @@ export function ClaudeTerminalPanel({
       // Then send Enter separately if submitting
       if (submit) {
         await new Promise(r => setTimeout(r, 600));
-        await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+        await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: '\r' }),
@@ -662,7 +703,7 @@ export function ClaudeTerminalPanel({
           <div className="flex-1 overflow-hidden" data-terminal-id={voiceTerminalId || sessionName}>
             <Terminal
               key={terminalKey}
-              sessionName={sessionName}
+              sessionName={activeSessionName}
               bridgeUrl={bridgeUrl}
               tintColor={tintColor}
               onConnectionChange={handleConnectionChange}
@@ -729,7 +770,7 @@ export function ClaudeTerminalPanel({
                   </button>
                   <button
                     onClick={() => {
-                      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}?action=delete`, { method: 'DELETE' })
+                      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}?action=delete`, { method: 'DELETE' })
                         .then(() => {
                           setSessionInfo(null);
                           onSessionChange?.(null);

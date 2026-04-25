@@ -4,7 +4,13 @@ export declare class BridgeClient {
     constructor(bridgeUrl: string);
     getSession(name: string): Promise<BridgeSessionInfo | null>;
     listSessions(): Promise<BridgeSessionInfo[]>;
-    getProjectSessions(projectId: string): Promise<BridgeSessionInfo[]>;
+    /**
+     * Get sessions for a project, matching the first session-name segment
+     * against any of the provided keys. Pass just a projectId for backward
+     * compat (matches that single key); pass a key array to support aliases
+     * (e.g. canonical sessionKey + legacy project.id form).
+     */
+    getProjectSessions(projectIdOrKeys: string | string[]): Promise<BridgeSessionInfo[]>;
     /** Get card IDs with currently active sessions (isActive from /stats). */
     getActiveCardSessions(projectIds: string[]): Promise<Set<string>>;
     /** Get lastActive timestamps for card sessions (from /sessions, includes stopped). */

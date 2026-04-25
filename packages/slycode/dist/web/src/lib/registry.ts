@@ -30,6 +30,7 @@ import {
 import { getStoreAssets } from './store-scanner';
 import { calculateHealthFromAssets } from './health-score';
 import { getBridgeUrl } from './paths';
+import { ensureProjectSessionKey } from './session-keys';
 
 // Path to the registry file
 // Resolution: SLYCODE_HOME → derive from cwd
@@ -51,16 +52,45 @@ const REPO_ROOT = getRepoRoot();
 const REGISTRY_PATH = path.join(REPO_ROOT, 'projects', 'registry.json');
 
 /**
- * Load the registry JSON file
+ * Load the registry JSON file. Self-heals missing sessionKey/sessionKeyAliases
+ * on each project by computing them from project.path; persists once via
+ * atomic write if anything changed. Safe to run multiple times (idempotent).
  */
 export async function loadRegistry(): Promise<Registry> {
+  let content: string;
   try {
-    const content = await fs.readFile(REGISTRY_PATH, 'utf-8');
-    return JSON.parse(content) as Registry;
+    content = await fs.readFile(REGISTRY_PATH, 'utf-8');
   } catch (error) {
     console.error('Failed to load registry:', error);
     throw new Error(`Failed to load registry from ${REGISTRY_PATH}`);
   }
+
+  const registry = JSON.parse(content) as Registry;
+
+  // Self-heal: ensure every project has sessionKey + sessionKeyAliases.
+  let dirty = false;
+  for (const project of registry.projects) {
+    if (ensureProjectSessionKey(project)) dirty = true;
+  }
+
+  if (dirty) {
+    // Persist the migration. Use a temp-file + rename pattern so a crash
+    // mid-write can't corrupt the registry.
+    try {
+      const tmpPath = `${REGISTRY_PATH}.tmp.${process.pid}.${Date.now()}`;
+      const out = JSON.stringify(registry, null, 2) + '\n';
+      await fs.writeFile(tmpPath, out, 'utf-8');
+      await fs.rename(tmpPath, REGISTRY_PATH);
+      console.log(`Registry: backfilled sessionKey on ${registry.projects.length} project(s) and persisted.`);
+    } catch (err) {
+      // Persistence failure is non-fatal — the migration will retry next load.
+      // We still return the in-memory migrated registry so the current request
+      // gets correct sessionKeys.
+      console.warn('Registry sessionKey migration: write failed, will retry next load', err);
+    }
+  }
+
+  return registry;
 }
 
 /**

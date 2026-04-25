@@ -18,6 +18,7 @@ import type { KanbanCard, KanbanBoard, AutomationConfig } from './types';
 import { loadRegistry } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
+import { computeSessionKey } from './session-keys';
 
 /**
  * Load env vars from the project root .env file if not already set.
@@ -378,7 +379,10 @@ export async function triggerAutomation(
   if (!config) return { cardId: card.id, projectId, success: false, error: 'No automation config' };
 
   const provider = config.provider || 'claude';
-  const sessionName = `${projectId}:${provider}:card:${card.id}`;
+  // Derive canonical sessionKey from path so automation session names match
+  // what the CLI creates (scripts/kanban.js:37) and what CardModal writes.
+  const sessionKey = computeSessionKey(projectPath);
+  const sessionName = `${sessionKey}:${provider}:card:${card.id}`;
   const cwd = config.workingDirectory || projectPath;
 
   // Build prompt with run header + card context + description as instruction

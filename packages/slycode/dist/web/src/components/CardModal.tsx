@@ -17,6 +17,7 @@ import { VoiceControlBar } from './VoiceControlBar';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
 import { VoiceErrorPopup } from './VoiceErrorPopup';
 import { useVoice } from '@/contexts/VoiceContext';
+import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
 
 interface VoiceFocusTarget {
   type: 'input' | 'terminal';
@@ -579,7 +580,20 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState(false);
 
-  const sessionName = `${projectId}:card:${card.id}`;
+  // Canonical session key derived from the project's folder path. This is what
+  // the CLI uses (scripts/kanban.js:37), so session names stay in lockstep
+  // regardless of what shape project.id happens to be in the registry.
+  const sessionKey = projectPath ? computeSessionKey(projectPath) : projectId;
+  // Alias-aware matcher — finds sessions created under either the canonical
+  // sessionKey or the legacy project.id form (for backward compat with
+  // sessions already persisted in bridge-sessions.json).
+  const projectKeyShape = {
+    id: projectId,
+    path: projectPath ?? '',
+    sessionKey,
+    sessionKeyAliases: projectId !== sessionKey ? [projectId] : [],
+  };
+  const sessionName = `${sessionKey}:card:${card.id}`;
   const cwd = projectPath!;
 
   // Derived multi-session state
@@ -712,7 +726,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       .then((data) => {
         if (!data?.sessions) return;
         const matches = (data.sessions as SessionInfo[]).filter((s) =>
-          s.name?.endsWith(cardSuffix) && s.name?.startsWith(`${projectId}:`)
+          s.name?.endsWith(cardSuffix) && sessionBelongsToProject(s.name, projectKeyShape)
         );
         const visible = matches.filter(s =>
           s.status !== 'stopped' || s.hasHistory
@@ -2042,6 +2056,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             <div className="h-full min-w-0">
               <ClaudeTerminalPanel
                 sessionName={sessionName}
+                sessionNameAliases={projectKeyShape.sessionKeyAliases.map(alias => `${alias}:card:${card.id}`)}
                 cwd={cwd}
                 actionsConfig={actionsConfig}
                 actions={actions}
@@ -2159,7 +2174,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                         </label>
                         <button
                           onClick={async () => {
-                            const name = `${projectId}:${newSessionProvider}:card:${card.id}`;
+                            const name = `${sessionKey}:${newSessionProvider}:card:${card.id}`;
                             try {
                               await fetch('/api/bridge/sessions', {
                                 method: 'POST',
@@ -2174,7 +2189,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                                 const cardSuffix = `card:${card.id}`;
                                 fetch('/api/bridge/sessions').then(r => r.ok ? r.json() : null).then(data => {
                                   if (!data?.sessions) return;
-                                  const matches = (data.sessions as SessionInfo[]).filter(s => s.name?.endsWith(cardSuffix) && s.name?.startsWith(`${projectId}:`));
+                                  const matches = (data.sessions as SessionInfo[]).filter(s => s.name?.endsWith(cardSuffix) && sessionBelongsToProject(s.name, projectKeyShape));
                                   const visible = matches.filter(s => s.status !== 'stopped' || s.hasHistory);
                                   visible.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
                                   setCardSessions(visible.map(s => {

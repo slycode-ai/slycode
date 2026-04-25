@@ -10,6 +10,27 @@ import { getGitStatus } from './git-utils.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+/**
+ * Hex-escape control bytes inside a payload before injecting it into the
+ * caller's PTY via the late-response path. A corrupted or hostile payload
+ * could otherwise contain ANSI/OSC sequences that mangle the terminal or
+ * even rewrite earlier output. Tab/newline are preserved (they are part of
+ * legitimate multi-line content); CR and other control bytes are escaped.
+ */
+function sanitiseInjectedPayload(payload: string): string {
+  let out = '';
+  for (let i = 0; i < payload.length; i++) {
+    const code = payload.charCodeAt(i);
+    if (code === 0x09 || code === 0x0A) { out += payload[i]; continue; }
+    if (code < 0x20 || code === 0x7F || (code >= 0x80 && code <= 0x9F)) {
+      out += '\\x' + code.toString(16).padStart(2, '0');
+      continue;
+    }
+    out += payload[i];
+  }
+  return out;
+}
+
 export function createApiRouter(sessionManager: SessionManager, responseStore: ResponseStore): Router {
   const router = Router();
 
@@ -391,13 +412,20 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
 
     const entry = responseStore.deliver(id, data);
     if (!entry) {
-      return res.status(404).json({ error: 'Response not found or expired' });
+      const hint = responseStore.getExpiryHint(id);
+      return res.status(404).json({
+        error: 'Response not found or expired',
+        reason: hint.reason,
+        issuedAt: hint.issuedAt,
+        expiredAt: hint.expiredAt,
+      });
     }
 
     // Late response injection: if caller has timed out, inject into calling session's PTY
     // Uses submitPrompt for reliable delivery (bracketed paste + delay + Enter + double-submit)
     if (entry.callerTimedOut && entry.callingSession) {
-      const lateMessage = `[LATE RESPONSE received]\nA previously timed-out cross-card prompt has received a response:\n---\n${data}\n---`;
+      const safeData = sanitiseInjectedPayload(data);
+      const lateMessage = `[LATE RESPONSE received]\nA previously timed-out cross-card prompt has received a response:\n---\n${safeData}\n---`;
       sessionManager.submitPrompt(entry.callingSession, { prompt: lateMessage, force: true }).then(result => {
         if (result.success) {
           console.log(`[responses] Late response injected into ${entry.callingSession} for response ${id}`);

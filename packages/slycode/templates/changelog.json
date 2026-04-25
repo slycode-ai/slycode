@@ -1,5 +1,43 @@
 [
   {
+    "version": "0.2.33",
+    "date": "2026-04-25",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "Harden sly-kanban respond against shell-quoting corruption — add --stdin mode with heredoc support for safe multi-line responses with backticks and quotes"
+      },
+      {
+        "type": "feature",
+        "description": "Late response injection — recover responses delivered after polling timeout via PTY injection into the original calling session"
+      },
+      {
+        "type": "improvement",
+        "description": "Canonical session-key derivation from project folder path — keeps web UI, messaging, and CLI session names in lockstep regardless of project ID shape"
+      },
+      {
+        "type": "improvement",
+        "description": "Better expiry diagnostics on cross-card responses — distinguish expired/consumed/unknown when delivery fails"
+      },
+      {
+        "type": "improvement",
+        "description": "Sanitize injected response payloads to escape control bytes that could mangle the terminal"
+      },
+      {
+        "type": "improvement",
+        "description": "Rewrite slycode update CLI for clearer service detection and restart behavior"
+      },
+      {
+        "type": "improvement",
+        "description": "Deep design action v1.2.0 — clearer self-contained message guidance"
+      },
+      {
+        "type": "bugfix",
+        "description": "Dismiss kanban card hover tooltip when drag starts (prevented tooltip lingering during drag)"
+      }
+    ]
+  },
+  {
     "version": "0.2.32",
     "date": "2026-04-21",
     "changes": [

@@ -4,6 +4,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { getSlycodeRoot, getPackageDir, expandTilde } from '@/lib/paths';
+import { ensureProjectSessionKey } from '@/lib/session-keys';
+import type { Project } from '@/lib/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -116,8 +118,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Add to registry
-    const newProject = {
+    // Add to registry. Compute sessionKey + aliases up front so the entry is
+    // complete on first write — loadRegistry() would backfill on next read,
+    // but callers using the POST response immediately need the canonical key.
+    const newProject: Project = {
       id: projectId,
       name,
       description: description || '',
@@ -127,6 +131,7 @@ export async function POST(request: Request) {
       areas: [] as string[],
       tags: tags || [],
     };
+    ensureProjectSessionKey(newProject);
 
     registry.projects.push(newProject);
     registry.lastUpdated = new Date().toISOString();

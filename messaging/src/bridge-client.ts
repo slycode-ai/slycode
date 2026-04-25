@@ -50,10 +50,20 @@ export class BridgeClient {
     }
   }
 
-  async getProjectSessions(projectId: string): Promise<BridgeSessionInfo[]> {
+  /**
+   * Get sessions for a project, matching the first session-name segment
+   * against any of the provided keys. Pass just a projectId for backward
+   * compat (matches that single key); pass a key array to support aliases
+   * (e.g. canonical sessionKey + legacy project.id form).
+   */
+  async getProjectSessions(projectIdOrKeys: string | string[]): Promise<BridgeSessionInfo[]> {
     const all = await this.listSessions();
-    const prefix = `${projectId}:`;
-    return all.filter(s => s.name.startsWith(prefix));
+    const keys = Array.isArray(projectIdOrKeys) ? projectIdOrKeys : [projectIdOrKeys];
+    const keySet = new Set(keys.filter(Boolean));
+    return all.filter(s => {
+      const firstSegment = s.name.split(':')[0];
+      return keySet.has(firstSegment);
+    });
   }
 
   /** Get card IDs with currently active sessions (isActive from /stats). */

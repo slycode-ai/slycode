@@ -16,6 +16,19 @@ export interface Project {
   areas: string[];
   tags: string[];
   order?: number;
+  /**
+   * Stable bridge-session identifier derived from path.basename(path).
+   * Computed deterministically from the folder name; kept in sync with
+   * scripts/kanban.js so CLI and web agree on one identity per project.
+   * Populated by loadRegistry() on first read if missing (self-healing).
+   */
+  sessionKey?: string;
+  /**
+   * Previous session-name prefixes that old persisted sessions may still use
+   * (e.g. the legacy project.id when it diverges from sessionKey). Used for
+   * alias-aware lookup so existing sessions keep resolving after upgrade.
+   */
+  sessionKeyAliases?: string[];
 }
 
 export interface Registry {

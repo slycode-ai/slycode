@@ -52,7 +52,9 @@ async function main() {
   validateDataPaths();
 
   const app = express();
-  app.use(express.json());
+  // 1 MB matches the CLI-side cap in scripts/kanban.js cmdRespond — kept in
+  // sync so a payload that passes the CLI cap won't 413 at the bridge.
+  app.use(express.json({ limit: '1mb' }));
 
   // Load runtime config
   const runtimeConfig = loadRuntimeConfig();

@@ -10,6 +10,7 @@ import { onTerminalPrompt } from '@/lib/terminal-events';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import { BranchTab } from './BranchTab';
 import { useVoice } from '@/contexts/VoiceContext';
+import { computeSessionKey } from '@/lib/session-keys';
 
 interface SessionInfo {
   status: 'running' | 'stopped' | 'detached';
@@ -63,7 +64,15 @@ export function GlobalClaudePanel({
   }, []);
 
   const resolvedLabel = label || (projectName ? projectName : 'Global Terminal');
-  const sessionName = sessionNameOverride || `${projectId}:global`;
+  // Use sessionKey (derived from path) for new session names so web and CLI
+  // agree on one identity per project, regardless of registry id shape.
+  const sessionKey = projectPath ? computeSessionKey(projectPath) : projectId;
+  const sessionName = sessionNameOverride || `${sessionKey}:global`;
+  // Alias bases for resolving pre-migration sessions stored under the old
+  // project.id form. Panel tries primary first, then each alias.
+  const sessionNameAliases = sessionNameOverride
+    ? []
+    : (projectId && projectId !== sessionKey ? [`${projectId}:global`] : []);
   const cwd = cwdOverride || projectPath!;
 
   const isRunning = sessionInfo?.status === 'running' || sessionInfo?.status === 'detached';
@@ -252,6 +261,7 @@ export function GlobalClaudePanel({
         <div className="flex h-[calc(100%-3rem)] flex-col rounded-none sm:rounded-b-md border border-t-0 border-void-700 bg-[#222228] dark:bg-[#1a1a1a] shadow-(--shadow-overlay) overflow-hidden">
           <ClaudeTerminalPanel
             sessionName={sessionName}
+            sessionNameAliases={sessionNameAliases}
             cwd={cwd}
             actionsConfig={actionsConfig}
             actions={actions}

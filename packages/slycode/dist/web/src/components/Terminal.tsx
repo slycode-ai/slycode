@@ -124,16 +124,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // xterm processes the key, regardless of which internal element has focus.
     // The previous DOM keydown listener on the container could miss events when
     // xterm's internal textarea was focused (e.g. after crash/reconnect).
+    //
+    // pasteText: clipboard paste content ONLY. Wraps payload in bracketed-paste
+    // markers so the receiving app treats it as a single pasted block.
+    // Do NOT use for synthesized keystrokes (CSI u, etc.) — apps honoring
+    // bracketed paste treat the inner bytes as literal text and will not
+    // interpret escape sequences. Use sendKey() for raw keystrokes instead.
     const pasteText = (text: string) => {
-      // Wrap in bracketed paste sequences so the receiving application
-      // treats the input as a single pasted block (not individual keypresses).
-      // This matches xterm's native paste behavior and prevents multi-line
-      // content from being interpreted as separate Enter presses.
       const wrapped = `\x1b[200~${text}\x1b[201~`;
       fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: wrapped }),
+        signal: fetchAbort.signal,
+      }).catch(() => {});
+    };
+
+    // sendKey: raw keystroke/escape sequence path. POSTs bytes unwrapped so
+    // the target CLI interprets them as a key press, not as pasted content.
+    const sendKey = (bytes: string) => {
+      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: bytes }),
         signal: fetchAbort.signal,
       }).catch(() => {});
     };
@@ -144,9 +157,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Codex, and Gemini interpret \x1b[13;2u as newline insertion.
       // Must return false for ALL event types (keydown, keypress) to prevent
       // xterm from sending \r via the keypress path.
+      // Must go through sendKey (raw), NOT pasteText — bracketed-paste wrapping
+      // makes CLIs treat the CSI u bytes as literal paste content.
       if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (e.type === 'keydown') {
-          pasteText('\x1b[13;2u');
+          sendKey('\x1b[13;2u');
         }
         return false;
       }

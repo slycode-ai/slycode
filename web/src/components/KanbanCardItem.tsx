@@ -166,7 +166,16 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
   };
 
   useEffect(() => {
+    const dismiss = () => {
+      if (hoverTimeout.current) {
+        clearTimeout(hoverTimeout.current);
+        hoverTimeout.current = null;
+      }
+      setShowTooltip(false);
+    };
+    window.addEventListener('kanban-card-drag', dismiss);
     return () => {
+      window.removeEventListener('kanban-card-drag', dismiss);
       if (hoverTimeout.current) {
         clearTimeout(hoverTimeout.current);
       }
@@ -177,14 +186,12 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
     e.dataTransfer.setData('text/plain', card.id);
     e.dataTransfer.effectAllowed = 'move';
     onDragStart?.();
-    setShowTooltip(false);
-    if (hoverTimeout.current) {
-      clearTimeout(hoverTimeout.current);
-    }
+    window.dispatchEvent(new CustomEvent('kanban-card-drag'));
   };
 
   const handleDragEnd = () => {
     onDragEnd?.();
+    window.dispatchEvent(new CustomEvent('kanban-card-drag'));
   };
 
   const hasTags = !isCompact && (card.areas.length > 0 || card.tags.length > 0);

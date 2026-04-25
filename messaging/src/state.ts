@@ -50,6 +50,10 @@ export class StateManager {
         name: p.name,
         description: p.description,
         path: p.path || '',
+        // Carry sessionKey/aliases forward if the registry has been migrated.
+        // If absent, session-keys helpers derive on-the-fly from path.
+        sessionKey: p.sessionKey,
+        sessionKeyAliases: p.sessionKeyAliases,
       }));
     } catch (err) {
       console.warn('Could not load project registry:', (err as Error).message);

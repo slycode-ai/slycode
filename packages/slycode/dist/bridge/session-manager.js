@@ -1174,15 +1174,11 @@ export class SessionManager {
         const CLOSE = '\x1b[201~';
         if (data.startsWith(OPEN) && data.endsWith(CLOSE)) {
             const inner = data.slice(OPEN.length, data.length - CLOSE.length);
-            console.log(`[writeToSession] ${name}: bracketed paste detected, ${inner.length} chars inner content`);
             writeToPty(session.pty, OPEN);
             await writeChunkedToPty(session.pty, inner);
             writeToPty(session.pty, CLOSE);
         }
         else {
-            if (data.length > 100) {
-                console.log(`[writeToSession] ${name}: raw write, ${data.length} chars (no bracketed paste)`);
-            }
             await writeChunkedToPty(session.pty, data);
         }
         // If this session doesn't have a GUID yet, try to detect it (any provider)

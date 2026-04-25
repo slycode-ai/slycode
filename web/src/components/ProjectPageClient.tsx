@@ -5,6 +5,7 @@ import type { BridgeStats } from '@/lib/types';
 import { usePolling } from '@/hooks/usePolling';
 import { GlobalClaudePanel } from './GlobalClaudePanel';
 import { useVoice } from '@/contexts/VoiceContext';
+import { computeSessionKey, projectKeyAlternation } from '@/lib/session-keys';
 
 interface ProjectPageClientProps {
   projectId: string;
@@ -27,7 +28,17 @@ export function ProjectPageClient({
 
   // Poll bridge stats for global terminal activity (every 2s)
   const fetchActivity = useCallback(async (signal: AbortSignal) => {
-    const projGlobalPattern = new RegExp(`^${projectId}:(?:[^:]+:)?global$`);
+    // Alias-aware + regex-escaped match for the project's global session.
+    // Accepts the canonical sessionKey AND the legacy project.id form so old
+    // sessions still resolve after the sessionKey migration.
+    const sessionKey = projectPath ? computeSessionKey(projectPath) : projectId;
+    const keyAlt = projectKeyAlternation({
+      id: projectId,
+      path: projectPath,
+      sessionKey,
+      sessionKeyAliases: projectId !== sessionKey ? [projectId] : [],
+    });
+    const projGlobalPattern = new RegExp(`^(?:${keyAlt}):(?:[^:]+:)?global$`);
     try {
       const res = await fetch('/api/bridge/stats', { signal });
       if (res.ok) {
@@ -40,7 +51,7 @@ export function ProjectPageClient({
     } catch {
       // Bridge might not be running
     }
-  }, [projectId]);
+  }, [projectId, projectPath]);
 
   usePolling(fetchActivity, 2000);
 

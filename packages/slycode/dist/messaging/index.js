@@ -11,6 +11,7 @@ import { SlyActionFilter } from './sly-action-filter.js';
 import { transcribeAudio, validateSttConfig } from './stt.js';
 import { textToSpeech, convertToOgg } from './tts.js';
 import { searchVoices } from './voices.js';
+import { projectSessionKeys, escapeRegex } from './session-keys.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // --- Shared Provider Labels ---
 const PROVIDER_LABELS = {
@@ -58,11 +59,28 @@ function updateGlobalProviderDefault(provider) {
         // Best-effort — don't break on failure
     }
 }
+/**
+ * Resolve project session keys (canonical + legacy aliases) from the messaging
+ * state. Accepts a bare projectId for backward compat when no state lookup is
+ * available, or a full Project object for alias-aware matching.
+ */
+function resolveKeysFor(projectIdOrProject, state) {
+    if (typeof projectIdOrProject === 'string') {
+        const proj = state?.getProjects().find(p => p.id === projectIdOrProject);
+        if (!proj)
+            return [projectIdOrProject];
+        return projectSessionKeys(proj);
+    }
+    return projectSessionKeys(projectIdOrProject);
+}
 /** Resolve provider for a card from bridge sessions. Picks the earliest-created session. */
-async function resolveProviderFromBridge(bridge, projectId, cardId) {
+async function resolveProviderFromBridge(bridge, projectId, cardId, state) {
     try {
-        const sessions = await bridge.getProjectSessions(projectId);
-        const cardPattern = new RegExp(`^${projectId}:([^:]+):card:${cardId}$`);
+        const keys = resolveKeysFor(projectId, state);
+        const sessions = await bridge.getProjectSessions(keys);
+        const keyAlt = keys.map(escapeRegex).join('|');
+        const escapedCardId = escapeRegex(cardId);
+        const cardPattern = new RegExp(`^(?:${keyAlt}):([^:]+):card:${escapedCardId}$`);
         const matches = sessions.filter(s => cardPattern.test(s.name));
         if (matches.length === 0)
             return null;
@@ -75,10 +93,12 @@ async function resolveProviderFromBridge(bridge, projectId, cardId) {
     }
 }
 /** Resolve provider for a project-level target from bridge sessions. Picks the earliest-created session. */
-async function resolveProjectProviderFromBridge(bridge, projectId) {
+async function resolveProjectProviderFromBridge(bridge, projectId, state) {
     try {
-        const sessions = await bridge.getProjectSessions(projectId);
-        const projPattern = new RegExp(`^${projectId}:([^:]+):global$`);
+        const keys = resolveKeysFor(projectId, state);
+        const sessions = await bridge.getProjectSessions(keys);
+        const keyAlt = keys.map(escapeRegex).join('|');
+        const projPattern = new RegExp(`^(?:${keyAlt}):([^:]+):global$`);
         const matches = sessions.filter(s => projPattern.test(s.name));
         if (matches.length === 0)
             return null;
@@ -94,11 +114,11 @@ async function resolveProjectProviderFromBridge(bridge, projectId) {
 async function hasExplicitSession(bridge, state) {
     const target = state.getTarget();
     if (target.type === 'card' && target.projectId && target.cardId) {
-        const resolved = await resolveProviderFromBridge(bridge, target.projectId, target.cardId);
+        const resolved = await resolveProviderFromBridge(bridge, target.projectId, target.cardId, state);
         return resolved !== null;
     }
     if (target.type === 'project' && target.projectId) {
-        const resolved = await resolveProjectProviderFromBridge(bridge, target.projectId);
+        const resolved = await resolveProjectProviderFromBridge(bridge, target.projectId, state);
         return resolved !== null;
     }
     return false;
@@ -647,7 +667,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 state.setSelectedProvider(override);
             }
             else {
-                const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId);
+                const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId, state);
                 state.setSelectedProvider(projProvider || getProviderDefault().provider);
             }
             updateKeyboard(channel, state);
@@ -731,7 +751,8 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             // Check session status via bridge
             if (target.projectId && target.cardId) {
                 try {
-                    const sessions = await bridge.getProjectSessions(target.projectId);
+                    const keys = resolveKeysFor(target.projectId, state);
+                    const sessions = await bridge.getProjectSessions(keys);
                     const cardSession = sessions.find(s => s.name.includes(`card:${target.cardId}`));
                     if (cardSession) {
                         const sessionStatus = cardSession.status === 'running'
@@ -1039,7 +1060,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 state.setSelectedProvider(override);
             }
             else {
-                const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId);
+                const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId, state);
                 state.setSelectedProvider(projBridgeProvider || getProviderDefault().provider);
             }
             currentDrilldownStage = null;
@@ -1081,7 +1102,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 state.setSelectedProvider(override);
             }
             else {
-                const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId);
+                const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId, state);
                 state.setSelectedProvider(bridgeProvider || stageDefault.provider);
             }
             // Resolve model: bridge session > stage default > Default

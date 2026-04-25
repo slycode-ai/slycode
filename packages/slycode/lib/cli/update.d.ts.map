@@ -1,1 +1,1 @@
-{"version":3,"file":"update.d.ts","sourceRoot":"","sources":["../../src/cli/update.ts"],"names":[],"mappings":"AAkEA,wBAAsB,MAAM,CAAC,KAAK,EAAE,MAAM,EAAE,GAAG,OAAO,CAAC,IAAI,CAAC,CA6F3D"}
+{"version":3,"file":"update.d.ts","sourceRoot":"","sources":["../../src/cli/update.ts"],"names":[],"mappings":"AAwFA,wBAAsB,MAAM,CAAC,KAAK,EAAE,MAAM,EAAE,GAAG,OAAO,CAAC,IAAI,CAAC,CAqI3D"}

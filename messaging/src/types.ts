@@ -112,6 +112,8 @@ export interface Project {
   name: string;
   description: string;
   path: string;
+  sessionKey?: string;
+  sessionKeyAliases?: string[];
 }
 
 export interface AppState {
