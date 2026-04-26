@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.2.34",
+    "date": "2026-04-26",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Fix activity indicators showing zero for projects after the session-key migration — aggregate counts across canonical sessionKey and legacy id aliases"
+      },
+      {
+        "type": "bugfix",
+        "description": "Fix card session detection when project id contains regex-special characters (e.g. dots)"
+      }
+    ]
+  },
+  {
     "version": "0.2.33",
     "date": "2026-04-25",
     "changes": [

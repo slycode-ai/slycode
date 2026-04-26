@@ -121,6 +121,22 @@ export function projectKeyAlternation(project: ProjectKeyShape): string {
 }
 
 /**
+ * Sum bridge-stats counts across all of a project's session keys (canonical
+ * + aliases). Used for activity indicators that aggregate session counts by
+ * the first segment of the session name. Without alias awareness, projects
+ * whose registry id differs from sessionKey would always show zero.
+ */
+export function sumProjectActivityCounts(
+  project: ProjectKeyShape,
+  counts: Record<string, number>,
+): number {
+  return projectSessionKeys(project).reduce(
+    (sum, key) => sum + (counts[key] ?? 0),
+    0,
+  );
+}
+
+/**
  * Ensure a project has sessionKey + sessionKeyAliases populated. Mutates the
  * project in place. Returns true if anything was changed (for dirty tracking).
  *

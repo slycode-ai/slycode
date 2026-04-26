@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { loadDashboardData } from '@/lib/registry';
 import { getBridgeUrl } from '@/lib/paths';
+import { sumProjectActivityCounts } from '@/lib/session-keys';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,10 @@ export async function GET() {
     const bridgeSessions = await getBridgeSessions();
     for (const project of data.projects) {
       if (!project.accessible) continue;
-      project.activeSessions = bridgeSessions[project.id] || 0;
+      // Sum across canonical sessionKey + legacy id aliases. Without this,
+      // projects where registry.id differs from sessionKey would show zero
+      // even when sessions are active.
+      project.activeSessions = sumProjectActivityCounts(project, bridgeSessions);
     }
 
     return NextResponse.json(data);

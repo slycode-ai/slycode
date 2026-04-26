@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.34] - 2026-04-26
+
+### Fixed
+- Fix activity indicators showing zero for projects after the session-key migration — aggregate counts across canonical sessionKey and legacy id aliases
+- Fix card session detection when project id contains regex-special characters (e.g. dots)
+
 ## [0.2.33] - 2026-04-25
 
 ### Added

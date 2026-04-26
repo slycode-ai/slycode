@@ -15,6 +15,7 @@ import { CliAssetsTab } from './CliAssetsTab';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
 import { VersionUpdateToast } from './VersionUpdateToast';
+import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
 import { useVoice } from '@/contexts/VoiceContext';
 
@@ -46,10 +47,11 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       .catch(() => {});
   }, []);
 
-  // Merge live bridge counts into project data (poll is source of truth once it has run)
+  // Merge live bridge counts into project data (poll is source of truth once it has run).
+  // Alias-aware: sum across each project's canonical sessionKey + legacy id form.
   const projectsWithBridge = data.projects.map(p => ({
     ...p,
-    activeSessions: bridgeCounts !== null ? (bridgeCounts[p.id] ?? 0) : (p.activeSessions ?? 0),
+    activeSessions: bridgeCounts !== null ? sumProjectActivityCounts(p, bridgeCounts) : (p.activeSessions ?? 0),
   }));
   const accessibleProjects = projectsWithBridge.filter((p) => p.accessible);
   const inaccessibleProjects = projectsWithBridge.filter((p) => !p.accessible);

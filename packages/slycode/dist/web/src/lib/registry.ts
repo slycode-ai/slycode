@@ -30,7 +30,7 @@ import {
 import { getStoreAssets } from './store-scanner';
 import { calculateHealthFromAssets } from './health-score';
 import { getBridgeUrl } from './paths';
-import { ensureProjectSessionKey } from './session-keys';
+import { ensureProjectSessionKey, sumProjectActivityCounts } from './session-keys';
 
 // Path to the registry file
 // Resolution: SLYCODE_HOME → derive from cwd
@@ -352,7 +352,8 @@ export async function loadDashboardData(): Promise<DashboardData> {
         }
       }
       for (const project of projects) {
-        project.activeSessions = counts[project.id] ?? 0;
+        // Alias-aware: sum across canonical sessionKey + legacy id forms.
+        project.activeSessions = sumProjectActivityCounts(project, counts);
       }
     }
   } catch {

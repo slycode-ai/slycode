@@ -14,6 +14,7 @@ import { AutomationsScreen } from './AutomationsScreen';
 import { ContextMenu, type ContextMenuGroup } from './ContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import { VersionUpdateToast } from './VersionUpdateToast';
+import { projectKeyAlternation } from '@/lib/session-keys';
 
 interface SessionInfo {
   name: string;
@@ -175,8 +176,11 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
         const stats: BridgeStats = await res.json();
         const activeSet = new Set<string>();
 
-        // Match active sessions to cards by pattern: {projectId}:card:{cardId} or {projectId}:{provider}:card:{cardId}
-        const cardPattern = new RegExp(`^${project.id}:(?:[^:]+:)?card:(.+)$`);
+        // Match active sessions to cards. Alias-aware (canonical sessionKey +
+        // legacy project.id form) and regex-escaped so dots in the project id
+        // don't become wildcards.
+        const keyAlt = projectKeyAlternation(project);
+        const cardPattern = new RegExp(`^(?:${keyAlt}):(?:[^:]+:)?card:(.+)$`);
         for (const session of stats.sessions) {
           if (session.isActive) {
             const match = session.name.match(cardPattern);
