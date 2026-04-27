@@ -158,7 +158,16 @@ export class BridgeClient {
     }
   }
 
-  async sendImage(name: string, filePath: string, cwd?: string): Promise<{ filename: string }> {
+  async sendImage(
+    name: string,
+    filePath: string,
+    cwd?: string,
+    aliases: string[] = [],
+  ): Promise<{ filename: string }> {
+    // Resolve to the actual stored name. Image upload requires an exact
+    // match; without alias resolution, photos to alias-form sessions 404.
+    const resolved = await this.resolveExistingSession(name, aliases);
+    const targetName = resolved?.name ?? name;
     const fs = await import('fs');
     const path = await import('path');
     const fileBuffer = fs.readFileSync(filePath);
@@ -173,7 +182,7 @@ export class BridgeClient {
     }
 
     try {
-      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(name)}/image`, {
+      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(targetName)}/image`, {
         method: 'POST',
         body: formData,
       });
@@ -191,9 +200,16 @@ export class BridgeClient {
     }
   }
 
-  async stopSession(name: string): Promise<{ stopped: boolean; reason?: string }> {
+  async stopSession(
+    name: string,
+    aliases: string[] = [],
+  ): Promise<{ stopped: boolean; reason?: string }> {
+    // Resolve to the actual stored name so we stop the right session even
+    // when it lives under a legacy alias form.
+    const resolved = await this.resolveExistingSession(name, aliases);
+    const targetName = resolved?.name ?? name;
     try {
-      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(name)}/stop`, {
+      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(targetName)}/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -232,6 +248,41 @@ export class BridgeClient {
     }
   }
 
+  /**
+   * Try canonical name first, then each alias. Returns whichever exists on
+   * the bridge (running, detached, or stopped with persisted state). Returns
+   * null when none of the candidates are known to the bridge.
+   *
+   * Error handling: bridge-down errors abort the whole search (no point
+   * trying further candidates against an unreachable bridge). Per-candidate
+   * HTTP errors (e.g. transient 5xx on one specific name) log and continue
+   * so a single bad response doesn't prevent finding the alias session.
+   *
+   * Public so callers (stop/restart/sendImage/sendInput) can pre-resolve
+   * before performing direct ops, since those endpoints require the exact
+   * stored name.
+   */
+  async resolveExistingSession(
+    canonical: string,
+    aliases: string[] = [],
+  ): Promise<{ name: string; info: BridgeSessionInfo } | null> {
+    for (const candidate of [canonical, ...aliases]) {
+      try {
+        const info = await this.getSession(candidate);
+        if (info) return { name: candidate, info };
+      } catch (err) {
+        const msg = (err as Error)?.message || '';
+        if (msg === BRIDGE_DOWN_MSG) {
+          // Bridge unreachable — no point trying remaining candidates
+          return null;
+        }
+        // Per-candidate HTTP error — log and try next alias
+        debugLog(`[resolveExistingSession] candidate ${candidate} errored: ${msg}`);
+      }
+    }
+    return null;
+  }
+
   async ensureSession(
     sessionName: string,
     cwd: string,
@@ -239,18 +290,21 @@ export class BridgeClient {
     prompt?: string,
     createInstructionFile?: boolean,
     model?: string,
+    aliases: string[] = [],
   ): Promise<{ session: BridgeSessionInfo; permissionMismatch?: boolean }> {
-    // Check if session exists and is alive (running or detached)
-    const existing = await this.getSession(sessionName);
-    if (existing && (existing.status === 'running' || existing.status === 'detached')) {
-      // Permission mismatch detection: messaging always needs skip-permissions
-      const mismatch = existing.skipPermissions === false;
-      return { session: existing, permissionMismatch: mismatch };
+    // Resolve existing session via alias-aware lookup
+    const resolved = await this.resolveExistingSession(sessionName, aliases);
+    if (resolved && (resolved.info.status === 'running' || resolved.info.status === 'detached')) {
+      const mismatch = resolved.info.skipPermissions === false;
+      return { session: resolved.info, permissionMismatch: mismatch };
     }
 
-    // Create new session — messaging always forces skipPermissions
+    // No live session — create. Use the resolved (alias) name if a stopped
+    // session with history exists there, so we re-attach instead of creating
+    // a canonical duplicate.
+    const createName = resolved?.name ?? sessionName;
     const session = await this.createSession({
-      name: sessionName,
+      name: createName,
       cwd,
       prompt,
       provider,
@@ -259,7 +313,7 @@ export class BridgeClient {
       model: model || undefined,
     });
 
-    debugLog(`[ensureSession] Session created: resumed=${session.resumed}, hasPrompt=${!!prompt}`);
+    debugLog(`[ensureSession] Session created: name=${createName}, resumed=${session.resumed}, hasPrompt=${!!prompt}`);
 
     return { session };
   }
@@ -271,45 +325,42 @@ export class BridgeClient {
     provider: string = 'claude',
     createInstructionFile?: boolean,
     model?: string,
+    aliases: string[] = [],
   ): Promise<{ permissionMismatch?: boolean }> {
-    // Check if session is already active
-    const existing = await this.getSession(sessionName);
-    const isActive = existing && (existing.status === 'running' || existing.status === 'detached');
+    // Resolve via alias-aware lookup so we deliver to an existing alias-form
+    // session instead of falling through to create a canonical duplicate.
+    const resolved = await this.resolveExistingSession(sessionName, aliases);
+    const isActive = resolved && (resolved.info.status === 'running' || resolved.info.status === 'detached');
 
     if (!isActive) {
-      // New or stopped session — pass message as initial prompt
-      debugLog(`[sendMessage] Session ${sessionName} not active (status: ${existing?.status ?? 'not found'}), creating/resuming`);
-      const result = await this.ensureSession(sessionName, cwd, provider, message, createInstructionFile, model);
+      debugLog(`[sendMessage] Session ${sessionName} (aliases tried: ${aliases.length}) not active, creating/resuming`);
+      const result = await this.ensureSession(sessionName, cwd, provider, message, createInstructionFile, model, aliases);
       return { permissionMismatch: result.permissionMismatch };
     }
 
-    // Permission mismatch detection for existing sessions
-    if (existing!.skipPermissions === false) {
+    if (resolved!.info.skipPermissions === false) {
       return { permissionMismatch: true };
     }
 
-    // Active session — send via input with bracketed paste markers.
-    // Without markers, ConPTY on Windows processes each chunk separately
-    // instead of buffering the entire input as a single paste operation.
-    debugLog(`[sendMessage] Sending to ${sessionName} (status: ${existing!.status}, clients: ${existing!.connectedClients})`);
-    const textSent = await this.sendInput(sessionName, `\x1b[200~${message}\x1b[201~`);
+    const liveName = resolved!.name;
+    debugLog(`[sendMessage] Sending to ${liveName} (status: ${resolved!.info.status}, clients: ${resolved!.info.connectedClients})`);
+    const textSent = await this.sendInput(liveName, `\x1b[200~${message}\x1b[201~`);
     if (!textSent) {
-      throw new Error(`Failed to send input to session ${sessionName}`);
+      throw new Error(`Failed to send input to session ${liveName}`);
     }
 
-    // Wait briefly, then send carriage return to submit
     const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
     await new Promise(resolve => setTimeout(resolve, submitDelay));
-    const crSent = await this.sendInput(sessionName, '\r');
+    const crSent = await this.sendInput(liveName, '\r');
     if (!crSent) {
-      debugLog(`[sendMessage] FAILED to send CR to ${sessionName} — message typed but not submitted`);
+      debugLog(`[sendMessage] FAILED to send CR to ${liveName} — message typed but not submitted`);
     }
 
     // Double-submit: send a second Enter to catch swallowed keystrokes
     if (process.env.PROMPT_DOUBLE_SUBMIT === 'true') {
       const doubleDelay = parseInt(process.env.PROMPT_DOUBLE_SUBMIT_DELAY_MS || '300', 10);
       await new Promise(resolve => setTimeout(resolve, doubleDelay));
-      const cr2Sent = await this.sendInput(sessionName, '\r');
+      const cr2Sent = await this.sendInput(liveName, '\r');
       debugLog(`[sendMessage] Double-submit: cr2=${cr2Sent}`);
     }
 
@@ -317,23 +368,36 @@ export class BridgeClient {
     return {};
   }
 
-  async restartSession(sessionName: string, cwd: string, provider: string, prompt?: string, model?: string): Promise<BridgeSessionInfo> {
+  async restartSession(
+    sessionName: string,
+    cwd: string,
+    provider: string,
+    prompt?: string,
+    model?: string,
+    aliases: string[] = [],
+  ): Promise<BridgeSessionInfo> {
+    // Resolve to the live session name. If the user has a permission-mismatch
+    // session under an alias, we need to stop and recreate THAT one, not a
+    // canonical-named ghost.
+    const resolved = await this.resolveExistingSession(sessionName, aliases);
+    const targetName = resolved?.name ?? sessionName;
     // Kill existing session (DELETE with ?action=stop actually terminates the PTY)
     try {
-      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionName)}?action=stop`, {
+      const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(targetName)}?action=stop`, {
         method: 'DELETE',
       });
       if (res.ok) {
-        debugLog(`[restartSession] Stopped session: ${sessionName}`);
+        debugLog(`[restartSession] Stopped session: ${targetName}`);
       }
     } catch {
       debugLog(`[restartSession] Stop failed (may already be stopped)`);
     }
     // Wait for clean shutdown
     await new Promise(resolve => setTimeout(resolve, 1500));
-    // Recreate session with skip-permissions — NOT fresh, so it resumes with history
+    // Recreate session with skip-permissions — NOT fresh, so it resumes with history.
+    // Use targetName so we re-attach to the same logical session.
     return this.createSession({
-      name: sessionName,
+      name: targetName,
       cwd,
       prompt,
       provider,

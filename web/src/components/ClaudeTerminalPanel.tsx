@@ -490,11 +490,15 @@ export function ClaudeTerminalPanel({
         prompt = buildPrompt(command.prompt, contextObj);
       }
 
+      // For RESUME: use the resolved alias name so the bridge re-attaches to
+      // the existing session rather than creating a fresh duplicate under the
+      // canonical key. For a truly new session (no resolution), use primary.
+      const createName = resolvedSessionName ?? sessionName;
       const res = await fetch(`${bridgeUrl}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: sessionName,
+          name: createName,
           provider: selectedProvider,
           skipPermissions,
           cwd,

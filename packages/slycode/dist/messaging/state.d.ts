@@ -21,7 +21,21 @@ export declare class StateManager {
     selectProject(projectId: string): Project | null;
     selectCard(projectId: string, cardId: string, stage?: string): Project | null;
     getTarget(): NavigationTarget;
+    /**
+     * Resolve the canonical sessionKey for the currently-selected project.
+     * Reloads the project registry first so a path edit / sessionKey recompute
+     * elsewhere is reflected immediately. Falls back to raw projectId when no
+     * matching project (preserves old behavior for unmigrated state).
+     */
+    private currentProjectKey;
     getSessionName(): string;
+    /**
+     * Alias session names to try alongside getSessionName(). Returns names built
+     * from the project's legacy id form (sessionKeyAliases) so messaging can
+     * find pre-migration sessions before falling back to creating new ones
+     * under the canonical sessionKey.
+     */
+    getSessionNameAliases(): string[];
     /** Get session name in old format (without provider segment) for backward compat lookups. */
     getLegacySessionName(): string;
     getSessionCwd(): string;

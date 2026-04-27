@@ -17,10 +17,10 @@ export declare class BridgeClient {
     getCardSessionRecency(projectIds: string[]): Promise<Map<string, string>>;
     createSession(request: BridgeCreateSessionRequest): Promise<BridgeSessionInfo>;
     sendInput(name: string, data: string): Promise<boolean>;
-    sendImage(name: string, filePath: string, cwd?: string): Promise<{
+    sendImage(name: string, filePath: string, cwd?: string, aliases?: string[]): Promise<{
         filename: string;
     }>;
-    stopSession(name: string): Promise<{
+    stopSession(name: string, aliases?: string[]): Promise<{
         stopped: boolean;
         reason?: string;
     }>;
@@ -29,14 +29,32 @@ export declare class BridgeClient {
         uncommitted: number;
     } | null>;
     checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck>;
-    ensureSession(sessionName: string, cwd: string, provider?: string, prompt?: string, createInstructionFile?: boolean, model?: string): Promise<{
+    /**
+     * Try canonical name first, then each alias. Returns whichever exists on
+     * the bridge (running, detached, or stopped with persisted state). Returns
+     * null when none of the candidates are known to the bridge.
+     *
+     * Error handling: bridge-down errors abort the whole search (no point
+     * trying further candidates against an unreachable bridge). Per-candidate
+     * HTTP errors (e.g. transient 5xx on one specific name) log and continue
+     * so a single bad response doesn't prevent finding the alias session.
+     *
+     * Public so callers (stop/restart/sendImage/sendInput) can pre-resolve
+     * before performing direct ops, since those endpoints require the exact
+     * stored name.
+     */
+    resolveExistingSession(canonical: string, aliases?: string[]): Promise<{
+        name: string;
+        info: BridgeSessionInfo;
+    } | null>;
+    ensureSession(sessionName: string, cwd: string, provider?: string, prompt?: string, createInstructionFile?: boolean, model?: string, aliases?: string[]): Promise<{
         session: BridgeSessionInfo;
         permissionMismatch?: boolean;
     }>;
-    sendMessage(sessionName: string, cwd: string, message: string, provider?: string, createInstructionFile?: boolean, model?: string): Promise<{
+    sendMessage(sessionName: string, cwd: string, message: string, provider?: string, createInstructionFile?: boolean, model?: string, aliases?: string[]): Promise<{
         permissionMismatch?: boolean;
     }>;
-    restartSession(sessionName: string, cwd: string, provider: string, prompt?: string, model?: string): Promise<BridgeSessionInfo>;
+    restartSession(sessionName: string, cwd: string, provider: string, prompt?: string, model?: string, aliases?: string[]): Promise<BridgeSessionInfo>;
     /**
      * Poll bridge stats and send typing indicators while session is active.
      * Returns when the session stops producing output.

@@ -125,61 +125,90 @@ export function GlobalClaudePanel({
   const handleTerminalPrompt = useCallback(async (event: { prompt: string; autoSubmit?: boolean }) => {
     setIsExpanded(true);
 
-    // Build the provider-specific session name (matches ClaudeTerminalPanel logic)
-    const providerSessionName = sessionName.endsWith(':global')
-      ? sessionName.replace(/:global$/, `:${globalProvider}:global`)
-      : sessionName;
+    // Build provider-specific candidates: primary first, then aliases. Same
+    // pattern as ClaudeTerminalPanel — needed so an existing alias-form
+    // session is reused instead of getting a fresh canonical duplicate.
+    const applyProvider = (base: string): string =>
+      base.endsWith(':global') ? base.replace(/:global$/, `:${globalProvider}:global`) : base;
+    const providerSessionName = applyProvider(sessionName);
+    const candidates = Array.from(new Set([
+      providerSessionName,
+      ...sessionNameAliases.map(applyProvider),
+    ]));
 
-    // Always check bridge for actual session status (local state may be stale after refresh/navigation)
-    let actuallyRunning = isRunning;
-    if (!actuallyRunning) {
+    // Find an existing session by trying candidates in order. Bridge returns
+    // 200 with null body for missing — must check `data` not just `res.ok`.
+    let resolvedName: string | null = null;
+    let resolvedRunning = false;
+    let resolvedHasHistory = false;
+    let networkFailed = false;
+    for (const candidate of candidates) {
       try {
-        const statusRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(providerSessionName)}`);
+        const statusRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(candidate)}`);
         if (statusRes.ok) {
           const statusData = await statusRes.json();
-          if (statusData.status === 'running' || statusData.status === 'detached') {
-            actuallyRunning = true;
-            setSessionInfo({ status: statusData.status, hasHistory: statusData.hasHistory });
+          if (statusData) {
+            resolvedName = candidate;
+            resolvedRunning = statusData.status === 'running' || statusData.status === 'detached';
+            resolvedHasHistory = !!statusData.hasHistory;
+            if (resolvedRunning) {
+              setSessionInfo({ status: statusData.status, hasHistory: statusData.hasHistory });
+            }
+            break;
           }
         }
-      } catch {
-        // Bridge not reachable — fall through to start new session
+      } catch (err) {
+        // Network error: bridge is unreachable. Don't fall through to create —
+        // a missing fetch response doesn't mean the session is missing.
+        console.error('[GlobalClaudePanel] Bridge unreachable during session discovery:', err);
+        networkFailed = true;
+        break;
       }
     }
+    if (networkFailed) return;
 
-    if (actuallyRunning) {
-      // Session is running — send input directly via bridge API
+    if (resolvedRunning && resolvedName) {
+      // Session is running — send input directly to the resolved name. Check
+      // /input response: if the session exited between probe and input (404),
+      // surface the failure rather than silently swallowing it.
       try {
-        // Wrap in bracketed paste markers so the TUI buffers the entire input
-        // as a single paste (required for chunked writes on Windows ConPTY)
-        await fetch(`/api/bridge/sessions/${encodeURIComponent(providerSessionName)}/input`, {
+        const pasteRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(resolvedName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: `\x1b[200~${event.prompt}\x1b[201~` }),
         });
+        if (!pasteRes.ok) {
+          console.error(`[GlobalClaudePanel] Input paste failed (${pasteRes.status}) for session ${resolvedName}`);
+          return;
+        }
         if (event.autoSubmit !== false) {
           await new Promise(r => setTimeout(r, 600));
-          await fetch(`/api/bridge/sessions/${encodeURIComponent(providerSessionName)}/input`, {
+          const enterRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(resolvedName)}/input`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: '\r' }),
           });
+          if (!enterRes.ok) {
+            console.error(`[GlobalClaudePanel] Enter submission failed (${enterRes.status}) for session ${resolvedName}`);
+          }
         }
       } catch (err) {
         console.error('Failed to push prompt to terminal:', err);
       }
     } else {
-      // No session running — start a new session with the prompt
+      // No running session — start one. Use the resolved name (so we re-attach
+      // to a stopped alias session with history) or fall back to primary.
       try {
+        const createName = resolvedName ?? providerSessionName;
         const res = await fetch('/api/bridge/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: providerSessionName,
+            name: createName,
             provider: globalProvider,
             skipPermissions: true,
             cwd,
-            fresh: true,
+            fresh: !resolvedHasHistory,
             prompt: event.prompt,
           }),
         });
@@ -191,7 +220,7 @@ export function GlobalClaudePanel({
         console.error('Failed to start terminal session with prompt:', err);
       }
     }
-  }, [isRunning, sessionName, cwd, globalProvider]);
+  }, [sessionName, sessionNameAliases, cwd, globalProvider]);
 
   useEffect(() => {
     return onTerminalPrompt(handleTerminalPrompt);

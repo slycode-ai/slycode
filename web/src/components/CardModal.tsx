@@ -745,7 +745,14 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         const visible = matches.filter(s =>
           s.status !== 'stopped' || s.hasHistory
         );
-        if (visible.length === 0) return;
+        if (visible.length === 0) {
+          // Clear stale pill state — switching to a card with no sessions, or
+          // after the last session was deleted, would otherwise leave a
+          // ghost Resume button and selected provider visible.
+          setCardSessions([]);
+          setSelectedProvider(null);
+          return;
+        }
         visible.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
         const sessions: CardSession[] = visible.map(s => {
           let provider = s.provider || 'claude';

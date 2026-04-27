@@ -1,5 +1,35 @@
 [
   {
+    "version": "0.2.36",
+    "date": "2026-04-27",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "Resume button now reuses existing alias-form sessions instead of creating duplicates — uses resolved alias name when posting session-create"
+      },
+      {
+        "type": "bugfix",
+        "description": "Alias-aware session resolution across messaging, scheduler, and web — image upload, stop, restart, and direct input now find sessions stored under legacy alias names"
+      },
+      {
+        "type": "bugfix",
+        "description": "Scheduler automation re-attaches to whichever existing session ranks highest (running > detached > creating > stopped) instead of blindly creating canonical duplicates"
+      },
+      {
+        "type": "bugfix",
+        "description": "GlobalClaudePanel tries candidate session names (canonical + aliases) before creating new sessions"
+      },
+      {
+        "type": "bugfix",
+        "description": "Clear stale pill state in CardModal when switching to a card with no visible sessions — prevents ghost Resume button and selected provider"
+      },
+      {
+        "type": "improvement",
+        "description": "Messaging now uses canonical projectKey for new session creation, keeping naming in lockstep with web/CLI"
+      }
+    ]
+  },
+  {
     "version": "0.2.35",
     "date": "2026-04-27",
     "changes": [

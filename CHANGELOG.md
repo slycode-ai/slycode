@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.36] - 2026-04-27
+
+### Fixed
+- Resume button now reuses existing alias-form sessions instead of creating duplicates — uses resolved alias name when posting session-create
+- Alias-aware session resolution across messaging, scheduler, and web — image upload, stop, restart, and direct input now find sessions stored under legacy alias names
+- Scheduler automation re-attaches to whichever existing session ranks highest (running > detached > creating > stopped) instead of blindly creating canonical duplicates
+- GlobalClaudePanel tries candidate session names (canonical + aliases) before creating new sessions
+- Clear stale pill state in CardModal when switching to a card with no visible sessions — prevents ghost Resume button and selected provider
+
+### Changed
+- Messaging now uses canonical projectKey for new session creation, keeping naming in lockstep with web/CLI
+
 ## [0.2.35] - 2026-04-27
 
 ### Added

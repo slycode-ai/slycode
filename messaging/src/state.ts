@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { AppState, NavigationTarget, PendingInstructionFileConfirm, Project, ResponseMode, TargetType } from './types.js';
+import { computeSessionKey } from './session-keys.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -213,29 +214,78 @@ export class StateManager {
     }
   }
 
+  /**
+   * Resolve the canonical sessionKey for the currently-selected project.
+   * Reloads the project registry first so a path edit / sessionKey recompute
+   * elsewhere is reflected immediately. Falls back to raw projectId when no
+   * matching project (preserves old behavior for unmigrated state).
+   */
+  private currentProjectKey(): string | null {
+    const id = this.state.selectedProjectId;
+    if (!id) return null;
+    this.reloadProjects();
+    const proj = this.state.projects.find(p => p.id === id);
+    if (!proj) return id;
+    return proj.sessionKey ?? computeSessionKey(proj.path) ?? id;
+  }
+
   getSessionName(): string {
     const target = this.getTarget();
     const provider = this.selectedProvider;
+    // Use canonical sessionKey for new session names so messaging stays in
+    // lockstep with web/CLI. Existing alias-form sessions are reached via
+    // alias-aware lookups in BridgeClient/index.ts before falling through
+    // to creating under this canonical name.
+    const projectKey = this.currentProjectKey() ?? target.projectId;
     switch (target.type) {
       case 'global':
         return `global:${provider}:global`;
       case 'project':
-        return `${target.projectId}:${provider}:global`;
+        return `${projectKey}:${provider}:global`;
       case 'card':
-        return `${target.projectId}:${provider}:card:${target.cardId}`;
+        return `${projectKey}:${provider}:card:${target.cardId}`;
     }
+  }
+
+  /**
+   * Alias session names to try alongside getSessionName(). Returns names built
+   * from the project's legacy id form (sessionKeyAliases) so messaging can
+   * find pre-migration sessions before falling back to creating new ones
+   * under the canonical sessionKey.
+   */
+  getSessionNameAliases(): string[] {
+    const target = this.getTarget();
+    if (target.type === 'global') return [];
+    const id = this.state.selectedProjectId;
+    if (!id) return [];
+    // currentProjectKey() reloads projects; doing so here too would double-load.
+    const canonical = this.currentProjectKey() ?? id;
+    const proj = this.state.projects.find(p => p.id === id);
+    if (!proj) return [];
+    const rawAliases = proj.sessionKeyAliases ?? (proj.id !== canonical ? [proj.id] : []);
+    const provider = this.selectedProvider;
+    // Dedupe — historical path edits can stack identical entries into
+    // sessionKeyAliases; without dedup each duplicate causes a redundant GET
+    // in resolveExistingSession.
+    const dedupedAliases = Array.from(new Set(rawAliases.filter(k => k && k !== canonical)));
+    return dedupedAliases.map(k =>
+      target.type === 'project'
+        ? `${k}:${provider}:global`
+        : `${k}:${provider}:card:${target.cardId}`,
+    );
   }
 
   /** Get session name in old format (without provider segment) for backward compat lookups. */
   getLegacySessionName(): string {
     const target = this.getTarget();
+    const projectKey = this.currentProjectKey() ?? target.projectId;
     switch (target.type) {
       case 'global':
         return 'global:global';
       case 'project':
-        return `${target.projectId}:global`;
+        return `${projectKey}:global`;
       case 'card':
-        return `${target.projectId}:card:${target.cardId}`;
+        return `${projectKey}:card:${target.cardId}`;
     }
   }
 

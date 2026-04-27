@@ -390,8 +390,59 @@ export async function triggerAutomation(
   // Derive canonical sessionKey from path so automation session names match
   // what the CLI creates (scripts/kanban.js:37) and what CardModal writes.
   const sessionKey = computeSessionKey(projectPath);
-  const sessionName = `${sessionKey}:${provider}:card:${card.id}`;
+  const canonicalName = `${sessionKey}:${provider}:card:${card.id}`;
   const cwd = config.workingDirectory || projectPath;
+  const isFreshConfig = config.freshSession || false;
+
+  // Probe bridge for any existing session under canonical OR legacy alias and
+  // pick the one we should re-attach to. Rules:
+  //   1. freshSession=true → always use canonical (we're going to stop+restart
+  //      anyway, and writing under alias would perpetuate legacy naming).
+  //   2. canonical exists → prefer canonical (converge to canonical going
+  //      forward, even if alias also exists from earlier duplicate state).
+  //   3. only alias exists → re-attach to alias to avoid creating a parallel
+  //      canonical session.
+  const aliasName = projectId !== sessionKey
+    ? `${projectId}:${provider}:card:${card.id}`
+    : null;
+  let sessionName = canonicalName;
+  if (!isFreshConfig && aliasName) {
+    const probe = async (name: string): Promise<unknown | null> => {
+      try {
+        const res = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(name)}`);
+        if (!res.ok) return null;
+        return await res.json(); // bridge returns 200/null for missing
+      } catch {
+        return null;
+      }
+    };
+    const [canonicalInfo, aliasInfo] = await Promise.all([
+      probe(canonicalName),
+      probe(aliasName),
+    ]);
+    // Rank candidates by status — operating on the actual live session is
+    // more important than converging to canonical naming. Use canonical only
+    // when it ranks at least as high as alias, so the canonical-running case
+    // wins the tie and we drift toward canonical going forward.
+    const rank = (info: unknown): number => {
+      if (!info || typeof info !== 'object') return 0;
+      const status = (info as { status?: string }).status;
+      if (status === 'running' || status === 'detached') return 3;
+      if (status === 'creating') return 2;
+      if (status === 'stopped') return 1;
+      return 0;
+    };
+    const cRank = rank(canonicalInfo);
+    const aRank = rank(aliasInfo);
+    const cStatus = (canonicalInfo as { status?: string } | null)?.status ?? 'missing';
+    const aStatus = (aliasInfo as { status?: string } | null)?.status ?? 'missing';
+    if (aRank > cRank) {
+      sessionName = aliasName;
+      console.log(`[scheduler] Re-attaching to alias ${aliasName} (alias=${aStatus} > canonical=${cStatus})`);
+    } else if (cRank > 0 && aRank > 0) {
+      console.log(`[scheduler] Both canonical and alias exist for ${card.id}; preferring canonical (canonical=${cStatus}, alias=${aStatus})`);
+    }
+  }
 
   // Build prompt with run header + card context + description as instruction
   const contextLines: string[] = [
@@ -417,7 +468,7 @@ export async function triggerAutomation(
     fullPrompt += '\n\nAfter completing the task, send a summary of the results using the messaging skill: sly-messaging send "<your summary>"';
   }
 
-  const isFresh = config.freshSession || false;
+  const isFresh = isFreshConfig;
   const startTime = Date.now();
 
   // Tracking for automation log

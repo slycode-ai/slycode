@@ -515,13 +515,16 @@ async function executeQuickCommand(
   try {
     await channel.sendTyping();
 
-    // Check if session is already active
-    const existing = await bridge.getSession(sessionName);
-    const isActive = existing && (existing.status === 'running' || existing.status === 'detached');
+    // Resolve via alias-aware lookup so we deliver to an existing alias-form
+    // session instead of falling through to create a canonical duplicate.
+    const aliases = state.getSessionNameAliases();
+    const resolved = await bridge.resolveExistingSession(sessionName, aliases);
+    const isActive = resolved && (resolved.info.status === 'running' || resolved.info.status === 'detached');
+    const liveName = resolved?.name ?? sessionName;
 
     if (isActive) {
       // Permission mismatch check
-      if (existing!.skipPermissions === false) {
+      if (resolved!.info.skipPermissions === false) {
         await channel.sendInlineKeyboard(
           '⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?',
           [[
@@ -532,21 +535,22 @@ async function executeQuickCommand(
         return;
       }
       // Active session — inject via sendInput with bracketed paste markers
-      // (ConPTY on Windows needs markers to buffer chunked input as a single paste)
-      await bridge.sendInput(sessionName, `\x1b[200~${formatted}\x1b[201~`);
+      // (ConPTY on Windows needs markers to buffer chunked input as a single paste).
+      // Use the resolved live name so input lands on the actual session.
+      await bridge.sendInput(liveName, `\x1b[200~${formatted}\x1b[201~`);
       await new Promise(resolve => setTimeout(resolve, 600));
-      await bridge.sendInput(sessionName, '\r');
+      await bridge.sendInput(liveName, '\r');
     } else {
       // Pre-flight: check instruction file before creating a new session
       const proceed = await checkInstructionFilePreFlight(channel, state, bridge, sessionName, cwd, provider, formatted);
       if (!proceed) return;
 
       // New or stopped session — pass prompt to session creation
-      await bridge.ensureSession(sessionName, cwd, provider, formatted, undefined, state.getSelectedModel() || undefined);
+      await bridge.ensureSession(sessionName, cwd, provider, formatted, undefined, state.getSelectedModel() || undefined, aliases);
     }
 
     await channel.sendText(`Sent: ${cmd.label}`);
-    bridge.watchActivity(sessionName, channel).catch(() => {});
+    bridge.watchActivity(liveName, channel).catch(() => {});
   } catch (err) {
     await channel.sendText(`Error: ${(err as Error).message}`);
   }
@@ -682,9 +686,19 @@ function setupChannel(
     let activeCardIds: Set<string>;
     let sessionRecency: Map<string, string>;
     try {
+      // Expand each projectId to its alias-aware key set so quick-access
+      // catches sessions stored under either the canonical sessionKey or
+      // the legacy project.id form.
+      const projectsById = new Map(state.getProjects().map(p => [p.id, p]));
+      const allKeys = Array.from(new Set(
+        projectIds.flatMap(id => {
+          const proj = projectsById.get(id);
+          return proj ? projectSessionKeys(proj) : [id];
+        })
+      ));
       [activeCardIds, sessionRecency] = await Promise.all([
-        bridge.getActiveCardSessions(projectIds),
-        bridge.getCardSessionRecency(projectIds),
+        bridge.getActiveCardSessions(allKeys),
+        bridge.getCardSessionRecency(allKeys),
       ]);
     } catch {
       activeCardIds = new Set();
@@ -1193,6 +1207,7 @@ function setupChannel(
         pending.provider,
         approved,
         pending.model || undefined,
+        state.getSessionNameAliases(),
       );
       if (result.permissionMismatch) {
         await channel.sendInlineKeyboard(
@@ -1218,13 +1233,15 @@ function setupChannel(
       const cwd = state.getSessionCwd();
       const provider = state.getSelectedProvider();
       try {
-        // Check if someone is connected via web UI
-        const existing = await bridge.getSession(sessionName);
-        if (existing && existing.connectedClients > 0) {
+        // Check if someone is connected via web UI — alias-aware so an
+        // alias-form session is correctly detected.
+        const aliases = state.getSessionNameAliases();
+        const resolved = await bridge.resolveExistingSession(sessionName, aliases);
+        if (resolved && resolved.info.connectedClients > 0) {
           await channel.sendText('⚠️ Terminal is open in the web UI. Disconnecting and restarting...');
         }
         await channel.sendTyping();
-        await bridge.restartSession(sessionName, cwd, provider, undefined, state.getSelectedModel() || undefined);
+        await bridge.restartSession(sessionName, cwd, provider, undefined, state.getSelectedModel() || undefined, aliases);
         await channel.sendText('Session restarted with skip-permissions. Send your message again.');
       } catch (err) {
         await channel.sendText(`Error restarting: ${(err as Error).message}`);
@@ -1367,7 +1384,7 @@ function setupChannel(
       }
       try {
         const sessionName = state.getSessionName();
-        const result = await bridge.stopSession(sessionName);
+        const result = await bridge.stopSession(sessionName, state.getSessionNameAliases());
         if (result.stopped) {
           await channel.sendText('Interrupted active session.');
         } else {
@@ -1391,7 +1408,7 @@ function setupChannel(
       if (!proceed) return;
 
       await channel.sendTyping();
-      const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined);
+      const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined, state.getSessionNameAliases());
       if (result.permissionMismatch) {
         await channel.sendInlineKeyboard(
           '⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?',
@@ -1440,7 +1457,7 @@ function setupChannel(
       if (!proceed) return;
 
       await channel.sendTyping();
-      const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined);
+      const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined, state.getSessionNameAliases());
       if (result.permissionMismatch) {
         await channel.sendInlineKeyboard(
           '⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?',
@@ -1467,10 +1484,12 @@ function setupChannel(
     try {
       await channel.sendTyping();
 
-      // Upload all images to bridge
+      // Upload all images to bridge — alias-aware so photos to alias-form
+      // sessions don't 404.
+      const aliases = state.getSessionNameAliases();
       const filenames: string[] = [];
       for (const photo of photos) {
-        const { filename } = await bridge.sendImage(sessionName, photo.filePath, cwd);
+        const { filename } = await bridge.sendImage(sessionName, photo.filePath, cwd, aliases);
         filenames.push(filename);
       }
 
@@ -1491,7 +1510,7 @@ function setupChannel(
       const proceed = await checkInstructionFilePreFlight(channel, state, bridge, sessionName, cwd, provider, message);
       if (!proceed) return;
 
-      const result = await bridge.sendMessage(sessionName, cwd, message, provider, undefined, state.getSelectedModel() || undefined);
+      const result = await bridge.sendMessage(sessionName, cwd, message, provider, undefined, state.getSelectedModel() || undefined, state.getSessionNameAliases());
       if (result.permissionMismatch) {
         await channel.sendInlineKeyboard(
           '⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?',
