@@ -32,7 +32,7 @@ const TEMPLATE_VARIABLES = [
   {
     key: 'card',
     label: 'Card',
-    template: '{{card.title}} [{{card.id}}]\nType: {{card.type}} | Priority: {{card.priority}}\n{{card.description}}',
+    template: '{{card.title}} [{{card.id}}]\nType: {{card.type}} | Priority: {{card.priority}}\n{{#if card.status}}Status: {{card.status}}\n{{/if}}{{card.description}}',
     color: 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
   },
   {

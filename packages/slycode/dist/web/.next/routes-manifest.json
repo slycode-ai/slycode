@@ -38,6 +38,14 @@
       "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/html-viewer/[...path]",
+      "regex": "^/html\\-viewer/(.+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPpath": "nxtPpath"
+      },
+      "namedRegex": "^/html\\-viewer/(?<nxtPpath>.+?)(?:/)?$"
+    },
+    {
       "page": "/project/[id]",
       "regex": "^/project/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -148,6 +156,12 @@
       "regex": "^/api/git\\-status(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/git\\-status(?:/)?$"
+    },
+    {
+      "page": "/api/html-attachment",
+      "regex": "^/api/html\\-attachment(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/html\\-attachment(?:/)?$"
     },
     {
       "page": "/api/kanban",

@@ -68,6 +68,8 @@ export interface TerminalContext {
     areas: string[];
     design_ref?: string;
     feature_ref?: string;
+    status?: string;       // normalized text only; empty string when unset
+    statusSetAt?: string;  // ISO timestamp; empty string when unset
   };
   stage?: string;
   project?: { name: string; description?: string };
@@ -302,28 +304,38 @@ export function ClaudeTerminalPanel({
   }, [selectedProvider, cwd, bridgeUrl, isRunning]);
 
   // Fetch session info — tries primary sessionName first, then aliases. The
-  // first candidate that returns 200 wins; resolvedSessionName is updated so
-  // subsequent ops (input/stop/image/SSE) use the actual stored name.
+  // first candidate that returns a non-null session wins; resolvedSessionName
+  // is updated so subsequent ops (input/stop/image/SSE) use the actual stored
+  // name.
+  //
+  // IMPORTANT: the bridge returns `200 null` (not 404) when a session is
+  // missing. Treat null body as "not found" and continue iterating, otherwise
+  // we'd never try the alias and existing legacy-id sessions would appear
+  // unlinked.
   const fetchSessionInfo = useCallback(async (signal?: AbortSignal) => {
     for (const candidate of sessionNameCandidates) {
       try {
         const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(candidate)}`, { signal });
         if (res.ok) {
           const data = await res.json();
-          setSessionInfo(data);
-          setResolvedSessionName(prev => (prev === candidate ? prev : candidate));
-          onSessionChangeRef.current?.(data);
-          return;
+          if (data) {
+            setSessionInfo(data);
+            setResolvedSessionName(prev => (prev === candidate ? prev : candidate));
+            onSessionChangeRef.current?.(data);
+            return;
+          }
+          // 200 with null body — bridge says no such session. Try next alias.
         }
-        // 404 from this candidate — try next alias (don't clear state yet).
       } catch {
         // Network error — abort. Don't try further candidates; usePolling retries.
         return;
       }
     }
-    // None of the candidates existed. Clear any stale resolution so future
-    // fetches start fresh with the primary.
+    // None of the candidates existed. Clear sessionInfo and any stale
+    // resolution so future fetches start fresh with the primary.
+    setSessionInfo(null);
     setResolvedSessionName(null);
+    onSessionChangeRef.current?.(null);
   }, [sessionNameCandidates, bridgeUrl]);
 
   usePolling(fetchSessionInfo, 5000);

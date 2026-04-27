@@ -633,6 +633,11 @@ export class SessionManager {
             clearTimeout(session.pendingPromptTimer);
             session.pendingPromptTimer = undefined;
         }
+        const chunkCount = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
+        // Scale the settle with chunk count: Codex's TUI is still rendering long
+        // pastes when a fixed 600ms `\r` arrives, and the keystroke gets dropped.
+        // Short prompts unchanged at 600ms.
+        const settleMs = 600 + Math.max(0, chunkCount - 1) * 500;
         try {
             // Use bracketed paste with chunked content via shared utility.
             // Markers sent atomically; writeChunkedToPty handles ConPTY chunking on Windows,
@@ -643,7 +648,7 @@ export class SessionManager {
                 writeToPty(session.pty, '\x1b[201~');
             }
             // Wait for write to settle, then send Enter
-            await new Promise(r => setTimeout(r, 600));
+            await new Promise(r => setTimeout(r, settleMs));
             if (session.pty) {
                 writeToPty(session.pty, '\r');
             }
@@ -652,9 +657,8 @@ export class SessionManager {
             console.error(`Failed to deliver prompt to ${name}:`, err);
             return;
         }
-        if (prompt.length > CHUNKED_WRITE_SIZE && os.platform() === 'win32') {
-            const totalChunks = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
-            console.log(`Deferred prompt: chunked ${prompt.length} chars → ${totalChunks} × ${CHUNKED_WRITE_SIZE}`);
+        if (chunkCount > 1 && os.platform() === 'win32') {
+            console.log(`Deferred prompt: chunked ${prompt.length} chars → ${chunkCount} × ${CHUNKED_WRITE_SIZE}, settle ${settleMs}ms`);
         }
         console.log(`Deferred prompt delivered to ${name} (${prompt.length} chars)`);
     }
@@ -1366,7 +1370,9 @@ export class SessionManager {
             const status = persisted ? 'stopped' : 'not_found';
             return { success: false, sessionStatus: status, isActive: false, error: status === 'stopped' ? 'Session is stopped. Use --create to start a new session.' : 'Session not found.' };
         }
-        if (session.status !== 'running') {
+        // Accept both 'running' and 'detached' — both have an active PTY ready to receive input.
+        // 'detached' just means no UI clients are connected, but the PTY is still operational.
+        if (session.status !== 'running' && session.status !== 'detached') {
             return { success: false, sessionStatus: session.status, isActive: false, error: `Session is ${session.status}. Cannot submit prompt.` };
         }
         if (!session.pty) {

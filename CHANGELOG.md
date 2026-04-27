@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.35] - 2026-04-27
+
+### Added
+- Per-card AI-set status string — short progress label visible on the card, auto-cleared on stage move
+- HTML card attachments — render mockups, POCs, and interactive previews in sandboxed iframe via `--html-ref`
+- `sly-kanban status` command — get/set/clear card progress status from CLI
+- Cross-card fire-and-forget prompts now register a response callback — late replies are PTY-injected into the calling session instead of lost
+
+### Fixed
+- Fix terminal panel not detecting existing sessions for projects with id/sessionKey mismatch — bridge 200/null response was treated as found, never tried alias names
+- Fix legacy session lookup masked by bridge 200/null response — accept both running and detached session states
+- Auto-clear card status on cross-stage moves so optimistic UI updates do not get reverted from disk
+
+### Changed
+- Scale settle delay between paste and Enter based on chunk count — fixes Codex TUI dropping Enter on long pastes
+
 ## [0.2.34] - 2026-04-26
 
 ### Fixed

@@ -1,0 +1,3 @@
+{
+  "/html-viewer/[...path]/page": "app/html-viewer/[...path]/page.js"
+}

@@ -588,3 +588,161 @@ body {
     transform: none;
   }
 }
+
+/* ============================================================
+   Card status line — CRT panel (v1)
+   ============================================================
+   Renders in the card footer when card.status?.text is set.
+   Color tokens come from a stage-* class on the panel; the
+   panel itself is otherwise identical across stages.
+
+   Layout:
+     - Short panel (~14px tall — see padding 1px / font 9px / borders).
+     - 2px-period horizontal scanlines as ::after (multiply blend).
+     - Hum bar as ::before, animates top→bottom continuously.
+     - Inset vignette via box-shadow.
+     - Marquee scrolls horizontally on card hover only.
+*/
+.card-status {
+  --csl-color: #ffffff;
+  --csl-hum:   rgba(255, 255, 255, 0.10);
+  --csl-border:#15171a;
+
+  background: #050505;
+  border: 1px solid var(--csl-border);
+  border-radius: 6px;
+  padding: 0 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 0 10px 2px rgba(0, 0, 0, 0.65);
+}
+.card-status .card-status-text {
+  font-family: var(--font-press-start-2p), 'Press Start 2P', 'Courier New', monospace;
+  font-size: 7px;
+  color: var(--csl-color);
+  text-shadow: 0 0 2px var(--csl-color), 0 0 5px color-mix(in srgb, var(--csl-color) 60%, transparent);
+  letter-spacing: 0.06em;
+  /* line-height 1 packs the text into the panel without extra leading.
+     Press Start 2P sits low in its em-box; translate the glyph up by ~10%
+     to optically center within the panel. */
+  line-height: 1;
+  display: inline-block;
+  transform: translateY(-0.5px);
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+}
+/* Rest layer — always rendered, fills the panel content area. Long text is
+   clipped at the panel edge with NO ellipsis — chosen for the LED-marquee
+   aesthetic (a clean glyph-cut feels right for the panel; "..." reads as a
+   text widget). */
+.card-status .card-status-rest {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  display: block;
+  line-height: 1;
+  transition: opacity 0.15s ease-out;
+  position: relative;
+  z-index: 1;
+}
+/* 2px-period scanlines — sit ABOVE the text layers (rest + marquee) so the
+   scanline overlay applies to text whether or not the marquee is showing.
+   With mix-blend-mode multiply, the dark stripes darken whatever is behind. */
+.card-status::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0.55) 1px,
+    rgba(0, 0, 0, 0.55) 2px
+  );
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  z-index: 4;
+}
+/* Hum bar — slow brighter band rolling top→bottom. Sits above everything,
+   including the marquee, so it keeps rolling whether text is scrolling or not. */
+.card-status::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 80%;
+  top: -80%;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    var(--csl-hum) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 5;
+  animation: card-status-humbar 5.5s linear infinite;
+}
+@keyframes card-status-humbar {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(225%); }
+}
+
+/* Marquee — only rendered when the rest layer overflows. Sits as an absolute
+   overlay covering the panel's content area (matching the panel's padding so
+   it lines up with the rest layer underneath). Hidden at rest, fades in on
+   group hover, animates the track for a seamless scroll.
+   Track contains TWO identical text-blocks so translateX(-50%) lands on a
+   block boundary = seamless loop. */
+.card-status-marquee {
+  position: absolute;
+  inset: 1px 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  z-index: 1;
+}
+.card-status-marquee .card-status-track {
+  display: inline-block;
+  white-space: nowrap;
+  transform: translateX(0);
+  will-change: transform;
+}
+/* On group hover when the panel is overflowing: fade in marquee, fade out rest,
+   start the animation. */
+.group:hover .card-status[data-overflows="true"] .card-status-marquee {
+  opacity: 1;
+}
+.group:hover .card-status[data-overflows="true"] .card-status-rest {
+  opacity: 0;
+}
+.group:hover .card-status[data-overflows="true"] .card-status-marquee .card-status-track {
+  animation: card-status-marquee 5s linear infinite;
+}
+@keyframes card-status-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Stage-keyed color tokens. Mint is distinct from the green session-running dot. */
+.card-status.stage-backlog        { --csl-color: #8aa6c4; --csl-hum: rgba(180, 200, 220, 0.08); --csl-border: #11151b; }
+.card-status.stage-design         { --csl-color: #7eb8d4; --csl-hum: rgba(180, 215, 235, 0.09); --csl-border: #0e171c; }
+.card-status.stage-implementation { --csl-color: #5cc8ff; --csl-hum: rgba(140, 220, 255, 0.10); --csl-border: #08141c; }
+.card-status.stage-testing        { --csl-color: #ff7261; --csl-hum: rgba(255, 130, 110, 0.09); --csl-border: #1a0d0a; }
+.card-status.stage-done           { --csl-color: #5fc18d; --csl-hum: rgba(110, 220, 165, 0.09); --csl-border: #0c1a13; }
+
+/* Honor prefers-reduced-motion: hum bar + marquee both disabled,
+   static panel + truncated text remain. */
+@media (prefers-reduced-motion: reduce) {
+  .card-status::before,
+  .group:hover .card-status[data-overflows="true"] .card-status-marquee .card-status-track {
+    animation: none;
+  }
+}

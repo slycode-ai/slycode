@@ -19,6 +19,7 @@ import { loadRegistry } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
 import { computeSessionKey } from './session-keys';
+import { readStatus, formatStatusForPrompt } from './status';
 
 /**
  * Load env vars from the project root .env file if not already set.
@@ -360,6 +361,13 @@ function buildRunHeader(
     lines.push(`Last run: ${formatDateTime(lastRunDate)} (${formatRelativeTime(lastRunDate, now)})`);
   } else {
     lines.push('Last run: never');
+  }
+
+  // Status line — quoted as untrusted card metadata to mitigate prompt-injection-via-status.
+  // Skipped entirely when no status is set.
+  const statusObj = readStatus(card.status);
+  if (statusObj) {
+    for (const line of formatStatusForPrompt(statusObj, now)) lines.push(line);
   }
 
   lines.push('======================');

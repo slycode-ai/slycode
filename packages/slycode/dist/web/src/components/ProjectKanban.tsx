@@ -12,6 +12,7 @@ import { CardModal } from './CardModal';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 import { AutomationsScreen } from './AutomationsScreen';
 import { ContextMenu, type ContextMenuGroup } from './ContextMenu';
+import { readStatus, getStatusAgeLabel } from '@/lib/status';
 import { ConfirmDialog } from './ConfirmDialog';
 import { VersionUpdateToast } from './VersionUpdateToast';
 import { projectKeyAlternation } from '@/lib/session-keys';
@@ -653,8 +654,14 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       // Calculate order using display-ordered cards (matches visual positions)
       const newOrder = calculateOrder(displayCards, adjustedIndex);
 
+      // Auto-clear status when the card moves to a different stage.
+      // Status reflects within-stage progress; surviving a transition would just be stale.
+      const stageChanged = sourceStage !== newStage;
+      const clearedStatus = stageChanged && card.status ? { status: undefined } : {};
+
       const updatedCard = {
         ...card,
+        ...clearedStatus,
         order: newOrder,
         updated_at: new Date().toISOString()
       };
@@ -705,6 +712,30 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     const stageLabels: Record<KanbanStage, string> = { backlog: 'Backlog', design: 'Design', implementation: 'Implementation', testing: 'Testing', done: 'Done' };
     const priorities: Priority[] = ['critical', 'high', 'medium', 'low'];
     const priorityLabels: Record<Priority, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+    const statusObj = readStatus(card.status);
+
+    const statusGroup: ContextMenuGroup | null = statusObj ? {
+      items: [
+        // Read-only timestamp row
+        {
+          label: `Status set: ${getStatusAgeLabel(statusObj)}`,
+          disabled: true,
+        },
+        {
+          label: 'Clear status',
+          danger: true,
+          onClick: () => {
+            editedCardIdsRef.current.add(card.id);
+            setStages((prev) => ({
+              ...prev,
+              [stage]: prev[stage].map((c) =>
+                c.id === card.id ? { ...c, status: undefined, updated_at: new Date().toISOString() } : c
+              ),
+            }));
+          },
+        },
+      ],
+    } : null;
 
     return [
       // Group 1: Properties
@@ -755,7 +786,9 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           },
         ],
       },
-      // Group 3: Lifecycle
+      // Group 3: Status (only when card has a status set)
+      ...(statusGroup ? [statusGroup] : []),
+      // Group 4: Lifecycle
       {
         items: [
           {

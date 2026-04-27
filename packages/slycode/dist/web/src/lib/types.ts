@@ -126,6 +126,8 @@ export interface KanbanCard {
   design_ref?: string;  // Reference to design document
   feature_ref?: string; // Reference to feature spec
   test_ref?: string;    // Reference to test document
+  html_ref?: string;    // Reference to HTML attachment (rendered in sandboxed iframe)
+  status?: { text: string; setAt: string };  // Short AI-set progress status; auto-cleared on stage move
   automation?: AutomationConfig;  // Present when card is in automation mode
   archived?: boolean;   // Soft delete - hidden from normal views
   created_at: string;

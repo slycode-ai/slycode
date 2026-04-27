@@ -16,6 +16,7 @@
   "/api/events/route": "app/api/events/route.js",
   "/api/file/route": "app/api/file/route.js",
   "/api/git-status/route": "app/api/git-status/route.js",
+  "/api/html-attachment/route": "app/api/html-attachment/route.js",
   "/api/kanban/route": "app/api/kanban/route.js",
   "/api/kanban/stream/route": "app/api/kanban/stream/route.js",
   "/api/projects/[id]/route": "app/api/projects/[id]/route.js",
@@ -33,6 +34,7 @@
   "/api/terminal-classes/route": "app/api/terminal-classes/route.js",
   "/api/transcribe/route": "app/api/transcribe/route.js",
   "/api/version-check/route": "app/api/version-check/route.js",
+  "/html-viewer/[...path]/page": "app/html-viewer/[...path]/page.js",
   "/page": "app/page.js",
   "/project/[id]/page": "app/project/[id]/page.js"
 }

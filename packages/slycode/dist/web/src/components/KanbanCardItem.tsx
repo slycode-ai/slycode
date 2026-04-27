@@ -1,8 +1,51 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { KanbanCard, KanbanStage } from '@/lib/types';
+import { readStatus, type CardStatus } from '@/lib/status';
+
+// Status panel: single static text with ellipsis at rest.
+// On hover, IF the text overflows the container, fade in a marquee overlay
+// that scrolls. If text fits, no marquee, no ellipsis — just the text.
+function CardStatusPanel({ status, stage }: { status: CardStatus; stage: KanbanStage }) {
+  const restRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  // The "rest" layer is a `display:block; overflow:hidden; text-overflow:ellipsis`
+  // wrapper. If the text inside is wider than the wrapper, scrollWidth > clientWidth
+  // and we know overflow exists.
+  useLayoutEffect(() => {
+    const el = restRef.current;
+    if (!el) return;
+    const measure = () => setOverflows(el.scrollWidth > el.clientWidth + 0.5);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [status.text]);
+
+  const gap = '\u00A0'.repeat(6);
+  return (
+    <div className={`card-status stage-${stage}`} data-overflows={overflows ? 'true' : 'false'}>
+      {/* Rest layer: always present. Block-level with ellipsis when text overflows. */}
+      <div ref={restRef} className="card-status-rest">
+        <span className="card-status-text">{status.text}</span>
+      </div>
+      {/* Marquee layer: only rendered when text overflows. Absolute overlay; fades
+          in on group hover, animates the track for a seamless scroll. */}
+      {overflows && (
+        <div className="card-status-marquee" aria-hidden="true">
+          <div className="card-status-track">
+            <span className="card-status-text">{status.text}{gap}</span>
+            <span className="card-status-text">{status.text}{gap}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type CardSessionStatus = 'running' | 'detached' | 'resumable' | 'none';
 
@@ -194,7 +237,9 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
     window.dispatchEvent(new CustomEvent('kanban-card-drag'));
   };
 
-  const hasTags = !isCompact && (card.areas.length > 0 || card.tags.length > 0);
+  const status = !isCompact ? readStatus(card.status) : null;
+  const hasTags = !isCompact && !status && (card.areas.length > 0 || card.tags.length > 0);
+  const hasFooterContent = hasTags || !!status;
 
   return (
     <>
@@ -214,7 +259,7 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`group relative cursor-pointer rounded-lg border-l-4 border-t border-t-white/50 backdrop-blur-lg bg-white/55 p-3 shadow-(--shadow-card) ring-1 ring-transparent transition-[transform,ring-color,box-shadow] duration-200 hover:translate-y-0.5 hover:ring-[rgba(var(--glow-color),0.4)] before:pointer-events-none before:absolute before:inset-y-1 before:-left-[3px] before:w-px before:rounded-full before:bg-white/0 before:transition-colors before:duration-200 dark:border-t-white/10 dark:backdrop-blur-xl dark:bg-[#20232a]/55 dark:hover:ring-[rgba(var(--glow-color),0.25)] ${priority.border} ${priority.hoverGlow} ${isActivelyWorking ? 'active-glow-card' : ''}`}
+        className={`group relative cursor-pointer rounded-lg border-l-4 border-t border-t-white/50 backdrop-blur-lg bg-white/55 px-3 pt-3 pb-2 shadow-(--shadow-card) ring-1 ring-transparent transition-[transform,ring-color,box-shadow] duration-200 hover:translate-y-0.5 hover:ring-[rgba(var(--glow-color),0.4)] before:pointer-events-none before:absolute before:inset-y-1 before:-left-[3px] before:w-px before:rounded-full before:bg-white/0 before:transition-colors before:duration-200 dark:border-t-white/10 dark:backdrop-blur-xl dark:bg-[#20232a]/55 dark:hover:ring-[rgba(var(--glow-color),0.25)] ${priority.border} ${priority.hoverGlow} ${isActivelyWorking ? 'active-glow-card' : ''}`}
       >
         {/* Header: title on left, number + dot on right */}
         <div className="flex items-start justify-between gap-2">
@@ -256,8 +301,9 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
           </div>
         )}
 
-        {/* Footer: tags on left (when present), checklist + emoji on right */}
-        <div className={`${hasTags ? 'mt-2' : 'mt-1'} flex items-center justify-end gap-2`}>
+        {/* Footer: status panel OR tags row on the left, checklist + emoji on right */}
+        <div className={`${hasFooterContent ? 'mt-2' : 'mt-1'} flex items-center justify-end gap-2`}>
+          {status && stage && <CardStatusPanel status={status} stage={stage} />}
           {hasTags && (
             <div className="flex min-w-0 flex-1 gap-1 overflow-hidden">
               {/* Areas */}

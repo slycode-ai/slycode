@@ -17,6 +17,7 @@ import { VoiceControlBar } from './VoiceControlBar';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
 import { VoiceErrorPopup } from './VoiceErrorPopup';
 import { useVoice } from '@/contexts/VoiceContext';
+import { readStatus, formatStatusForPrompt } from '@/lib/status';
 import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
 
 interface VoiceFocusTarget {
@@ -83,7 +84,7 @@ const priorityColors: Record<string, string> = {
   low: 'bg-green-500/15 text-green-700 dark:text-green-400/70 border border-green-500/20',
 };
 
-type TabId = 'details' | 'design' | 'feature' | 'test' | 'notes' | 'checklist' | 'terminal';
+type TabId = 'details' | 'design' | 'feature' | 'html' | 'test' | 'notes' | 'checklist' | 'terminal';
 
 const stageTerminalColors: Record<KanbanStage, string> = {
   backlog: 'border-t border-void-600 bg-void-800',
@@ -632,6 +633,14 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   if (card.areas.length > 0) ctxLines.push(`Areas: ${card.areas.join(', ')}`);
   if (card.design_ref) ctxLines.push(`Design Doc: ${card.design_ref}`);
   if (card.feature_ref) ctxLines.push(`Feature Spec: ${card.feature_ref}`);
+  if (card.html_ref) ctxLines.push(`HTML: ${card.html_ref}`);
+  // Status — quoted as untrusted card metadata to mitigate prompt-injection via status text.
+  {
+    const statusObj = readStatus(card.status);
+    if (statusObj) {
+      for (const line of formatStatusForPrompt(statusObj)) ctxLines.push(line);
+    }
+  }
   ctxLines.push(ctxChecklist.length > 0 ? `Checklist: ${ctxCheckedCount}/${ctxChecklist.length} checked` : 'Checklist: none');
   ctxLines.push(`Notes: ${ctxNotesCount}`);
 
@@ -653,6 +662,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     ctxLines.push('Problems: none');
   }
 
+  const ctxStatus = readStatus(card.status);
   const terminalContext: TerminalContext = {
     cardContext: ctxLines.join('\n'),
     card: {
@@ -664,6 +674,10 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       areas: card.areas,
       design_ref: card.design_ref,
       feature_ref: card.feature_ref,
+      // Status flattened to plain strings for the template engine.
+      // `{{card.status}}` resolves to the normalized text only; empty when unset.
+      status: ctxStatus?.text ?? '',
+      statusSetAt: ctxStatus?.setAt ?? '',
     },
     stage,
     project: { name: projectId },
@@ -777,7 +791,16 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const hasDesign = !!card.design_ref;
   const hasFeature = !!card.feature_ref;
   const hasTest = !!card.test_ref;
+  const hasHtml = !!card.html_ref;
   const hasChecklist = localChecklist.length > 0;
+
+  // HTML attachment URLs (sandboxed iframe + viewer route)
+  const htmlAttachmentSrc = card.html_ref
+    ? `/api/html-attachment?path=${encodeURIComponent(card.html_ref)}&projectId=${encodeURIComponent(projectId)}`
+    : null;
+  const htmlViewerHref = card.html_ref
+    ? `/html-viewer/${card.html_ref.split('/').map(encodeURIComponent).join('/')}?projectId=${encodeURIComponent(projectId)}`
+    : null;
 
   // Automation mode — compute effective styles (orange overrides stage colors)
   const isAutomation = !!card.automation;
@@ -1074,6 +1097,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       const visibleTabs: TabId[] = ['details'];
       if (hasDesign) visibleTabs.push('design');
       if (hasFeature) visibleTabs.push('feature');
+      if (hasHtml) visibleTabs.push('html');
       if (hasTest) visibleTabs.push('test');
       visibleTabs.push('notes');
       if (hasChecklist) visibleTabs.push('checklist');
@@ -1092,7 +1116,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, hasDesign, hasFeature, hasTest, hasChecklist]);
+  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasChecklist]);
 
   return (
     <div
@@ -1375,6 +1399,21 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
               Feature
             </button>
           )}
+          {hasHtml && (
+            <button
+              onClick={() => setActiveTab('html')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === 'html'
+                  ? 'border-b-2 border-[#ff6a33] text-[#ff6a33]/90 dark:text-[#ff6a33]/90'
+                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              HTML
+            </button>
+          )}
           {hasTest && (
             <button
               onClick={() => setActiveTab('test')}
@@ -1519,7 +1558,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         </div>
 
         {/* Content */}
-        <div className={activeTab === 'terminal' || activeTab === 'notes' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]'}>
+        <div className={activeTab === 'terminal' || activeTab === 'notes' || activeTab === 'html' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]'}>
           {activeTab === 'details' ? (
             <div className="p-4">
               {/* Compact Metadata Strip */}
@@ -1663,7 +1702,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </div>
 
                 {/* References (icons only) */}
-                {(card.design_ref || card.feature_ref || card.test_ref) && (
+                {(card.design_ref || card.feature_ref || card.test_ref || card.html_ref) && (
                   <>
                     <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
                     <div className="flex items-center gap-1">
@@ -1689,6 +1728,18 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                           {/* Checklist icon for feature */}
                           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                          </svg>
+                        </button>
+                      )}
+                      {card.html_ref && (
+                        <button
+                          onClick={() => setActiveTab('html')}
+                          className="rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
+                          title={card.html_ref}
+                        >
+                          {/* Code-brackets icon for HTML */}
+                          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                           </svg>
                         </button>
                       )}
@@ -1827,6 +1878,54 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </div>
               )}
 
+            </div>
+          ) : activeTab === 'html' && card.html_ref && htmlAttachmentSrc && htmlViewerHref ? (
+            /* HTML Attachment View — sandboxed iframe + open-in-new-tab */
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between gap-2 border-b border-void-200 px-4 py-2 text-xs dark:border-void-700">
+                <div className="flex min-w-0 items-center gap-2">
+                  <button
+                    onClick={() => handleCopyPath(card.html_ref!)}
+                    className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
+                    title={copiedPath ? 'Copied!' : `Copy path: ${card.html_ref}`}
+                  >
+                    {copiedPath ? (
+                      <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                    )}
+                  </button>
+                  <span className="truncate font-mono text-void-700 dark:text-void-300" title={card.html_ref}>
+                    {card.html_ref}
+                  </span>
+                  <span className="hidden text-void-400 dark:text-void-500 sm:inline">·</span>
+                  <span className="hidden text-void-400 dark:text-void-500 sm:inline">sandboxed (no fetch, no remote images)</span>
+                </div>
+                <a
+                  href={htmlViewerHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex shrink-0 items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
+                  title="Open in new tab"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  Open in new tab
+                </a>
+              </div>
+              <div className="flex-1 min-h-0 bg-white dark:bg-[#1a1a1a]">
+                <iframe
+                  src={htmlAttachmentSrc}
+                  sandbox="allow-scripts"
+                  className="h-full w-full border-0"
+                  title={`HTML attachment: ${card.html_ref}`}
+                />
+              </div>
             </div>
           ) : activeTab === 'design' || activeTab === 'feature' || activeTab === 'test' ? (
             /* Document View - Design, Feature, or Test */

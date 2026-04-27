@@ -331,12 +331,27 @@ export async function POST(request: NextRequest) {
                   // Card deleted on disk during pending move — drop silently
                   continue;
                 }
+                // Detect stage change vs disk: status must be auto-cleared on
+                // cross-stage moves, mirroring the CLI `move` behavior. Without
+                // this, the client's optimistic clear is silently restored from
+                // disk on the next read.
+                let sourceStage: KanbanStage | null = null;
+                for (const s of Object.keys(diskStages) as KanbanStage[]) {
+                  if ((diskStages[s] || []).some((c) => c.id === card.id)) {
+                    sourceStage = s;
+                    break;
+                  }
+                }
+                const stageChanged = sourceStage !== null && sourceStage !== (stage as KanbanStage);
                 mergedCard = {
                   ...diskCard,
                   order: card.order,
                   updated_at: card.updated_at,
                   last_modified_by: 'web',
                 };
+                if (stageChanged && mergedCard.status) {
+                  delete mergedCard.status;
+                }
               } else {
                 // Edit/create: use frontend version fully
                 mergedCard = { ...card, last_modified_by: 'web' };

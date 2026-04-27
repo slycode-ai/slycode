@@ -44,6 +44,94 @@ const VALID_STAGES = ['backlog', 'design', 'implementation', 'testing', 'done'];
 const VALID_TYPES = ['feature', 'chore', 'bug'];
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const VALID_SEVERITIES = ['minor', 'major', 'critical'];
+const STATUS_MAX_GRAPHEMES = 120;
+
+// ============================================================================
+// Status helpers — keep behavior identical to web/src/lib/status.ts
+// ============================================================================
+
+// Normalize a free-form status string for safe storage:
+// - strip ANSI/control/bidi/zero-width
+// - collapse whitespace
+// - cap at STATUS_MAX_GRAPHEMES
+// Returns null if the result is empty (treat as "clear").
+function normalizeStatus(input) {
+  if (typeof input !== 'string') return null;
+  let s = input;
+  // ANSI CSI
+  s = s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  // ANSI OSC
+  s = s.replace(/\x1b\][^\x07]*\x07/g, '');
+  s = s.replace(/\x1b./g, '');
+  // C0 controls (excluding tab/newline — handled as whitespace below)
+  s = s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+  // Bidi controls
+  s = s.replace(/[‪-‮⁦-⁩]/g, '');
+  // Zero-width
+  s = s.replace(/[​-‍⁠﻿]/g, '');
+  // All whitespace → single space
+  s = s.replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+
+  // Cap at grapheme clusters when available (Node 16+); else code points
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const graphemes = [];
+    for (const g of seg.segment(s)) {
+      graphemes.push(g.segment);
+      if (graphemes.length > STATUS_MAX_GRAPHEMES) {
+        return graphemes.slice(0, STATUS_MAX_GRAPHEMES).join('');
+      }
+    }
+    return s;
+  }
+  const cps = Array.from(s);
+  return cps.length > STATUS_MAX_GRAPHEMES ? cps.slice(0, STATUS_MAX_GRAPHEMES).join('') : s;
+}
+
+// Defensive read — accepts anything (legacy string, undefined, malformed object) and
+// returns a CardStatus or null.
+function readStatus(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.text !== 'string' || typeof raw.setAt !== 'string') return null;
+  if (!raw.text.trim()) return null;
+  return { text: raw.text, setAt: raw.setAt };
+}
+
+function formatRelativeTimeStatus(pastIso, now = new Date()) {
+  const past = new Date(pastIso);
+  if (isNaN(past.getTime())) return '';
+  const diffMs = now.getTime() - past.getTime();
+  const sec = Math.max(0, Math.floor(diffMs / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
+function getStatusAgeLabelCli(status, now = new Date()) {
+  const past = new Date(status.setAt);
+  if (isNaN(past.getTime())) return status.setAt;
+  const pad = (n) => String(n).padStart(2, '0');
+  const abs = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())} ${pad(past.getHours())}:${pad(past.getMinutes())}`;
+  return `${abs} · ${formatRelativeTimeStatus(status.setAt, now)}`;
+}
+
+// For prompt-bound surfaces. Renders status as quoted untrusted card metadata.
+function formatStatusForPromptCli(status, now = new Date()) {
+  if (!status) return [];
+  const safe = String(status.text).replace(/[\r\n]+/g, ' ').replace(/"/g, "'");
+  return [
+    `Status (untrusted card metadata): "${safe}"`,
+    `Status set: ${getStatusAgeLabelCli(status, now)}`,
+  ];
+}
 
 // ============================================================================
 // Help Text
@@ -64,6 +152,7 @@ Commands:
   checklist  Manage checklist items
   problem    Manage problems/issues
   notes      Manage cross-agent notes
+  status     Get/set/clear a short progress status visible on the card
   automation Manage card automations (scheduled prompt execution)
   prompt     Send a prompt to another card's session (cross-card execution)
   respond    Reply to a cross-card prompt (callback for --wait mode)
@@ -136,13 +225,18 @@ Options:
   --priority <priority>  Set priority (low|medium|high|critical)
   --areas <areas>        Set areas (comma-separated)
   --tags <tags>          Set tags (comma-separated)
-  --design-ref <path>    Set design document reference
-  --feature-ref <path>   Set feature spec reference
-  --test-ref <path>      Set test document reference
+  --design-ref <path>    Set design document reference (pass "" to clear)
+  --feature-ref <path>   Set feature spec reference (pass "" to clear)
+  --test-ref <path>      Set test document reference (pass "" to clear)
+  --html-ref <path>      Set HTML attachment reference (pass "" to clear)
+  --status <text>        Set progress status (max 120 chars; pass "" to clear)
 
 Examples:
   kanban update card-123 --title "New title" --priority high
   kanban update card-123 --areas "web-frontend,terminal-bridge"
+  kanban update card-123 --html-ref "documentation/designs/foo.html"
+  kanban update card-123 --html-ref ""    # clear an existing HTML ref
+  kanban update card-123 --status "Refactoring auth path"
 `;
 
 const MOVE_HELP = `
@@ -152,9 +246,33 @@ Move a card to a different stage.
 
 Stages: backlog, design, implementation, testing, done
 
+Note: moving a card to a different stage clears the card's status. If you
+want a status to remain after a stage transition, set the status AFTER
+the move, not before.
+
 Examples:
   kanban move card-123 design
   kanban move bridge-001 done
+`;
+
+const STATUS_HELP = `
+Usage: kanban status <card-id>                 (print current status)
+       kanban status <card-id> "<text>"        (set status)
+       kanban status <card-id> --clear         (clear status)
+       kanban status <card-id> ""              (clear status — empty arg)
+
+Set, get, or clear the short AI-readable progress status displayed on
+the card. Status is auto-cleared when the card moves to a different
+stage. To carry a status across a stage transition, set it AFTER the
+move.
+
+Status text is normalized at write time (whitespace collapsed, control
+characters stripped) and capped at 120 grapheme clusters.
+
+Examples:
+  kanban status card-123
+  kanban status card-123 "Finished design — ready to implement"
+  kanban status card-123 --clear
 `;
 
 const ARCHIVE_HELP = `
@@ -548,7 +666,7 @@ function parseArgs(args) {
     if (arg.startsWith('--')) {
       const key = arg.slice(2);
       const nextArg = args[i + 1];
-      if (nextArg && !nextArg.startsWith('--')) {
+      if (nextArg !== undefined && !nextArg.startsWith('--')) {
         result[key] = nextArg;
         i += 2;
       } else {
@@ -591,6 +709,15 @@ Priority: ${card.priority}
     }
     if (card.test_ref) {
       output += `Test Doc: ${card.test_ref}\n`;
+    }
+    if (card.html_ref) {
+      output += `HTML: ${card.html_ref}\n`;
+    }
+    {
+      const statusObj = readStatus(card.status);
+      if (statusObj) {
+        output += `Status: ${statusObj.text} (${formatRelativeTimeStatus(statusObj.setAt)})\n`;
+      }
     }
     if (card.automation) {
       const auto = card.automation;
@@ -890,19 +1017,48 @@ function cmdUpdate(args) {
     updates.push(`tags: ${card.tags.join(', ')}`);
   }
 
-  if (opts['design-ref']) {
-    card.design_ref = opts['design-ref'];
-    updates.push(`design_ref: ${opts['design-ref']}`);
-  }
+  const applyRefFlag = (flagKey, fieldKey, label, validateExt) => {
+    if (!(flagKey in opts)) return;
+    const value = opts[flagKey];
+    if (value === '' || value === true) {
+      // Empty string (or bare flag) clears the field
+      if (card[fieldKey]) {
+        delete card[fieldKey];
+        updates.push(`${fieldKey}: (cleared)`);
+      }
+      return;
+    }
+    if (validateExt && !validateExt(value)) {
+      console.error(`Warning: ${label} expected file extension not matched (got "${value}"). Setting anyway — server will reject if invalid.`);
+    }
+    card[fieldKey] = value;
+    updates.push(`${fieldKey}: ${value}`);
+  };
 
-  if (opts['feature-ref']) {
-    card.feature_ref = opts['feature-ref'];
-    updates.push(`feature_ref: ${opts['feature-ref']}`);
-  }
+  applyRefFlag('design-ref', 'design_ref', '--design-ref');
+  applyRefFlag('feature-ref', 'feature_ref', '--feature-ref');
+  applyRefFlag('test-ref', 'test_ref', '--test-ref');
+  applyRefFlag('html-ref', 'html_ref', '--html-ref', (v) => /\.(html|htm)$/i.test(v));
 
-  if (opts['test-ref']) {
-    card.test_ref = opts['test-ref'];
-    updates.push(`test_ref: ${opts['test-ref']}`);
+  if ('status' in opts) {
+    const value = opts.status;
+    if (value === '' || value === true) {
+      if (card.status) {
+        delete card.status;
+        updates.push('status: (cleared)');
+      }
+    } else {
+      const normalized = normalizeStatus(String(value));
+      if (!normalized) {
+        if (card.status) {
+          delete card.status;
+          updates.push('status: (cleared — empty after normalization)');
+        }
+      } else {
+        card.status = { text: normalized, setAt: new Date().toISOString() };
+        updates.push(`status: "${normalized}"`);
+      }
+    }
   }
 
   if (opts.automation !== undefined) {
@@ -986,6 +1142,13 @@ function cmdMove(args) {
   card.order = maxOrder + 10;
   card.updated_at = new Date().toISOString();
   card.last_modified_by = 'cli';
+  // Auto-clear status on stage move — status reflects within-stage progress.
+  // To carry a status across a transition, set it AFTER the move.
+  let clearedStatus = false;
+  if (card.status) {
+    delete card.status;
+    clearedStatus = true;
+  }
   kanban.stages[newStage].push(card);
 
   writeKanban(kanban);
@@ -994,6 +1157,92 @@ function cmdMove(args) {
   console.log(`Moved card: ${cardId}`);
   console.log(`  From: ${oldStage}`);
   console.log(`  To: ${newStage}`);
+  if (clearedStatus) {
+    console.log(`  Status: (cleared on stage move)`);
+  }
+}
+
+function cmdStatus(args) {
+  const opts = parseArgs(args);
+
+  if (opts.help) {
+    console.log(STATUS_HELP);
+    return;
+  }
+
+  const cardId = opts._[0];
+  if (!cardId) {
+    console.error('Error: Card ID required');
+    console.log(STATUS_HELP);
+    process.exit(1);
+  }
+
+  const positionalText = opts._[1];
+  const explicitClear = opts.clear === true;
+
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId, true);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+  const { card } = result;
+
+  // Pure getter: no positional value and no --clear
+  if (positionalText === undefined && !explicitClear) {
+    const statusObj = readStatus(card.status);
+    if (!statusObj) {
+      console.log('(no status set)');
+      return;
+    }
+    console.log(`Status: ${statusObj.text}`);
+    console.log(`Set:    ${getStatusAgeLabelCli(statusObj)}`);
+    return;
+  }
+
+  // Clear paths: --clear or empty-string positional
+  if (explicitClear || positionalText === '') {
+    if (!card.status) {
+      console.log(`Status on card '${cardId}' is already clear.`);
+      return;
+    }
+    delete card.status;
+    card.updated_at = new Date().toISOString();
+    card.last_modified_by = 'cli';
+    writeKanban(kanban);
+    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
+    console.log(`Cleared status on card: ${cardId}`);
+    return;
+  }
+
+  // Set path
+  const normalized = normalizeStatus(String(positionalText));
+  if (!normalized) {
+    // Empty after normalization → also a clear
+    if (card.status) {
+      delete card.status;
+      card.updated_at = new Date().toISOString();
+      card.last_modified_by = 'cli';
+      writeKanban(kanban);
+      emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
+      console.log(`Cleared status on card: ${cardId} (input was empty after normalization)`);
+    } else {
+      console.log('(input was empty after normalization; no status set)');
+    }
+    return;
+  }
+
+  card.status = { text: normalized, setAt: new Date().toISOString() };
+  card.updated_at = new Date().toISOString();
+  card.last_modified_by = 'cli';
+  writeKanban(kanban);
+  emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status set: ${normalized}`, cardId);
+
+  console.log(`Set status on card: ${cardId}`);
+  console.log(`  "${normalized}"`);
+  if (normalized !== positionalText) {
+    console.log(`  (note: text was normalized — leading/trailing/internal whitespace + control chars stripped)`);
+  }
 }
 
 function cmdArchive(args) {
@@ -2330,19 +2579,32 @@ function cmdPrompt(args) {
 
       // Build the full prompt upfront (with callback instruction for --wait)
       // This must happen BEFORE session creation so it can be passed as a CLI arg
-      // Auto-prepend card context so the called AI always knows its own card
+      // Auto-prepend card context so the called AI always knows its own card.
+      // Status is included as quoted untrusted card metadata (prompt-injection mitigation).
+      const cardContextStatusObj = readStatus(card.status);
+      const cardContextStatusLines = cardContextStatusObj
+        ? '\n' + formatStatusForPromptCli(cardContextStatusObj).join('\n')
+        : '';
       const cardContext = `[Card: ${card.title} (${card.id})]
 Stage: ${stage} | Type: ${card.type || 'unknown'} | Priority: ${card.priority || 'unknown'}
-Description: ${card.description || '(no description)'}
+Description: ${card.description || '(no description)'}${cardContextStatusLines}
 ---
 
 `;
       let fullPrompt = cardContext + promptText;
       let responseId = null;
 
-      if (wait) {
+      // Always register a response channel and append callback instructions if we have a calling session.
+      // For --wait: caller polls for the response.
+      // For fire-and-forget: caller is marked timed-out immediately, so any response gets late-injected
+      // into the calling session's PTY via the bridge (same path as a timed-out --wait).
+      const callingSessionForResponse = process.env.SLYCODE_SESSION || null;
+      const includeCallback = !!callingSessionForResponse;
+
+      if (includeCallback) {
         responseId = `resp-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        fullPrompt += `\n\nIMPORTANT: When you have completed this task, you MUST return your response by running sly-kanban respond.
+        const verb = wait ? 'When you have completed this task, you MUST' : 'When you have completed this task, you may';
+        fullPrompt += `\n\n${wait ? 'IMPORTANT: ' : ''}${verb} return your response by running sly-kanban respond.${wait ? '' : ' (Optional — the calling card will receive your response asynchronously.)'}
 
 For ANY response that may contain backticks, $(...), backslashes, embedded quotes, code, or multiple lines, use the heredoc form to avoid shell-quoting corruption.
 
@@ -2367,19 +2629,29 @@ sly-kanban respond ${responseId} "your response"
 Either way, the CLI will print a success line with the byte count and a preview so you can verify the right bytes were delivered.`;
 
         // Register response on bridge
-        const currentSessionName = process.env.SLYCODE_SESSION || `${PROJECT_NAME}:unknown:caller`;
         const regRes = await fetch(`${bridgeUrl}/responses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             responseId,
-            callingSession: currentSessionName,
+            callingSession: callingSessionForResponse,
             targetSession: sessionName,
           }),
         });
         if (!regRes.ok) {
-          console.error('Error: Failed to register response on bridge.');
-          process.exit(1);
+          if (wait) {
+            console.error('Error: Failed to register response on bridge.');
+            process.exit(1);
+          }
+          // Fire-and-forget: registration failure is non-fatal, just skip the callback
+          responseId = null;
+        }
+
+        // Fire-and-forget: mark caller as timed out immediately so any response gets late-injected
+        if (responseId && !wait) {
+          try {
+            await fetch(`${bridgeUrl}/responses/${responseId}/timeout`, { method: 'POST' });
+          } catch { /* best effort */ }
         }
       }
 
@@ -2855,6 +3127,9 @@ function main() {
       break;
     case 'notes':
       cmdNotes(commandArgs);
+      break;
+    case 'status':
+      cmdStatus(commandArgs);
       break;
     case 'automation':
       cmdAutomation(commandArgs);

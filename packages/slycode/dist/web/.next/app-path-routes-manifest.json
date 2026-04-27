@@ -16,6 +16,7 @@
   "/api/events/route": "/api/events",
   "/api/file/route": "/api/file",
   "/api/git-status/route": "/api/git-status",
+  "/api/html-attachment/route": "/api/html-attachment",
   "/api/kanban/route": "/api/kanban",
   "/api/kanban/stream/route": "/api/kanban/stream",
   "/api/projects/[id]/route": "/api/projects/[id]",
@@ -33,6 +34,7 @@
   "/api/terminal-classes/route": "/api/terminal-classes",
   "/api/transcribe/route": "/api/transcribe",
   "/api/version-check/route": "/api/version-check",
+  "/html-viewer/[...path]/page": "/html-viewer/[...path]",
   "/page": "/",
   "/project/[id]/page": "/project/[id]"
 }
