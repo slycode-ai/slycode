@@ -1,6 +1,6 @@
 ---
 name: test-review
-version: 1.0.0
+version: 1.1.0
 label: "Test Review"
 description: "Interactive test review — efficiently close out cards stuck in testing"
 group: "Card Actions"
@@ -38,15 +38,23 @@ For each checklist item, categorise it:
 **Step 3 — Present your assessment:**
 Show me a summary grouped by the categories above. For implicitly tested items, briefly explain your reasoning ("This works because X depends on it and X was working when we did Y").
 
-**Step 4 — Quick Q&A (max 3 questions per round):**
-For the ❓ items, ask me **up to 3 concise questions at a time**. The user communicates via voice/speech-to-text, so more than 3 is hard to answer in one go. Keep each question short and direct:
-- "Did the kanban drag-drop work when you tested the wide viewport layout?"
-- "Happy to defer the edge case testing for now?"
-- "Was the search working when you used it from Telegram?"
+**Step 4 — Quick Q&A:**
 
-If there are more than 3 items to ask about, do multiple rounds — ask 3, wait for answers, then ask the next batch.
+For the ❓ items, choose the right delivery based on how many you have:
 
-I'll answer quickly and you adjust the categorisation.
+- **1-3 questions** — ask inline, concise and direct (the user replies via voice/speech-to-text):
+  - "Did the kanban drag-drop work when you tested the wide viewport layout?"
+  - "Happy to defer the edge case testing for now?"
+  - "Was the search working when you used it from Telegram?"
+
+- **4+ questions** — author a questionnaire instead (unless you're responding via messaging, in which case ask inline anyway). Voice replies don't scale beyond ~3 questions, but a questionnaire lets the user fill at their own pace using proper input controls (boolean toggles, single_choice, etc.):
+  1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+  2. Use `boolean` items for "did this work?" questions; `single_choice` with `allow_other: true` for "verified / deferred / broken / not sure"; `free_text` for anything open-ended
+  3. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+  4. Tell the user briefly in chat what's in it, then wait
+  5. The user's Submit lands in your session as a Q&A block — use the answers to adjust categorisation
+
+I'll answer (inline or via questionnaire) and you adjust the categorisation.
 
 **Step 5 — Take action:**
 Based on our discussion:
@@ -78,5 +86,5 @@ sly-kanban move {{card.id}} done
 - Always load area context first — it helps you reason about implicit testing.
 - Lean toward "implicitly tested" when there's reasonable evidence.
 - Don't make me confirm things that are obviously working.
-- Max 3 questions per round — user answers via voice, keep it manageable.
+- 1-3 questions inline; 4+ → questionnaire (user answers via voice, keep inline manageable).
 - If everything looks clean, just say so and offer to move to done.

@@ -29,6 +29,8 @@ interface GlobalClaudePanelProps {
   label?: string;
   voiceTerminalId?: string;
   onTerminalReady?: (handle: { sendInput: (data: string) => void } | null) => void;
+  /** When true, the panel mounts already expanded. Used by /global quick-launch. */
+  defaultExpanded?: boolean;
 }
 
 export function GlobalClaudePanel({
@@ -43,8 +45,9 @@ export function GlobalClaudePanel({
   label,
   voiceTerminalId,
   onTerminalReady,
+  defaultExpanded = false,
 }: GlobalClaudePanelProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const panelRef = useRef<HTMLDivElement>(null);
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const actionsConfig = useSlyActionsConfig();

@@ -1,6 +1,6 @@
 ---
 name: implement
-version: 1.0.0
+version: 1.1.0
 label: "Implement"
 description: "Implement the work described in the card"
 group: "Card Actions"
@@ -29,6 +29,8 @@ First, move the card to implementation if its not already there. THen,
 1. **If feature_ref exists** → Read the feature spec and use `/implement` to execute the plan
 2. **If only design_ref exists** → Read the design doc and implement based on the requirements there (no formal feature spec)
 3. **If neither exists** → Work from the card description. Ask clarifying questions if requirements are unclear before proceeding.
+
+**Status updates while you work:** Set a card status (`sly-kanban status {{card.id}} "..."`) at meaningful milestones — e.g., when starting a major phase, finishing one and moving to the next, kicking off a long-running test, or pausing to ask the user something. Aim for a handful of updates across the work, not one per step. For a small change, one or two is plenty; for a multi-phase implementation, status helps anyone watching the board see where you are. Prefer specific over generic ("Wiring up notes API" beats "Working").
 
 **After implementation (required):**
 1. Test your changes work as expected

@@ -38,6 +38,49 @@
       "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/questionnaire/[projectId]",
+      "regex": "^/api/questionnaire/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId"
+      },
+      "namedRegex": "^/api/questionnaire/(?<nxtPprojectId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/questionnaire/[projectId]/[name]",
+      "regex": "^/api/questionnaire/([^/]+?)/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId",
+        "nxtPname": "nxtPname"
+      },
+      "namedRegex": "^/api/questionnaire/(?<nxtPprojectId>[^/]+?)/(?<nxtPname>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/questionnaire/[projectId]/[name]/answer",
+      "regex": "^/api/questionnaire/([^/]+?)/([^/]+?)/answer(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId",
+        "nxtPname": "nxtPname"
+      },
+      "namedRegex": "^/api/questionnaire/(?<nxtPprojectId>[^/]+?)/(?<nxtPname>[^/]+?)/answer(?:/)?$"
+    },
+    {
+      "page": "/api/questionnaire/[projectId]/[name]/submit",
+      "regex": "^/api/questionnaire/([^/]+?)/([^/]+?)/submit(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId",
+        "nxtPname": "nxtPname"
+      },
+      "namedRegex": "^/api/questionnaire/(?<nxtPprojectId>[^/]+?)/(?<nxtPname>[^/]+?)/submit(?:/)?$"
+    },
+    {
+      "page": "/api/shortcuts/[projectId]",
+      "regex": "^/api/shortcuts/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprojectId": "nxtPprojectId"
+      },
+      "namedRegex": "^/api/shortcuts/(?<nxtPprojectId>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/html-viewer/[...path]",
       "regex": "^/html\\-viewer/(.+?)(?:/)?$",
       "routeKeys": {
@@ -52,6 +95,15 @@
         "nxtPid": "nxtPid"
       },
       "namedRegex": "^/project/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/project/[id]/[token]",
+      "regex": "^/project/([^/]+?)/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid",
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/project/(?<nxtPid>[^/]+?)/(?<nxtPtoken>[^/]+?)(?:/)?$"
     }
   ],
   "staticRoutes": [
@@ -218,6 +270,12 @@
       "namedRegex": "^/api/settings(?:/)?$"
     },
     {
+      "page": "/api/shortcuts",
+      "regex": "^/api/shortcuts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/shortcuts(?:/)?$"
+    },
+    {
       "page": "/api/sly-actions",
       "regex": "^/api/sly\\-actions(?:/)?$",
       "routeKeys": {},
@@ -258,6 +316,12 @@
       "regex": "^/api/version\\-check(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/version\\-check(?:/)?$"
+    },
+    {
+      "page": "/global",
+      "regex": "^/global(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/global(?:/)?$"
     }
   ],
   "dataRoutes": [],

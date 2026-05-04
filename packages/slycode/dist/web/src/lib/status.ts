@@ -4,9 +4,37 @@
 // default template. CLI side has its own copy in scripts/kanban.js — keep
 // behavior identical between the two.
 
+export type CardStatusKind = 'manual' | 'auto';
+export type CardStatusTier = 'high' | 'medium' | 'low';
+
 export interface CardStatus {
   text: string;
   setAt: string;
+  // V2 provenance — V1 data without these fields is read as kind:'manual'.
+  kind?: CardStatusKind;
+  tier?: CardStatusTier;
+}
+
+// V2 overwrite levels (lower = higher priority).
+//   -1 = manual (sacred — auto never overwrites)
+//    0 = high-tier auto      (problem add)
+//    1 = medium-tier auto    (ref attached, problem resolve)
+//    2 = low-tier auto       (notes, checklist, cross-card prompt)
+//    3 = malformed/unknown   (anything overwrites)
+export function getStatusLevel(status: CardStatus | null | undefined): number {
+  if (!status) return Number.POSITIVE_INFINITY;
+  if (status.kind === 'manual') return -1;
+  // V1 backward-compat: missing kind => treat as manual.
+  if (!status.kind) return -1;
+  if (status.tier === 'high') return 0;
+  if (status.tier === 'medium') return 1;
+  if (status.tier === 'low') return 2;
+  return 3;
+}
+
+export function canOverwriteStatus(currentStatus: CardStatus | null | undefined, newStatus: CardStatus): boolean {
+  if (!currentStatus) return true;
+  return getStatusLevel(newStatus) <= getStatusLevel(currentStatus);
 }
 
 export const STATUS_MAX_GRAPHEMES = 120;
@@ -52,13 +80,18 @@ export function normalizeStatus(input: string): string | null {
 }
 
 // Defensive read — accepts anything (string from legacy data, undefined, malformed object)
-// and returns a normalized CardStatus or null.
+// and returns a normalized CardStatus or null. Does NOT persist the default `kind`
+// back to disk; callers should preserve the original raw object on writes.
 export function readStatus(raw: unknown): CardStatus | null {
   if (!raw || typeof raw !== 'object') return null;
-  const obj = raw as { text?: unknown; setAt?: unknown };
+  const obj = raw as { text?: unknown; setAt?: unknown; kind?: unknown; tier?: unknown };
   if (typeof obj.text !== 'string' || typeof obj.setAt !== 'string') return null;
   if (!obj.text.trim()) return null;
-  return { text: obj.text, setAt: obj.setAt };
+  const kind: CardStatusKind = obj.kind === 'auto' ? 'auto' : 'manual';
+  const tier: CardStatusTier | undefined = obj.tier === 'high' || obj.tier === 'medium' || obj.tier === 'low'
+    ? obj.tier
+    : undefined;
+  return { text: obj.text, setAt: obj.setAt, kind, ...(tier ? { tier } : {}) };
 }
 
 // Format a relative time like "23m ago", "2h ago", "3d ago".

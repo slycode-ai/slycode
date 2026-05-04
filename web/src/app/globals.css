@@ -618,13 +618,16 @@ body {
   align-items: center;
   overflow: hidden;
   position: relative;
-  box-shadow: inset 0 0 10px 2px rgba(0, 0, 0, 0.65);
+  /* Vignette removed — on a panel this short, the top/bottom inset darkening
+     was eating into the glyphs. */
 }
 .card-status .card-status-text {
   font-family: var(--font-press-start-2p), 'Press Start 2P', 'Courier New', monospace;
   font-size: 7px;
   color: var(--csl-color);
-  text-shadow: 0 0 2px var(--csl-color), 0 0 5px color-mix(in srgb, var(--csl-color) 60%, transparent);
+  /* Glow tuned tight — at 7px Press Start, larger blur radii blur the glyphs
+     themselves and hurt readability (especially on dimmer stage colors). */
+  text-shadow: 0 0 1px var(--csl-color), 0 0 2.5px color-mix(in srgb, var(--csl-color) 50%, transparent);
   letter-spacing: 0.06em;
   /* line-height 1 packs the text into the panel without extra leading.
      Press Start 2P sits low in its em-box; translate the glyph up by ~10%
@@ -653,7 +656,8 @@ body {
 }
 /* 2px-period scanlines — sit ABOVE the text layers (rest + marquee) so the
    scanline overlay applies to text whether or not the marquee is showing.
-   With mix-blend-mode multiply, the dark stripes darken whatever is behind. */
+   With mix-blend-mode multiply, the dark stripes darken whatever is behind.
+   Opacity tuned down — was eating too much contrast on dim stage colors. */
 .card-status::after {
   content: '';
   position: absolute;
@@ -662,8 +666,8 @@ body {
     to bottom,
     rgba(0, 0, 0, 0) 0px,
     rgba(0, 0, 0, 0) 1px,
-    rgba(0, 0, 0, 0.55) 1px,
-    rgba(0, 0, 0, 0.55) 2px
+    rgba(0, 0, 0, 0.20) 1px,
+    rgba(0, 0, 0, 0.20) 2px
   );
   pointer-events: none;
   mix-blend-mode: multiply;
@@ -724,7 +728,9 @@ body {
   opacity: 0;
 }
 .group:hover .card-status[data-overflows="true"] .card-status-marquee .card-status-track {
-  animation: card-status-marquee 5s linear infinite;
+  /* Duration is set per-card by the React component via inline style so longer
+     status text scrolls in proportionally more time — keeps pixels/sec consistent. */
+  animation: card-status-marquee var(--card-status-marquee-duration, 5s) linear infinite;
 }
 @keyframes card-status-marquee {
   0%   { transform: translateX(0); }

@@ -1,6 +1,6 @@
 ---
 name: design-requirements
-version: 1.1.0
+version: 1.2.0
 label: "Design Doc"
 description: "Create a requirements document through iterative discovery"
 group: "Card Actions"
@@ -78,6 +78,19 @@ When in doubt, lean toward creating the feature spec — it's better to over-doc
 - Any **suggestions** you want feedback on
 
 Questions written into the doc but not surfaced in your message are effectively invisible.
+
+---
+
+### Asking Multiple Questions — Use a Questionnaire
+
+If you have **3+ related clarifying questions** in the same round (common at the start when many things are unknown), author a questionnaire instead of bouncing single questions inline (skip if you're responding via messaging — ask inline instead):
+
+1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+2. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+3. Tell the user briefly in chat what's in the questionnaire and why, then wait
+4. The user's Submit lands in your session as a Q&A block — fold the answers into the design doc
+
+For 1-2 questions, ask inline. See the kanban skill for schema and item types (free_text, single_choice, multi_choice, boolean, scale, number, exposition).
 
 ---
 

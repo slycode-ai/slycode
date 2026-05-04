@@ -90,6 +90,20 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const editedCardIdsRef = useRef<Set<string>>(new Set());
   const movedCardIdsRef = useRef<Set<string>>(new Set());
 
+  // Quick-launch shortcut state — populated when ProjectKanban is opened via
+  // /project/<id>/<token>. The token route resolves and redirects with these
+  // params on the canonical project URL; this component consumes them, hands
+  // the prompt off to CardModal (which fires it once the session is ready),
+  // and strips the params so a refresh doesn't re-trigger.
+  const [pendingShortcut, setPendingShortcut] = useState<{
+    cardId: string;
+    prompt: string;
+    provider?: string;
+    preferExisting?: boolean;
+  } | null>(null);
+  const [shortcutErr, setShortcutErr] = useState<string | null>(null);
+  const consumedShortcutParamsRef = useRef(false);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ position: { x: number; y: number }; card: KanbanCard; stage: KanbanStage } | null>(null);
   // Delete confirmation from context menu (separate from modal's delete)
@@ -290,23 +304,69 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     loadKanban().then(() => setIsLoaded(true));
   }, [loadKanban]);
 
-  // Auto-open card from ?card=CARD_ID query param (once)
+  // Auto-open card from ?card=CARD_ID query param (once). Also consumes
+  // ?prompt=, ?provider=, ?preferExisting=, ?err= from the quick-launch
+  // token redirect (`/project/<id>/<token>` → here). Strips all of those
+  // after consuming so a refresh doesn't re-trigger.
   useEffect(() => {
     if (!isLoaded) return;
+
+    // Handle the err= path first: a miss from the token redirect lands here
+    // with no card param. Surface it as a transient toast and strip the URL.
+    const err = searchParams.get('err');
+    if (err === 'shortcut_not_found' && !consumedShortcutParamsRef.current) {
+      const token = searchParams.get('token') || '';
+      consumedShortcutParamsRef.current = true;
+      setShortcutErr(token ? `No card or shortcut matched "${token}".` : 'Shortcut not found.');
+      router.replace(pathname, { scroll: false });
+      return;
+    }
+
     const cardId = searchParams.get('card');
-    if (!cardId || consumedCardParamRef.current === cardId) return;
+    const promptParam = searchParams.get('prompt');
+    // Track the (card, prompt) pair as the consumed signature so a fresh
+    // shortcut firing the same card with a different prompt re-triggers the
+    // pendingShortcut path instead of being suppressed by the original
+    // "already opened this card" guard.
+    const sig = cardId ? `${cardId}::${promptParam || ''}` : null;
+    if (!sig || consumedCardParamRef.current === sig) return;
 
     // Find card across all stages
     for (const stage of STAGE_ORDER) {
       const card = stages[stage]?.find((c) => c.id === cardId);
       if (card) {
-        consumedCardParamRef.current = cardId;
+        consumedCardParamRef.current = sig;
         setSelectedCardId(card.id);
         setSelectedStage(stage);
+        // Capture the optional shortcut payload — CardModal consumes it once
+        // the per-provider session is ready.
+        if (promptParam) {
+          setPendingShortcut({
+            cardId: card.id,
+            prompt: promptParam,
+            provider: searchParams.get('provider') || undefined,
+            preferExisting: searchParams.get('preferExisting') === '1',
+          });
+          // Strip prompt/provider/preferExisting from URL but keep ?card so
+          // closing the modal still works the existing way (which strips ?card
+          // explicitly at line ~518).
+          const sp = new URLSearchParams(searchParams.toString());
+          sp.delete('prompt');
+          sp.delete('provider');
+          sp.delete('preferExisting');
+          router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+        }
         break;
       }
     }
-  }, [isLoaded, searchParams, stages]);
+  }, [isLoaded, searchParams, stages, pathname, router]);
+
+  // Auto-dismiss the shortcut-not-found toast after 5s
+  useEffect(() => {
+    if (!shortcutErr) return;
+    const t = setTimeout(() => setShortcutErr(null), 5000);
+    return () => clearTimeout(t);
+  }, [shortcutErr]);
 
   // Connect to SSE stream for live updates using ConnectionManager
   useEffect(() => {
@@ -1062,9 +1122,26 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             onCreate={isCreatingCard ? handleCreateCard : undefined}
             onAutomationToggle={onAutomationToggle}
             suppressAutoTerminal={suppressAutoTerminal}
+            pendingShortcut={pendingShortcut && pendingShortcut.cardId === selectedCard.id ? pendingShortcut : null}
+            onPendingShortcutConsumed={() => setPendingShortcut(null)}
           />
         )}
       </div>
+
+      {/* Shortcut-not-found toast */}
+      {shortcutErr && (
+        <div className="fixed bottom-4 left-4 z-50 flex max-w-md items-center gap-3 rounded-lg border border-red-400/50 bg-red-50 px-4 py-2.5 text-sm text-red-900 shadow-(--shadow-card) dark:border-red-500/40 dark:bg-red-950/80 dark:text-red-100">
+          <span className="text-base leading-none">⚠</span>
+          <span className="flex-1">{shortcutErr}</span>
+          <button
+            onClick={() => setShortcutErr(null)}
+            className="text-red-700 hover:text-red-900 dark:text-red-300 dark:hover:text-red-100"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Context Menu */}
       <ContextMenu

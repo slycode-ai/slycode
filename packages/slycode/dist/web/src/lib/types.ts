@@ -127,7 +127,14 @@ export interface KanbanCard {
   feature_ref?: string; // Reference to feature spec
   test_ref?: string;    // Reference to test document
   html_ref?: string;    // Reference to HTML attachment (rendered in sandboxed iframe)
-  status?: { text: string; setAt: string };  // Short AI-set progress status; auto-cleared on stage move
+  questionnaire_refs?: string[]; // List of attached questionnaires (JSON, multiple per card)
+  status?: {
+    text: string;
+    setAt: string;
+    // V2 provenance — V1 data without these fields is read as kind:'manual'.
+    kind?: 'manual' | 'auto';
+    tier?: 'high' | 'medium' | 'low';
+  };  // Short AI-set progress status; auto-cleared on stage move
   automation?: AutomationConfig;  // Present when card is in automation mode
   archived?: boolean;   // Soft delete - hidden from normal views
   created_at: string;
@@ -154,6 +161,26 @@ export interface KanbanBoard {
   project_id: string;
   stages: KanbanStages;
   last_updated: string;
+}
+
+// ============================================================================
+// Quick-launch Shortcuts Types
+//
+// Mirrors `messaging/src/types.ts` Shortcut + ShortcutsFile. Both copies MUST
+// stay in lockstep — same convention as session-keys.ts.
+// ============================================================================
+
+export interface Shortcut {
+  label: string;                  // lowercase, must contain at least one letter
+  cardId: string;                 // target card id
+  prompt?: string;                // optional starter prompt
+  provider?: ProviderId;          // optional provider override
+  preferExistingSession?: boolean; // if true, reuse existing card session even if its provider differs
+}
+
+export interface ShortcutsFile {
+  projectTag: string;             // lowercase alphanumeric, 1-6 chars, unique workspace-wide
+  shortcuts: Shortcut[];
 }
 
 // ============================================================================

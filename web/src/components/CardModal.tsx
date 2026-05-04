@@ -11,6 +11,7 @@ import {
 import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import { AutomationConfig } from './AutomationConfig';
+import { QuestionnaireTab } from './QuestionnaireTab';
 import { ConfirmDialog } from './ConfirmDialog';
 import { getProviderColor } from '@/lib/provider-colors';
 import { VoiceControlBar } from './VoiceControlBar';
@@ -59,6 +60,18 @@ interface CardModalProps {
   onCreate?: (card: NewCardData) => void;
   onAutomationToggle?: (isAutomation: boolean) => void;
   suppressAutoTerminal?: boolean;
+  /**
+   * Quick-launch shortcut payload from the URL token redirect. When present,
+   * the modal selects the matching provider tab and fires the prompt once
+   * the per-provider session is alive (creating it if needed).
+   */
+  pendingShortcut?: {
+    cardId: string;
+    prompt: string;
+    provider?: string;
+    preferExisting?: boolean;
+  } | null;
+  onPendingShortcutConsumed?: () => void;
 }
 
 const STAGES: { id: KanbanStage; label: string }[] = [
@@ -84,7 +97,7 @@ const priorityColors: Record<string, string> = {
   low: 'bg-green-500/15 text-green-700 dark:text-green-400/70 border border-green-500/20',
 };
 
-type TabId = 'details' | 'design' | 'feature' | 'html' | 'test' | 'notes' | 'checklist' | 'terminal';
+type TabId = 'details' | 'design' | 'feature' | 'html' | 'test' | 'questionnaires' | 'notes' | 'checklist' | 'terminal';
 
 const stageTerminalColors: Record<KanbanStage, string> = {
   backlog: 'border-t border-void-600 bg-void-800',
@@ -190,7 +203,7 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
   return <div style={style}>{children}</div>;
 }
 
-export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, onAutomationToggle, suppressAutoTerminal }: CardModalProps) {
+export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const [docLoading, setDocLoading] = useState(false);
 
@@ -634,6 +647,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   if (card.design_ref) ctxLines.push(`Design Doc: ${card.design_ref}`);
   if (card.feature_ref) ctxLines.push(`Feature Spec: ${card.feature_ref}`);
   if (card.html_ref) ctxLines.push(`HTML: ${card.html_ref}`);
+  if (card.questionnaire_refs && card.questionnaire_refs.length > 0) {
+    ctxLines.push(`Questionnaires: ${card.questionnaire_refs.join(', ')}`);
+  }
   // Status — quoted as untrusted card metadata to mitigate prompt-injection via status text.
   {
     const statusObj = readStatus(card.status);
@@ -731,6 +747,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     return () => document.removeEventListener('mousedown', handler);
   }, [newSessionDropdown]);
 
+  // True once refreshCardSessions has completed at least one fetch — gates
+  // pendingShortcut firing so we don't try to use a live session before the
+  // initial sessions list arrives (which would race-create a duplicate).
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
   // Shared session discovery — fetches all sessions for this card, builds cardSessions[].
   // Called on mount and from onSessionChange to detect new sibling sessions in real time.
   const refreshCardSessions = useCallback(() => {
@@ -738,6 +759,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     fetch('/api/bridge/sessions')
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
+        setSessionsLoaded(true);
         if (!data?.sessions) return;
         const matches = (data.sessions as SessionInfo[]).filter((s) =>
           s.name?.endsWith(cardSuffix) && sessionBelongsToProject(s.name, projectKeyShape)
@@ -794,11 +816,119 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     }
   }, [anyRunning, hasAutoSwitched, suppressAutoTerminal]);
 
+  // ----- Quick-launch shortcut firing -----
+  //
+  // When opened with a pendingShortcut, decide which provider/session to
+  // target and fire the prompt. Provider rules:
+  //   - If preferExisting is true and ANY session exists for this card,
+  //     reuse the earliest-created one (matches the per-provider tab default).
+  //   - Otherwise use shortcut.provider (or fall back to existing session if
+  //     shortcut omitted a provider).
+  // Firing path:
+  //   - If a matching session is alive: POST bracketed-paste input + CR to
+  //     the bridge directly (same primitive ClaudeTerminalPanel.sendCommand
+  //     uses).
+  //   - If no session: POST /api/bridge/sessions to create with the prompt
+  //     embedded; the bridge passes it as a positional arg.
+  // Idempotency: tracked via consumedShortcutRef so a re-render doesn't
+  // re-fire. Parent is notified so it can clear its state.
+  const consumedShortcutRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingShortcut || pendingShortcut.cardId !== card.id) return;
+    if (!sessionsLoaded) return; // wait for initial fetch to settle so we see existing sessions
+    const promptKey = `${pendingShortcut.cardId}:${pendingShortcut.prompt}`;
+    if (consumedShortcutRef.current === promptKey) return;
+
+    // Claim the slot SYNCHRONOUSLY before any await. Without this, a
+    // re-render of this effect (cardSessions updates from refresh, parent
+    // re-renders, etc.) racing the async fetch chain below would start a
+    // parallel fire — and each fire sends its own bracketed-paste + CR
+    // pair, so the user sees the prompt typed N times.
+    consumedShortcutRef.current = promptKey;
+    onPendingShortcutConsumed?.();
+
+    let cancelled = false;
+    const fire = async () => {
+      // Decide target provider
+      let chosenProvider = pendingShortcut.provider || 'claude';
+      let liveSession: CardSession | null = null;
+      if (pendingShortcut.preferExisting && cardSessions.length > 0) {
+        const live = cardSessions.find((s) => s.status === 'running' || s.status === 'detached');
+        if (live) {
+          chosenProvider = live.provider;
+          liveSession = live;
+        }
+      } else if (!pendingShortcut.provider && cardSessions.length > 0) {
+        // Provider unspecified — reuse existing session if any.
+        const live = cardSessions.find((s) => s.status === 'running' || s.status === 'detached');
+        if (live) {
+          chosenProvider = live.provider;
+          liveSession = live;
+        }
+      }
+      // If we didn't pick from the live list, see if a session for the
+      // requested provider already exists (any status).
+      if (!liveSession) {
+        const match = cardSessions.find((s) => s.provider === chosenProvider);
+        if (match && (match.status === 'running' || match.status === 'detached')) {
+          liveSession = match;
+        }
+      }
+
+      // Switch the UI to the chosen provider tab + terminal tab so the user
+      // sees what's happening.
+      setSelectedProvider(chosenProvider);
+      setActiveTab('terminal');
+
+      const sessionName = `${sessionKey}:${chosenProvider}:card:${card.id}`;
+      const wrapped = `\x1b[200~${pendingShortcut.prompt}\x1b[201~`;
+      try {
+        if (liveSession) {
+          // Inject directly into the live session.
+          await fetch(`/api/bridge/sessions/${encodeURIComponent(liveSession.name)}/input`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: wrapped }),
+          });
+          await new Promise((r) => setTimeout(r, 600));
+          await fetch(`/api/bridge/sessions/${encodeURIComponent(liveSession.name)}/input`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: '\r' }),
+          });
+        } else {
+          // No live session — create one with the prompt embedded.
+          await fetch('/api/bridge/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: sessionName,
+              provider: chosenProvider,
+              cwd,
+              skipPermissions: true,
+              prompt: pendingShortcut.prompt,
+            }),
+          });
+          // Refresh so the new session appears as a per-provider tab.
+          setTimeout(() => { if (!cancelled) refreshCardSessions(); }, 1200);
+        }
+      } catch (err) {
+        console.error('Failed to fire quick-launch shortcut:', err);
+        // consumedShortcutRef was already set synchronously above, so we
+        // won't loop on a hard error.
+      }
+    };
+
+    fire();
+    return () => { cancelled = true; };
+  }, [pendingShortcut, cardSessions, card.id, sessionKey, cwd, refreshCardSessions, onPendingShortcutConsumed, sessionsLoaded]);
+
   // Document refs
   const hasDesign = !!card.design_ref;
   const hasFeature = !!card.feature_ref;
   const hasTest = !!card.test_ref;
   const hasHtml = !!card.html_ref;
+  const hasQuestionnaires = (card.questionnaire_refs?.length ?? 0) > 0;
   const hasChecklist = localChecklist.length > 0;
 
   // HTML attachment URLs (sandboxed iframe + viewer route)
@@ -1436,6 +1566,26 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
               Test
             </button>
           )}
+          {hasQuestionnaires && (
+            <button
+              onClick={() => setActiveTab('questionnaires')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === 'questionnaires'
+                  ? 'border-b-2 border-cyan-400 text-cyan-500 dark:text-cyan-400'
+                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              Questionnaires
+              {(card.questionnaire_refs?.length ?? 0) > 1 && (
+                <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-xs dark:bg-cyan-900/50">
+                  {card.questionnaire_refs!.length}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('notes')}
             className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
@@ -1565,7 +1715,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         </div>
 
         {/* Content */}
-        <div className={activeTab === 'terminal' || activeTab === 'notes' || activeTab === 'html' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]'}>
+        <div className={activeTab === 'terminal' || activeTab === 'notes' || activeTab === 'html' || activeTab === 'questionnaires' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]'}>
           {activeTab === 'details' ? (
             <div className="p-4">
               {/* Compact Metadata Strip */}
@@ -1885,6 +2035,18 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </div>
               )}
 
+            </div>
+          ) : activeTab === 'questionnaires' ? (
+            /* Questionnaires View — interactive Q&A forms */
+            <div className="flex h-full flex-col">
+              <QuestionnaireTab
+                card={card}
+                projectId={projectId}
+                activeSessionName={activeSession?.name ?? sessionName}
+                activeProvider={selectedProvider ?? activeSession?.provider ?? undefined}
+                cwd={cwd}
+                onSubmitSuccess={() => setActiveTab('terminal')}
+              />
             </div>
           ) : activeTab === 'html' && card.html_ref && htmlAttachmentSrc && htmlViewerHref ? (
             /* HTML Attachment View — sandboxed iframe + open-in-new-tab */

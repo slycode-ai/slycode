@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { DashboardData, BridgeStats } from '@/lib/types';
 import { connectionManager } from '@/lib/connection-manager';
 import { usePolling } from '@/hooks/usePolling';
@@ -39,6 +39,13 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [slycodeVersion, setSlycodeVersion] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
 
+  // Auto-open the global terminal when arriving via /global or /?openGlobal=1.
+  // Strip the param after consuming so a refresh doesn't re-trigger.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const openGlobalRequested = searchParams.get('openGlobal') === '1';
+  const consumedOpenGlobalRef = useRef(false);
+
   // Fetch SlyCode version on mount
   useEffect(() => {
     fetch('/api/version-check')
@@ -57,6 +64,16 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const inaccessibleProjects = projectsWithBridge.filter((p) => !p.accessible);
   const [showAddModal, setShowAddModal] = useState(false);
   const router = useRouter();
+
+  // Strip ?openGlobal=1 after first render so a refresh doesn't re-trigger
+  // the auto-expand. The `defaultExpanded` prop on GlobalClaudePanel only
+  // applies on its initial mount, so the URL strip is safe.
+  useEffect(() => {
+    if (openGlobalRequested && !consumedOpenGlobalRef.current) {
+      consumedOpenGlobalRef.current = true;
+      router.replace(pathname, { scroll: false });
+    }
+  }, [openGlobalRequested, pathname, router]);
 
   // Number-key shortcuts to jump to projects
   useKeyboardShortcuts({
@@ -503,6 +520,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
         isActive={isGlobalActive}
         label="Global Terminal"
         voiceTerminalId="dashboard-global"
+        defaultExpanded={openGlobalRequested}
         onTerminalReady={(handle) => {
           if (handle) voice.registerTerminal('dashboard-global', handle);
           else voice.unregisterTerminal('dashboard-global');

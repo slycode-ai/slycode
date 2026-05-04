@@ -11,14 +11,26 @@ import { readStatus, type CardStatus } from '@/lib/status';
 function CardStatusPanel({ status, stage }: { status: CardStatus; stage: KanbanStage }) {
   const restRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
+  // Marquee animation duration in seconds. Scaled to keep pixels/sec consistent
+  // across status lengths so longer text doesn't appear to scroll faster than
+  // shorter text.
+  const [marqueeSeconds, setMarqueeSeconds] = useState<number>(5);
 
-  // The "rest" layer is a `display:block; overflow:hidden; text-overflow:ellipsis`
-  // wrapper. If the text inside is wider than the wrapper, scrollWidth > clientWidth
-  // and we know overflow exists.
   useLayoutEffect(() => {
     const el = restRef.current;
     if (!el) return;
-    const measure = () => setOverflows(el.scrollWidth > el.clientWidth + 0.5);
+    const measure = () => {
+      const overflowing = el.scrollWidth > el.clientWidth + 0.5;
+      setOverflows(overflowing);
+      if (overflowing) {
+        // Target ~60 px/sec horizontal scroll. The track translates by one
+        // block width on each loop. Block width \u2248 text scrollWidth + ~30px gap
+        // (6 non-breaking spaces at 7px font). Clamp to keep extreme cases sane.
+        const blockWidth = el.scrollWidth + 30;
+        const seconds = Math.max(3, Math.min(30, blockWidth / 60));
+        setMarqueeSeconds(seconds);
+      }
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
@@ -28,8 +40,17 @@ function CardStatusPanel({ status, stage }: { status: CardStatus; stage: KanbanS
 
   const gap = '\u00A0'.repeat(6);
   return (
-    <div className={`card-status stage-${stage}`} data-overflows={overflows ? 'true' : 'false'}>
-      {/* Rest layer: always present. Block-level with ellipsis when text overflows. */}
+    <div
+      className={`card-status stage-${stage}`}
+      data-overflows={overflows ? 'true' : 'false'}
+      title={status.text}
+      aria-label={`Card status: ${status.text}`}
+      style={{ '--card-status-marquee-duration': `${marqueeSeconds}s` } as React.CSSProperties}
+    >
+      {/* Rest layer: always present. Block-level; long text clips at panel edge
+          (no ellipsis — chosen for the LED-marquee aesthetic). The full text is
+          available via the title attribute (pointer hover) and aria-label
+          (screen readers). */}
       <div ref={restRef} className="card-status-rest">
         <span className="card-status-text">{status.text}</span>
       </div>

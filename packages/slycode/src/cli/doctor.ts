@@ -20,6 +20,48 @@ function icon(result: CheckResult): string {
   }
 }
 
+const PREBUILT_PLATFORMS = new Set([
+  'darwin-arm64',
+  'darwin-x64',
+  'win32-arm64',
+  'win32-x64',
+  'linux-arm64',
+  'linux-x64',
+]);
+
+function hasCommand(cmd: string): boolean {
+  try {
+    if (process.platform === 'win32') {
+      execSync(`where ${cmd}`, { stdio: 'ignore', windowsHide: true });
+    } else {
+      execSync(`command -v ${cmd}`, { stdio: 'ignore', windowsHide: true, shell: '/bin/sh' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildToolsCheck(): Check {
+  const key = `${process.platform}-${process.arch}`;
+  if (PREBUILT_PLATFORMS.has(key)) {
+    return { name: 'Build tools', result: 'ok', message: `No local build tools normally required (${key} prebuild)` };
+  }
+  const missing: string[] = [];
+  const hasC = !!process.env.CC || hasCommand('gcc') || hasCommand('clang') || hasCommand('cc');
+  const hasCxx = !!process.env.CXX || hasCommand('g++') || hasCommand('clang++') || hasCommand('c++');
+  const hasMake = hasCommand('make');
+  const hasPython = hasCommand('python3') || hasCommand('python');
+  if (!hasC) missing.push('C compiler');
+  if (!hasCxx) missing.push('C++ compiler');
+  if (!hasMake) missing.push('make');
+  if (!hasPython) missing.push('python3');
+  if (missing.length === 0) {
+    return { name: 'Build tools', result: 'ok', message: `C/C++ toolchain detected (required on ${key} — no prebuild)` };
+  }
+  return { name: 'Build tools', result: 'fail', message: `Missing on ${key}: ${missing.join(', ')}` };
+}
+
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -51,7 +93,12 @@ export async function doctor(_args: string[]): Promise<void> {
     });
   }
 
-  // 2. Workspace
+  // 2. Build tools (only matters on platforms with no node-pty prebuild)
+  // Keep wording in sync with: packages/slycode/scripts/preinstall.js,
+  // packages/slycode/README.md, scripts/setup.sh:check_build_tools().
+  checks.push(buildToolsCheck());
+
+  // 3. Workspace
   const workspace = resolveWorkspace();
   if (workspace) {
     checks.push({ name: 'Workspace', result: 'ok', message: workspace });

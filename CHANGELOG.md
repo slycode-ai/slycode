@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.37] - 2026-05-04
+
+### Added
+- Card questionnaires — author multi-question forms (free-text, single/multi-choice, boolean, scale, exposition) and attach to cards via `--questionnaire-ref`; user submits and answers stream back to the AI session as a Q&A block
+- Quick-launch shortcuts — per-project `shortcuts.json` maps short tokens to cards, prompts, and provider; URL form `/project/<id>/<token>` auto-opens the card and injects the prompt
+- Project tag shortcuts — assign a 1-6 char tag to projects so messaging `/<tag>` jumps straight there; reserved `global` token routes to dashboard with auto-expanded global terminal
+- Card status v2 — manual vs auto status with tier-based overwrite (manual is sacred; auto writes from notes/checklist/refs/problems honor priority); LED-marquee animation scales by text length
+- TTS audio archive — voice replies persist to `data/tts-archive/` with ring-buffer rotation (defaults: 10 files, override via `TTS_ARCHIVE_MAX` and `TTS_ARCHIVE_DIR`)
+- `slycode doctor` build-tools check — flags missing C/C++ toolchain, make, and python on platforms without prebuilt node-pty binaries
+
+### Changed
+- Card actions (challenge, challenge-implementation, chore, debug, deep-design, design-requirements, test-review) now author questionnaires when 3+ user decisions are needed; ask inline for fewer or when responding via messaging
+- Voice settings gear stays interactive even when the rest of the voice control bar is disabled
+- Status displayed in messaging session-switch confirmations and `/status` command — no need to query separately
+
 ## [0.2.36] - 2026-04-27
 
 ### Fixed

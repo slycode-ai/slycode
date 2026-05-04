@@ -90,12 +90,136 @@ function normalizeStatus(input) {
 }
 
 // Defensive read — accepts anything (legacy string, undefined, malformed object) and
-// returns a CardStatus or null.
+// returns a CardStatus or null. V1 data without `kind` reads as `kind: 'manual'`.
+// Does NOT persist the default back to disk; callers shouldn't rewrite the raw object
+// based purely on a defensive read.
 function readStatus(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (typeof raw.text !== 'string' || typeof raw.setAt !== 'string') return null;
   if (!raw.text.trim()) return null;
-  return { text: raw.text, setAt: raw.setAt };
+  const kind = raw.kind === 'auto' ? 'auto' : 'manual';
+  const tier = (raw.tier === 'high' || raw.tier === 'medium' || raw.tier === 'low') ? raw.tier : undefined;
+  const out = { text: raw.text, setAt: raw.setAt, kind };
+  if (tier) out.tier = tier;
+  return out;
+}
+
+// V2 overwrite levels (lower = higher priority).
+//   -1 manual (sacred — auto never overwrites)
+//    0 high-tier auto      (problem add)
+//    1 medium-tier auto    (ref attached, problem resolve)
+//    2 low-tier auto       (notes, checklist, cross-card prompt)
+//    3 malformed/unknown   (anything overwrites)
+function getStatusLevel(status) {
+  if (!status) return Number.POSITIVE_INFINITY;
+  if (status.kind === 'manual') return -1;
+  if (!status.kind) return -1; // V1 backward-compat
+  if (status.tier === 'high') return 0;
+  if (status.tier === 'medium') return 1;
+  if (status.tier === 'low') return 2;
+  return 3;
+}
+
+function canOverwriteStatus(currentStatus, newStatus) {
+  if (!currentStatus) return true;
+  return getStatusLevel(newStatus) <= getStatusLevel(currentStatus);
+}
+
+// Manual write: always overwrites, sets kind:'manual' and explicitly drops any
+// stale `tier` field. Returns the normalized text (or null if input was empty
+// after normalization, in which case caller should clear status).
+function setManualStatus(card, text) {
+  const normalized = normalizeStatus(text);
+  if (!normalized) {
+    if (card.status) delete card.status;
+    return null;
+  }
+  card.status = { text: normalized, setAt: new Date().toISOString(), kind: 'manual' };
+  return normalized;
+}
+
+// Auto write: builds the candidate, runs canOverwriteStatus, only mutates if allowed.
+// Returns true if written, false if denied. Never churns setAt on a denied write.
+function tryAutoStatus(card, opts) {
+  const { text, tier } = opts || {};
+  if (tier !== 'high' && tier !== 'medium' && tier !== 'low') return false;
+  const normalized = normalizeStatus(text);
+  if (!normalized) return false;
+  const candidate = { text: normalized, setAt: new Date().toISOString(), kind: 'auto', tier };
+  const current = readStatus(card.status);
+  if (!canOverwriteStatus(current, candidate)) return false;
+  card.status = candidate;
+  return true;
+}
+
+// ============================================================================
+// Named tier-tagged auto-status helpers — the ONLY path to creating auto
+// statuses. Centralizes wording, truncation, and tier assignment.
+// ============================================================================
+
+function autoStatusDocAttached(card, kinds) {
+  // kinds is an array of: 'design' | 'feature' | 'html' | 'test' | 'questionnaire'
+  if (!Array.isArray(kinds) || kinds.length === 0) return false;
+  let text;
+  if (kinds.length === 1) {
+    const single = kinds[0];
+    text = single === 'design'        ? 'Design doc attached'
+        :  single === 'feature'       ? 'Feature spec attached'
+        :  single === 'html'          ? 'HTML attachment added'
+        :  single === 'test'          ? 'Test doc attached'
+        :  single === 'questionnaire' ? 'Questionnaire attached'
+        :  'Doc attached';
+  } else {
+    text = 'Docs attached';
+  }
+  return tryAutoStatus(card, { text, tier: 'medium' });
+}
+
+function autoStatusNoteAdded(card) {
+  return tryAutoStatus(card, { text: 'Note added', tier: 'low' });
+}
+
+function autoStatusChecklistItemAdded(card, itemText) {
+  // Truncate the variable part FIRST so the prefix survives the cap.
+  const prefix = 'Checklist item added: ';
+  const reservedForPrefix = prefix.length;
+  const remainingBudget = STATUS_MAX_GRAPHEMES - reservedForPrefix;
+  let truncated = String(itemText || '').replace(/\s+/g, ' ').trim();
+  // Cap the variable text to remainingBudget graphemes (best-effort)
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const graphemes = [];
+    for (const g of seg.segment(truncated)) {
+      graphemes.push(g.segment);
+      if (graphemes.length >= remainingBudget) break;
+    }
+    truncated = graphemes.join('');
+  } else {
+    const cps = Array.from(truncated);
+    if (cps.length > remainingBudget) truncated = cps.slice(0, remainingBudget).join('');
+  }
+  return tryAutoStatus(card, { text: prefix + truncated, tier: 'low' });
+}
+
+function autoStatusChecklistToggled(card, doneCount, totalCount) {
+  return tryAutoStatus(card, { text: `Checklist: ${doneCount}/${totalCount}`, tier: 'low' });
+}
+
+function autoStatusProblemReported(card, severity) {
+  const sev = String(severity || 'minor');
+  return tryAutoStatus(card, { text: `Problem reported (${sev})`, tier: 'high' });
+}
+
+function autoStatusProblemResolved(card, remainingCount) {
+  const r = Number(remainingCount || 0);
+  const text = r > 0 ? `Problem resolved: ${r} open` : 'All problems resolved';
+  return tryAutoStatus(card, { text, tier: 'medium' });
+}
+
+function autoStatusPromptReceived(card) {
+  // Fixed text (no excerpt) — prevents leaking instruction-shaped or sensitive
+  // prompt fragments to the board.
+  return tryAutoStatus(card, { text: 'Prompt received', tier: 'low' });
 }
 
 function formatRelativeTimeStatus(pastIso, now = new Date()) {
@@ -141,22 +265,23 @@ const MAIN_HELP = `
 Usage: kanban <command> [options]
 
 Commands:
-  search     Search cards by query, stage, type, or area
-  show       Show full details of a card by ID
-  board      Show full board snapshot (all cards grouped by stage)
-  create     Create a new card (use --automation for automation cards)
-  update     Update card fields (title, description, areas, etc.)
-  move       Move a card to a different stage
-  reorder    Reorder cards within a stage
-  archive    Archive cards (soft delete)
-  checklist  Manage checklist items
-  problem    Manage problems/issues
-  notes      Manage cross-agent notes
-  status     Get/set/clear a short progress status visible on the card
-  automation Manage card automations (scheduled prompt execution)
-  prompt     Send a prompt to another card's session (cross-card execution)
-  respond    Reply to a cross-card prompt (callback for --wait mode)
-  areas      List available areas from context-priming
+  search        Search cards by query, stage, type, or area
+  show          Show full details of a card by ID
+  board         Show full board snapshot (all cards grouped by stage)
+  create        Create a new card (use --automation for automation cards)
+  update        Update card fields (title, description, areas, etc.)
+  move          Move a card to a different stage
+  reorder       Reorder cards within a stage
+  archive       Archive cards (soft delete)
+  checklist     Manage checklist items
+  problem       Manage problems/issues
+  notes         Manage cross-agent notes
+  status        Get/set/clear a short progress status visible on the card
+  automation    Manage card automations (scheduled prompt execution)
+  questionnaire Inspect / patch questionnaires attached to a card
+  prompt        Send a prompt to another card's session (cross-card execution)
+  respond       Reply to a cross-card prompt (callback for --wait mode)
+  areas         List available areas from context-priming
 
 Run 'kanban <command> --help' for command-specific options.
 `;
@@ -229,6 +354,10 @@ Options:
   --feature-ref <path>   Set feature spec reference (pass "" to clear)
   --test-ref <path>      Set test document reference (pass "" to clear)
   --html-ref <path>      Set HTML attachment reference (pass "" to clear)
+  --questionnaire-ref <path>
+                         Append a questionnaire JSON ref. Path must be under
+                         documentation/questionnaires/ and end in .json.
+                         Pass "" to clear ALL questionnaires from the card.
   --status <text>        Set progress status (max 120 chars; pass "" to clear)
 
 Examples:
@@ -236,22 +365,31 @@ Examples:
   kanban update card-123 --areas "web-frontend,terminal-bridge"
   kanban update card-123 --html-ref "documentation/designs/foo.html"
   kanban update card-123 --html-ref ""    # clear an existing HTML ref
+  kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
+  kanban update card-123 --questionnaire-ref ""   # clear all questionnaires
   kanban update card-123 --status "Refactoring auth path"
 `;
 
 const MOVE_HELP = `
-Usage: kanban move <card-id> <stage>
+Usage: kanban move <card-id> <stage> [--status "<text>"]
 
 Move a card to a different stage.
 
 Stages: backlog, design, implementation, testing, done
 
-Note: moving a card to a different stage clears the card's status. If you
-want a status to remain after a stage transition, set the status AFTER
-the move, not before.
+Options:
+  --status <text>    Set a manual status on the card after the move (one-shot).
+                     The move clears any existing status first; --status then
+                     replaces it with the given text. This is the recommended
+                     form when you want a status to survive a stage transition.
+
+Note: without --status, moving a card to a different stage clears the card's
+status. If you want a status to remain after a stage transition, either pass
+--status here, or run \`sly-kanban status\` after the move.
 
 Examples:
   kanban move card-123 design
+  kanban move card-123 implementation --status "Wiring CLI helpers"
   kanban move bridge-001 done
 `;
 
@@ -716,7 +854,11 @@ Priority: ${card.priority}
     {
       const statusObj = readStatus(card.status);
       if (statusObj) {
-        output += `Status: ${statusObj.text} (${formatRelativeTimeStatus(statusObj.setAt)})\n`;
+        // V2: expose provenance (kind + tier) for debugging "why didn't this overwrite?".
+        // This is debug output for humans, NOT a script-stable interface.
+        const tierPart = statusObj.tier ? `:${statusObj.tier}` : '';
+        const provenance = `${statusObj.kind || 'manual'}${tierPart}`;
+        output += `Status: ${statusObj.text} (${provenance}, ${formatRelativeTimeStatus(statusObj.setAt)})\n`;
       }
     }
     if (card.automation) {
@@ -1017,28 +1159,63 @@ function cmdUpdate(args) {
     updates.push(`tags: ${card.tags.join(', ')}`);
   }
 
-  const applyRefFlag = (flagKey, fieldKey, label, validateExt) => {
+  // Track which ref kinds were newly attached this call (set with a non-empty
+  // value AND the value actually changed). Used for the combined auto-status
+  // emission after all flags are processed. Idempotent re-sets do NOT count.
+  const refsAttachedThisCall = [];
+
+  const applyRefFlag = (flagKey, fieldKey, label, validateExt, autoKind, options = {}) => {
     if (!(flagKey in opts)) return;
     const value = opts[flagKey];
+    const isList = options.list === true;
+
     if (value === '' || value === true) {
-      // Empty string (or bare flag) clears the field
+      // Empty string (or bare flag) clears the field. For list fields, clears the entire array.
       if (card[fieldKey]) {
         delete card[fieldKey];
-        updates.push(`${fieldKey}: (cleared)`);
+        updates.push(`${fieldKey}: (cleared${isList ? ' all' : ''})`);
       }
       return;
     }
     if (validateExt && !validateExt(value)) {
+      if (options.strict) {
+        console.error(`Error: ${label} rejected "${value}" (must be a valid path under documentation/questionnaires/, ending in .json, with no traversal)`);
+        process.exit(1);
+      }
       console.error(`Warning: ${label} expected file extension not matched (got "${value}"). Setting anyway — server will reject if invalid.`);
     }
+
+    if (isList) {
+      // List mode: append to array, dedupe silently. Auto-status fires once
+      // per call (not per pre-existing entry) to match the singular-flag idempotency contract.
+      const existing = Array.isArray(card[fieldKey]) ? card[fieldKey] : [];
+      if (existing.includes(value)) return;
+      card[fieldKey] = [...existing, value];
+      updates.push(`${fieldKey}: + ${value}`);
+      if (autoKind) refsAttachedThisCall.push(autoKind);
+      return;
+    }
+
+    // Singular mode (existing behavior).
+    const previous = card[fieldKey];
+    if (previous === value) return; // idempotent: no real change, skip update + auto-status
     card[fieldKey] = value;
     updates.push(`${fieldKey}: ${value}`);
+    if (autoKind) refsAttachedThisCall.push(autoKind);
   };
 
-  applyRefFlag('design-ref', 'design_ref', '--design-ref');
-  applyRefFlag('feature-ref', 'feature_ref', '--feature-ref');
-  applyRefFlag('test-ref', 'test_ref', '--test-ref');
-  applyRefFlag('html-ref', 'html_ref', '--html-ref', (v) => /\.(html|htm)$/i.test(v));
+  applyRefFlag('design-ref', 'design_ref', '--design-ref', null, 'design');
+  applyRefFlag('feature-ref', 'feature_ref', '--feature-ref', null, 'feature');
+  applyRefFlag('test-ref', 'test_ref', '--test-ref', null, 'test');
+  applyRefFlag('html-ref', 'html_ref', '--html-ref', (v) => /\.(html|htm)$/i.test(v), 'html');
+  applyRefFlag(
+    'questionnaire-ref',
+    'questionnaire_refs',
+    '--questionnaire-ref',
+    (v) => /^documentation\/questionnaires\//.test(v.replace(/\\/g, '/')) && /\.json$/i.test(v) && !v.includes('..'),
+    'questionnaire',
+    { list: true, strict: true }
+  );
 
   if ('status' in opts) {
     const value = opts.status;
@@ -1048,15 +1225,12 @@ function cmdUpdate(args) {
         updates.push('status: (cleared)');
       }
     } else {
-      const normalized = normalizeStatus(String(value));
-      if (!normalized) {
-        if (card.status) {
-          delete card.status;
-          updates.push('status: (cleared — empty after normalization)');
-        }
-      } else {
-        card.status = { text: normalized, setAt: new Date().toISOString() };
+      const normalized = setManualStatus(card, String(value));
+      if (normalized) {
         updates.push(`status: "${normalized}"`);
+      } else if (!card.status) {
+        // Was already clear (or got cleared by empty-after-normalization)
+        updates.push('status: (cleared — empty after normalization)');
       }
     }
   }
@@ -1083,6 +1257,13 @@ function cmdUpdate(args) {
   if (updates.length === 0) {
     console.log('No updates specified. Use --help for options.');
     return;
+  }
+
+  // Auto-status emission: only ONE combined emission for any refs newly attached
+  // this call. Skipped on clears, no-op re-sets, and explicit --status writes
+  // (which already set a manual status that auto can't overwrite anyway).
+  if (refsAttachedThisCall.length > 0 && !('status' in opts)) {
+    autoStatusDocAttached(card, refsAttachedThisCall);
   }
 
   card.updated_at = new Date().toISOString();
@@ -1143,11 +1324,19 @@ function cmdMove(args) {
   card.updated_at = new Date().toISOString();
   card.last_modified_by = 'cli';
   // Auto-clear status on stage move — status reflects within-stage progress.
-  // To carry a status across a transition, set it AFTER the move.
+  // To carry a status across a transition, set it AFTER the move OR pass --status.
   let clearedStatus = false;
   if (card.status) {
     delete card.status;
     clearedStatus = true;
+  }
+  // V2: --status sets a new manual status post-clear (one-shot move-with-status).
+  let postMoveStatus = null;
+  if ('status' in opts) {
+    const value = opts.status;
+    if (value !== '' && value !== true) {
+      postMoveStatus = setManualStatus(card, String(value));
+    }
   }
   kanban.stages[newStage].push(card);
 
@@ -1157,8 +1346,11 @@ function cmdMove(args) {
   console.log(`Moved card: ${cardId}`);
   console.log(`  From: ${oldStage}`);
   console.log(`  To: ${newStage}`);
-  if (clearedStatus) {
+  if (clearedStatus && !postMoveStatus) {
     console.log(`  Status: (cleared on stage move)`);
+  }
+  if (postMoveStatus) {
+    console.log(`  Status: "${postMoveStatus}"`);
   }
 }
 
@@ -1215,24 +1407,21 @@ function cmdStatus(args) {
     return;
   }
 
-  // Set path
-  const normalized = normalizeStatus(String(positionalText));
+  // Set path — manual write always overwrites (level -1, sacred).
+  const normalized = setManualStatus(card, String(positionalText));
   if (!normalized) {
-    // Empty after normalization → also a clear
+    // Empty after normalization → setManualStatus already cleared the field.
     if (card.status) {
-      delete card.status;
-      card.updated_at = new Date().toISOString();
-      card.last_modified_by = 'cli';
-      writeKanban(kanban);
-      emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
-      console.log(`Cleared status on card: ${cardId} (input was empty after normalization)`);
-    } else {
-      console.log('(input was empty after normalization; no status set)');
+      // (shouldn't happen — setManualStatus deletes when input is empty)
     }
+    card.updated_at = new Date().toISOString();
+    card.last_modified_by = 'cli';
+    writeKanban(kanban);
+    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
+    console.log(`Cleared status on card: ${cardId} (input was empty after normalization)`);
     return;
   }
 
-  card.status = { text: normalized, setAt: new Date().toISOString() };
   card.updated_at = new Date().toISOString();
   card.last_modified_by = 'cli';
   writeKanban(kanban);
@@ -1413,6 +1602,7 @@ function cmdChecklist(args) {
       card.checklist.push(newItem);
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
+      autoStatusChecklistItemAdded(card, text);
       writeKanban(kanban);
       console.log(`Added checklist item: ${newItem.id}`);
       console.log(`  Text: ${text}`);
@@ -1432,6 +1622,8 @@ function cmdChecklist(args) {
       toggleItem.done = !toggleItem.done;
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
+      const doneCount = card.checklist.filter(i => i.done).length;
+      autoStatusChecklistToggled(card, doneCount, card.checklist.length);
       writeKanban(kanban);
       console.log(`Toggled: ${toggleId}`);
       console.log(`  Status: ${toggleItem.done ? 'done' : 'pending'}`);
@@ -1539,6 +1731,7 @@ function cmdProblem(args) {
       card.problems.push(newProblem);
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
+      autoStatusProblemReported(card, severity);
       writeKanban(kanban);
       emitEvent('problem_added', PROJECT_NAME, `Problem added to '${card.title}': ${description}`, cardId);
       console.log(`Added problem: ${newProblem.id}`);
@@ -1564,6 +1757,8 @@ function cmdProblem(args) {
       prob.resolved_at = new Date().toISOString();
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
+      const remainingOpen = card.problems.filter(p => !p.resolved_at).length;
+      autoStatusProblemResolved(card, remainingOpen);
       writeKanban(kanban);
       emitEvent('problem_resolved', PROJECT_NAME, `Problem resolved on '${card.title}': ${prob.description}`, cardId);
       console.log(`Resolved problem: ${resolveId}`);
@@ -1731,6 +1926,7 @@ function cmdNotes(args) {
       card.agentNotes.push(newNote);
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
+      autoStatusNoteAdded(card);
       writeKanban(kanban);
       console.log(`Added note #${newNote.id}`);
       if (newNote.agent) console.log(`  Agent: ${newNote.agent}`);
@@ -2480,6 +2676,336 @@ function cmdReorder(args) {
 }
 
 // ============================================================================
+// Questionnaire Command (inspect & patch attached questionnaires)
+// ============================================================================
+//
+// Mirrors the file IO portion of `web/src/lib/questionnaire.ts`. Both copies
+// MUST stay in lockstep — same convention as web/src/lib/status.ts ↔ status
+// helpers in this file.
+// ============================================================================
+
+const QUESTIONNAIRE_HELP = `
+Usage: kanban questionnaire <subcommand> [options]
+
+Inspect or patch questionnaires attached to a card.
+
+Subcommands:
+  list <card-id>
+      List the questionnaires attached to the card with answered/answerable
+      counts and required-missing counts.
+
+  answers <card-id> [--name <slug>]
+      Print the Q&A in the same human-readable prose format the Submit
+      message uses. If --name is omitted and the card has only one
+      questionnaire, that one is used.
+
+  answer <card-id> --name <slug> --item <id> --value <json>
+      Patch a single answer. Atomic write. The --value argument MUST be
+      valid JSON (e.g. '"text"', 'true', '4', '["a","b"]').
+
+Examples:
+  kanban questionnaire card-123 list
+  kanban questionnaire card-123 answers --name migration_scope
+  kanban questionnaire card-123 answer --name migration_scope \\
+        --item q1 --value '"Tuesday evening"'
+`;
+
+function _qStripControlChars(s) {
+  if (typeof s !== 'string') return '';
+  let out = s.replace(/\x1b\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]/g, '');
+  out = out.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  out = out.replace(/\x1b./g, '');
+  out = out.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
+  return out;
+}
+
+function _qIsAnswerable(item) {
+  return item && item.type && item.type !== 'exposition';
+}
+
+function _qIsAnswerFilled(item) {
+  if (!_qIsAnswerable(item)) return false;
+  if (item.answer === null || item.answer === undefined) return false;
+  switch (item.type) {
+    case 'free_text':
+    case 'single_choice':
+      return typeof item.answer === 'string' && item.answer.trim().length > 0;
+    case 'multi_choice':
+      return Array.isArray(item.answer) && item.answer.length > 0;
+    case 'boolean':
+      return item.answer === true || item.answer === false;
+    case 'scale':
+    case 'number':
+      return typeof item.answer === 'number' && Number.isFinite(item.answer);
+    default:
+      return false;
+  }
+}
+
+function _qCounts(q) {
+  let answered = 0;
+  let answerable = 0;
+  let requiredMissing = 0;
+  for (const item of q.items || []) {
+    if (!_qIsAnswerable(item)) continue;
+    answerable++;
+    const filled = _qIsAnswerFilled(item);
+    if (filled) answered++;
+    if (item.required && !filled) requiredMissing++;
+  }
+  return { answered, answerable, requiredMissing };
+}
+
+function _qFormatAnswer(item) {
+  if (!_qIsAnswerFilled(item)) return '(no answer)';
+  switch (item.type) {
+    case 'free_text': {
+      const v = _qStripControlChars(item.answer);
+      const parts = v.split('\n');
+      if (parts.length === 1) return parts[0];
+      return parts.map((p, i) => (i === 0 ? p : `   ${p}`)).join('\n');
+    }
+    case 'single_choice':
+      return _qStripControlChars(item.answer);
+    case 'multi_choice':
+      return item.answer.map((v) => _qStripControlChars(v)).join(', ');
+    case 'boolean':
+      return item.answer ? 'true' : 'false';
+    case 'scale':
+    case 'number':
+      return String(item.answer);
+    default:
+      return '(no answer)';
+  }
+}
+
+function _qBuildAnswersText(q, relPath) {
+  const lines = [];
+  lines.push(`[Questionnaire: ${_qStripControlChars(q.name)}]`);
+  if (relPath) lines.push(`File: ${relPath}`);
+  lines.push('');
+  for (const item of q.items || []) {
+    if (!_qIsAnswerable(item)) continue;
+    lines.push(`Q: ${_qStripControlChars(item.question)}`);
+    lines.push(`A: ${_qFormatAnswer(item)}`);
+    lines.push('');
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
+function _qValidatePath(relPath) {
+  if (typeof relPath !== 'string' || !relPath.trim()) {
+    throw new Error('Path must be a non-empty string');
+  }
+  const posix = relPath.replace(/\\/g, '/');
+  if (!posix.startsWith('documentation/questionnaires/')) {
+    throw new Error(`Path must start with "documentation/questionnaires/" (got "${posix}")`);
+  }
+  if (!/\.json$/i.test(posix)) {
+    throw new Error(`Path must end with .json (got "${posix}")`);
+  }
+  if (posix.includes('..')) {
+    throw new Error(`Path must not contain ".." (got "${posix}")`);
+  }
+}
+
+function _qResolveAbsPath(relPath) {
+  _qValidatePath(relPath);
+  const abs = path.resolve(PROJECT_ROOT, relPath);
+  const allowedBase = path.resolve(PROJECT_ROOT, 'documentation/questionnaires');
+  if (abs !== allowedBase && !abs.startsWith(allowedBase + path.sep)) {
+    throw new Error('Resolved path escapes documentation/questionnaires/');
+  }
+  return abs;
+}
+
+function _qLoad(relPath) {
+  const abs = _qResolveAbsPath(relPath);
+  const raw = fs.readFileSync(abs, 'utf-8');
+  const parsed = JSON.parse(raw);
+  // Light validation — full schema check happens via the web validator. CLI
+  // accepts looser structure so a malformed file can still be inspected/patched.
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
+    throw new Error(`Invalid questionnaire structure in ${relPath}`);
+  }
+  return { abs, q: parsed };
+}
+
+function _qAtomicSave(absPath, q) {
+  q.updated_at = new Date().toISOString();
+  const tmp = `${absPath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2, 10)}`;
+  fs.writeFileSync(tmp, JSON.stringify(q, null, 2) + '\n', 'utf-8');
+  fs.renameSync(tmp, absPath);
+}
+
+function _qResolveByName(card, name) {
+  const refs = Array.isArray(card.questionnaire_refs) ? card.questionnaire_refs : [];
+  if (refs.length === 0) {
+    throw new Error('Card has no questionnaires attached');
+  }
+  if (!name) {
+    if (refs.length === 1) {
+      return _qLoad(refs[0]);
+    }
+    const names = refs.map((r) => {
+      try {
+        return _qLoad(r).q.name;
+      } catch {
+        return r;
+      }
+    });
+    throw new Error(`Multiple questionnaires attached — pass --name <slug>. Names: ${names.join(', ')}`);
+  }
+  for (const ref of refs) {
+    try {
+      const loaded = _qLoad(ref);
+      if (loaded.q.name === name) return { ...loaded, relPath: ref };
+    } catch {
+      // skip unreadable refs
+    }
+  }
+  throw new Error(`No attached questionnaire with name "${name}"`);
+}
+
+function cmdQuestionnaire(args) {
+  const sub = args[0];
+  if (!sub || sub === '--help' || sub === '-h') {
+    console.log(QUESTIONNAIRE_HELP);
+    return;
+  }
+  const subArgs = args.slice(1);
+
+  switch (sub) {
+    case 'list':
+      return _cmdQuestionnaireList(subArgs);
+    case 'answers':
+      return _cmdQuestionnaireAnswers(subArgs);
+    case 'answer':
+      return _cmdQuestionnaireAnswer(subArgs);
+    default:
+      console.error(`Error: Unknown questionnaire subcommand '${sub}'`);
+      console.log(QUESTIONNAIRE_HELP);
+      process.exit(1);
+  }
+}
+
+function _cmdQuestionnaireList(args) {
+  const opts = parseArgs(args);
+  const cardId = opts._[0];
+  if (!cardId) {
+    console.error('Error: card ID required');
+    console.log(QUESTIONNAIRE_HELP);
+    process.exit(1);
+  }
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId, true);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+  const card = result.card;
+  const refs = Array.isArray(card.questionnaire_refs) ? card.questionnaire_refs : [];
+  if (refs.length === 0) {
+    console.log('(no questionnaires attached)');
+    return;
+  }
+  for (const ref of refs) {
+    try {
+      const { q } = _qLoad(ref);
+      const counts = _qCounts(q);
+      const required = counts.requiredMissing > 0
+        ? `  ${counts.requiredMissing} required missing`
+        : '';
+      console.log(
+        `${q.name}  [${q.status}]  ${counts.answered}/${counts.answerable} answered${required}`
+      );
+      console.log(`   ${ref}`);
+    } catch (err) {
+      console.log(`${ref}  [unreadable: ${err.message}]`);
+    }
+  }
+}
+
+function _cmdQuestionnaireAnswers(args) {
+  const opts = parseArgs(args);
+  const cardId = opts._[0];
+  const name = opts.name;
+  if (!cardId) {
+    console.error('Error: card ID required');
+    console.log(QUESTIONNAIRE_HELP);
+    process.exit(1);
+  }
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId, true);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+  try {
+    const { q, relPath } = _qResolveByName(result.card, name);
+    const text = _qBuildAnswersText(q, relPath || (Array.isArray(result.card.questionnaire_refs) ? result.card.questionnaire_refs[0] : null));
+    console.log(text);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function _cmdQuestionnaireAnswer(args) {
+  const opts = parseArgs(args);
+  const cardId = opts._[0];
+  const name = opts.name;
+  const itemId = opts.item;
+  const valueRaw = opts.value;
+
+  if (!cardId || !name || !itemId || valueRaw === undefined) {
+    console.error('Error: requires <card-id> --name <slug> --item <id> --value <json>');
+    console.log(QUESTIONNAIRE_HELP);
+    process.exit(1);
+  }
+
+  let value;
+  try {
+    value = JSON.parse(valueRaw);
+  } catch (err) {
+    console.error(`Error: --value must be valid JSON (got "${valueRaw}"): ${err.message}`);
+    process.exit(1);
+  }
+
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId, true);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+
+  let loaded;
+  try {
+    loaded = _qResolveByName(result.card, name);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  const { q, abs } = loaded;
+  const idx = (q.items || []).findIndex((it) => _qIsAnswerable(it) && it.id === itemId);
+  if (idx === -1) {
+    console.error(`Error: Item id "${itemId}" not found in questionnaire "${name}"`);
+    process.exit(1);
+  }
+  // Light shape check (full validation lives in the web validator; CLI keeps it loose).
+  q.items[idx].answer = value;
+  try {
+    _qAtomicSave(abs, q);
+    console.log(`OK ${name}:${itemId}`);
+  } catch (err) {
+    console.error(`Error writing questionnaire: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// ============================================================================
 // Prompt Command (cross-card execution)
 // ============================================================================
 
@@ -2744,6 +3270,11 @@ Either way, the CLI will print a success line with the byte count and a preview 
         }
         console.log('  Session started. Prompt delivered via CLI arg.');
 
+        // V2: target card gets a low-tier auto-status that the prompt landed.
+        // Fixed text (no excerpt) so prompt fragments don't leak to the board.
+        autoStatusPromptReceived(card);
+        writeKanban(kanban);
+
         // For fire-and-forget, prompt was passed as CLI arg — we're done
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} via session creation.`);
@@ -2775,6 +3306,11 @@ Either way, the CLI will print a success line with the byte count and a preview 
           await cleanupResponseLock();
           process.exit(1);
         }
+
+        // V2: target card gets a low-tier auto-status that the prompt landed.
+        // Fixed text (no excerpt) so prompt fragments don't leak to the board.
+        autoStatusPromptReceived(card);
+        writeKanban(kanban);
 
         // Fire-and-forget mode
         if (!wait) {
@@ -3133,6 +3669,9 @@ function main() {
       break;
     case 'automation':
       cmdAutomation(commandArgs);
+      break;
+    case 'questionnaire':
+      cmdQuestionnaire(commandArgs);
       break;
     case 'prompt':
       cmdPrompt(commandArgs);

@@ -6,6 +6,12 @@
       "static/media/70bc3e132a0a741e-s.p.15008bfb.woff2",
       "static/media/de161955856a921d-s.p.25da2b95.woff2"
     ],
+    "[project]/src/app/global/page": [
+      "static/media/caa3a2e1cccd8315-s.p.853070df.woff2",
+      "static/media/797e433ab948586e-s.p.dbea232f.woff2",
+      "static/media/70bc3e132a0a741e-s.p.15008bfb.woff2",
+      "static/media/de161955856a921d-s.p.25da2b95.woff2"
+    ],
     "[project]/src/app/html-viewer/[...path]/page": [
       "static/media/caa3a2e1cccd8315-s.p.853070df.woff2",
       "static/media/797e433ab948586e-s.p.dbea232f.woff2",
@@ -13,6 +19,12 @@
       "static/media/de161955856a921d-s.p.25da2b95.woff2"
     ],
     "[project]/src/app/page": [
+      "static/media/caa3a2e1cccd8315-s.p.853070df.woff2",
+      "static/media/797e433ab948586e-s.p.dbea232f.woff2",
+      "static/media/70bc3e132a0a741e-s.p.15008bfb.woff2",
+      "static/media/de161955856a921d-s.p.25da2b95.woff2"
+    ],
+    "[project]/src/app/project/[id]/[token]/page": [
       "static/media/caa3a2e1cccd8315-s.p.853070df.woff2",
       "static/media/797e433ab948586e-s.p.dbea232f.woff2",
       "static/media/70bc3e132a0a741e-s.p.15008bfb.woff2",

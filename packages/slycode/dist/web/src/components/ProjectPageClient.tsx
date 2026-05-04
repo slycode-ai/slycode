@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { BridgeStats } from '@/lib/types';
 import { usePolling } from '@/hooks/usePolling';
 import { GlobalClaudePanel } from './GlobalClaudePanel';
@@ -25,6 +26,22 @@ export function ProjectPageClient({
   const [isGlobalActive, setIsGlobalActive] = useState(false);
   const [isProjectGlobalActive, setIsProjectGlobalActive] = useState(false);
   const voice = useVoice();
+
+  // Quick-launch project-terminal entry: /project/<id>/<tag> redirects to
+  // /project/<id>?openTerminal=1, which we read once on mount and pass to
+  // GlobalClaudePanel as defaultExpanded. Strip the param after consuming
+  // so refresh doesn't re-trigger.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const openTerminalRequested = searchParams.get('openTerminal') === '1';
+  const consumedOpenTerminalRef = useRef(false);
+  useEffect(() => {
+    if (openTerminalRequested && !consumedOpenTerminalRef.current) {
+      consumedOpenTerminalRef.current = true;
+      router.replace(pathname, { scroll: false });
+    }
+  }, [openTerminalRequested, pathname, router]);
 
   // Poll bridge stats for global terminal activity (every 2s)
   const fetchActivity = useCallback(async (signal: AbortSignal) => {
@@ -73,6 +90,7 @@ export function ProjectPageClient({
         projectPath={projectPath}
         isActive={isProjectGlobalActive}
         voiceTerminalId="project-global"
+        defaultExpanded={openTerminalRequested}
         onTerminalReady={(handle) => {
           if (handle) voice.registerTerminal('project-global', handle);
           else voice.unregisterTerminal('project-global');

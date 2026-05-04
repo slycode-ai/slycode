@@ -1,6 +1,6 @@
 ---
 name: challenge
-version: 1.1.0
+version: 1.2.0
 label: "Challenge"
 description: "Send design to another AI provider for adversarial review and synthesis"
 group: "Card Actions"
@@ -74,6 +74,16 @@ When the response arrives, **do not blindly adopt the suggestions**:
    ```
 
 7. **Present the synthesis to the user** — clearly list what you changed in the design, what you rejected and why, and any items that need their decision.
+
+**If 3+ items need user input** (open questions, scope-change calls, borderline trade-offs), author a questionnaire instead of dumping them inline (skip if you're responding via messaging — ask inline instead):
+
+1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+2. Use `single_choice` (with `allow_other: true`) for either/or trade-offs, `free_text` for open questions, `boolean` for yes/no, `exposition` items between groups for context
+3. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+4. In chat, briefly summarise what changed, what's in the questionnaire, and why, then wait
+5. The user's Submit lands in your session as a Q&A block — fold answers into the design doc
+
+For 1-2 items, ask inline.
 
 ---
 

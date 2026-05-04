@@ -140,6 +140,13 @@ export interface KanbanCard {
   agentNotes?: Array<{ id: number; text: string; timestamp: string }>;
   design_ref?: string;
   feature_ref?: string;
+  status?: {
+    text: string;
+    setAt: string;
+    // V2 provenance — not surfaced in Telegram, kept for backward-compat reads.
+    kind?: 'manual' | 'auto';
+    tier?: 'high' | 'medium' | 'low';
+  };
   archived?: boolean;
   automation?: Record<string, unknown>;
   created_at: string;
@@ -158,6 +165,24 @@ export interface KanbanBoard {
   project_id: string;
   stages: KanbanStages;
   last_updated: string;
+}
+
+// --- Quick-launch Shortcuts ---
+//
+// Mirrors `web/src/lib/types.ts` Shortcut + ShortcutsFile. Both copies MUST
+// stay in lockstep — same convention as session-keys.ts.
+
+export interface Shortcut {
+  label: string;
+  cardId: string;
+  prompt?: string;
+  provider?: string;
+  preferExistingSession?: boolean;
+}
+
+export interface ShortcutsFile {
+  projectTag: string;
+  shortcuts: Shortcut[];
 }
 
 // --- Command Config Types ---

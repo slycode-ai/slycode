@@ -119,6 +119,12 @@ export interface KanbanCard {
     }>;
     design_ref?: string;
     feature_ref?: string;
+    status?: {
+        text: string;
+        setAt: string;
+        kind?: 'manual' | 'auto';
+        tier?: 'high' | 'medium' | 'low';
+    };
     archived?: boolean;
     automation?: Record<string, unknown>;
     created_at: string;
@@ -135,6 +141,17 @@ export interface KanbanBoard {
     project_id: string;
     stages: KanbanStages;
     last_updated: string;
+}
+export interface Shortcut {
+    label: string;
+    cardId: string;
+    prompt?: string;
+    provider?: string;
+    preferExistingSession?: boolean;
+}
+export interface ShortcutsFile {
+    projectTag: string;
+    shortcuts: Shortcut[];
 }
 export interface SlyActionConfig {
     label: string;

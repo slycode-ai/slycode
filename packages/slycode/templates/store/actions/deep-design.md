@@ -1,6 +1,6 @@
 ---
 name: deep-design
-version: 1.2.0
+version: 1.3.0
 label: "Deep Design"
 description: "Thorough design with parallel analysis agents for creative, risk, and quality perspectives"
 group: "Card Actions"
@@ -130,6 +130,21 @@ For every outstanding question, option, trade-off, or suggestion you surface, in
 Apply this structure to every question, option, or suggestion you surface — during synthesis and throughout the Q&A iteration. If a question depends on something in the doc (a requirement, a constraint, an earlier decision), restate that thing in the message. Questions written into the doc but not surfaced with full context in your message are effectively invisible.
 
 **Be concise where it makes sense.** The goal is *enough* context to decide, not exhaustive explanation. A simple question with an obvious framing needs one or two sentences of setup, not a full problem/options/recommendation block. Use the full structure when the decision genuinely has trade-offs; skip it when it doesn't. Match the weight of the explanation to the weight of the decision.
+
+---
+
+### Asking Multiple Questions — Use a Questionnaire
+
+If you're surfacing **3+ decisions, options, or trade-offs** in one round (common after Phase 3 synthesis), author a questionnaire instead of dumping them all inline (skip if you're responding via messaging — ask inline instead):
+
+1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+2. Map each decision to an item — `single_choice` (with `allow_other: true`) for either/or trade-offs, `free_text` for open-ended, `boolean` for yes/no, `multi_choice` for "pick all that apply"
+3. Use `exposition` items between question groups to give the problem/context blocks (the same problem/options/recommendation framing from above, just placed in the questionnaire instead of a long chat message)
+4. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+5. In chat, briefly summarise what's in the questionnaire and why, then wait
+6. The user's Submit lands in your session as a Q&A block — fold the answers into the design doc
+
+For 1-2 decisions, surface them inline using the Self-Contained Messages structure above.
 
 **When design is complete — assess complexity:**
 

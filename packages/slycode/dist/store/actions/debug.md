@@ -1,6 +1,6 @@
 ---
 name: debug
-version: 1.0.0
+version: 1.1.0
 label: "Debug"
 description: "Debug issues described in a bug card"
 group: "Card Actions"
@@ -33,3 +33,16 @@ Debug the issues described in this bug card.
 6. **Verify** - Confirm the fix works
 
 Log any related issues discovered with `sly-kanban problem {{card.id}} add "description"`
+
+---
+
+### Asking Multiple Questions — Use a Questionnaire
+
+If you need **3+ pieces of information** from the user to investigate (repro steps, environment, recent changes, expected vs actual, when it started, etc.), author a questionnaire instead of asking inline (skip if you're responding via messaging — ask inline instead):
+
+1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+2. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+3. Tell the user briefly in chat what you're trying to learn and why, then wait
+4. The user's Submit lands in your session as a Q&A block
+
+For 1-2 questions, ask inline.

@@ -38,7 +38,8 @@ export function VoiceControlBar({
   const isRecordingPhase = voiceState === 'recording' || voiceState === 'paused';
 
   return (
-    <div className={`flex items-center gap-1.5 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+    <div className="flex items-center gap-1.5">
+      <div className={`flex items-center gap-1.5 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
       {/* Idle / Disabled: just mic button */}
       {(voiceState === 'idle' || voiceState === 'disabled') && (
         <button
@@ -143,7 +144,9 @@ export function VoiceControlBar({
         </div>
       )}
 
-      {/* Settings gear - always visible */}
+      </div>
+
+      {/* Settings gear - always interactive, never inherits `disabled` styling */}
       <button
         onClick={onOpenSettings}
         className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-500 transition-all hover:border-void-400/50 hover:text-void-700 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-void-400/50 dark:hover:text-void-300"

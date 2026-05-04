@@ -10,9 +10,11 @@ import { KanbanClient } from './kanban-client.js';
 import { SlyActionFilter } from './sly-action-filter.js';
 import { transcribeAudio, validateSttConfig } from './stt.js';
 import { textToSpeech, convertToOgg } from './tts.js';
+import * as audioArchive from './audio-archive.js';
 import { searchVoices } from './voices.js';
 import type { Channel, InlineButton, ServiceConfig, VoiceConfig, NavigationTarget, SlyActionConfig, ResponseMode, BridgeSessionInfo, Project } from './types.js';
 import { projectSessionKeys, escapeRegex } from './session-keys.js';
+import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -284,6 +286,25 @@ async function getBreadcrumb(target: NavigationTarget, state: StateManager, kanb
   return crumb;
 }
 
+// Inline relative-time helper for the /status command (messaging package is
+// intentionally standalone — duplicates the same logic as web/CLI).
+function formatRelativeTimeMessaging(pastIso: string, now: Date = new Date()): string {
+  const past = new Date(pastIso);
+  if (isNaN(past.getTime())) return '';
+  const diffMs = now.getTime() - past.getTime();
+  const sec = Math.max(0, Math.floor(diffMs / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 3) + '...' : text;
 }
@@ -397,6 +418,23 @@ async function renderLaneDrilldown(
 
 // --- Session Lifecycle ---
 
+// Returns a one-line "Status: <text> (set <Xm ago>)" string when the target
+// is a card with a non-empty status, or null otherwise. Defensively tolerates
+// malformed status objects (V1 shape, missing fields).
+function getCardStatusLineMessaging(target: NavigationTarget, kanban: KanbanClient): string | null {
+  if (target.type !== 'card' || !target.projectId || !target.cardId) return null;
+  const info = kanban.getCard(target.projectId, target.cardId);
+  if (!info) return null;
+  const raw = info.card.status as { text?: unknown; setAt?: unknown } | undefined;
+  if (!raw
+      || typeof raw.text !== 'string'
+      || typeof raw.setAt !== 'string'
+      || !raw.text.trim()) {
+    return null;
+  }
+  return `Status: ${raw.text} (set ${formatRelativeTimeMessaging(raw.setAt)})`;
+}
+
 async function handleSessionLifecycle(
   channel: Channel,
   state: StateManager,
@@ -407,6 +445,10 @@ async function handleSessionLifecycle(
   const target = ensureStage(state.getTarget(), kanban, state);
   const sessionName = state.getSessionName();
   const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
+  // V2: include the card's manual/auto status in the switch confirmation so
+  // the user doesn't have to run /status separately to see it. Same shape as
+  // /status uses; provenance hidden.
+  const statusLine = getCardStatusLineMessaging(target, kanban);
 
   // Build provider line with model
   const currentProvider = state.getSelectedProvider();
@@ -424,7 +466,10 @@ async function handleSessionLifecycle(
   try {
     session = await bridge.getSession(sessionName);
   } catch (err) {
-    await channel.sendText(`${breadcrumb}\n${providerLine}\n\n${(err as Error).message}`);
+    const parts = [breadcrumb, providerLine];
+    if (statusLine) parts.push(statusLine);
+    parts.push('', (err as Error).message);
+    await channel.sendText(parts.join('\n'));
     return;
   }
 
@@ -432,7 +477,9 @@ async function handleSessionLifecycle(
 
   if (session && (session.status === 'running' || session.status === 'detached')) {
     // Active session — connected
-    await channel.sendText(`${breadcrumb} — Connected\n${providerLine}`);
+    const parts = [`${breadcrumb} — Connected`, providerLine];
+    if (statusLine) parts.push(statusLine);
+    await channel.sendText(parts.join('\n'));
     return;
   }
 
@@ -441,7 +488,9 @@ async function handleSessionLifecycle(
   const commands = actionFilter.filterActions(terminalClass, 'startup', cardType);
   const buttons = actionsToButtons(commands);
   const label = session?.status === 'stopped' ? 'Session paused' : 'No session';
-  const text = `${breadcrumb}\n${providerLine}\n\n${label}. Start with a command or message:`;
+  const headerParts = [breadcrumb, providerLine];
+  if (statusLine) headerParts.push(statusLine);
+  const text = `${headerParts.join('\n')}\n\n${label}. Start with a command or message:`;
   if (buttons.length > 0) {
     await channel.sendInlineKeyboard(text, buttons);
   } else {
@@ -620,6 +669,121 @@ async function checkInstructionFilePreFlight(
   return false;
 }
 
+// --- Quick-launch deeplink handler (Telegram /start <token>) ---
+//
+// Resolves a token via messaging/src/shortcuts.ts, switches the bot's
+// navigation target accordingly, and (for saved shortcuts with a prompt)
+// fires the prompt against the chosen provider.
+async function handleQuickLaunch(
+  token: string,
+  channel: Channel,
+  state: StateManager,
+  bridge: BridgeClient,
+  kanban: KanbanClient,
+): Promise<void> {
+  const projects = state.getProjects();
+  const all = loadAllShortcutsList(projects);
+  const resolved = resolveShortcutToken(token, all);
+
+  if (resolved.kind === 'miss') {
+    await channel.sendText(`No card or shortcut matched \`${token}\`.\n${resolved.reason}`);
+    return;
+  }
+
+  if (resolved.kind === 'global') {
+    state.selectGlobal();
+    updateKeyboard(channel, state);
+    await channel.sendText('Switched to global terminal.');
+    return;
+  }
+
+  if (resolved.kind === 'project') {
+    const project = state.selectProject(resolved.projectId);
+    if (!project) {
+      await channel.sendText(`No card or shortcut matched \`${token}\`.\nProject ${resolved.projectId} not found.`);
+      return;
+    }
+    updateKeyboard(channel, state);
+    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value);
+    return;
+  }
+
+  // Card or saved-shortcut path — both switch the target to a card.
+  const cardInfo = kanban.getCard(resolved.projectId, resolved.cardId);
+  if (!cardInfo) {
+    await channel.sendText(`No card or shortcut matched \`${token}\`.\nCard ${resolved.cardId} not found.`);
+    return;
+  }
+  const project = state.selectCard(resolved.projectId, resolved.cardId, cardInfo.stage);
+  if (!project) {
+    await channel.sendText(`No card or shortcut matched \`${token}\`.\nProject ${resolved.projectId} not found.`);
+    return;
+  }
+  updateKeyboard(channel, state);
+
+  // Provider selection: shortcut wins by default. With preferExistingSession,
+  // reuse an existing session's provider if one exists for the card.
+  if (resolved.kind === 'shortcut' && resolved.provider) {
+    let providerToUse = resolved.provider;
+    if (resolved.preferExistingSession) {
+      try {
+        const existing = await bridge.getProjectSessions([resolved.projectId, project.sessionKey || project.id].filter(Boolean));
+        const cardMatch = existing.find((s: BridgeSessionInfo) =>
+          s.name.endsWith(`:card:${resolved.cardId}`) && (s.status === 'running' || s.status === 'detached'),
+        );
+        if (cardMatch) {
+          // Session name format is `${projectKey}:${provider}:card:${cardId}` —
+          // pull the provider segment.
+          const parts = cardMatch.name.split(':');
+          if (parts.length >= 3) providerToUse = parts[1] || providerToUse;
+        }
+      } catch {
+        // Bridge unavailable — fall back to shortcut's configured provider.
+      }
+    }
+    state.setSelectedProvider(providerToUse);
+    state.setProviderOverride(providerToUse);
+  }
+
+  // Card-only (no prompt) — surface the lifecycle status like /switch would.
+  if (resolved.kind === 'card' || !resolved.prompt) {
+    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value);
+    return;
+  }
+
+  // Saved shortcut with a prompt — fire it via the standard send path.
+  const sessionName = state.getSessionName();
+  const cwd = state.getSessionCwd();
+  const provider = state.getSelectedProvider();
+  const formatted = `[${channel.name}] ${resolved.prompt} (${buildFooter(state)})`;
+
+  try {
+    await channel.sendTyping();
+    const aliases = state.getSessionNameAliases();
+    const result = await bridge.sendMessage(sessionName, cwd, formatted, provider, undefined, state.getSelectedModel() || undefined, aliases);
+    if (result.permissionMismatch) {
+      await channel.sendInlineKeyboard(
+        '⚠️ This session was started without skip-permissions, which is required for messaging.\n\nRestart the session with permissions skipped?',
+        [[
+          { label: 'Restart session', callbackData: 'perm_restart' },
+          { label: 'Cancel', callbackData: 'perm_cancel' },
+        ]],
+      );
+      return;
+    }
+    await channel.sendText(`Sent shortcut \`${token}\` → ${cardInfo.card.title}`);
+    bridge.watchActivity(sessionName, channel).catch(() => {});
+  } catch (err) {
+    await channel.sendText(`Error firing shortcut: ${(err as Error).message}`);
+  }
+}
+
+// Action filter reference for handleQuickLaunch (which runs outside setupChannel
+// but needs to invoke handleSessionLifecycle, which takes an actionFilter).
+// Set when setupChannel runs; safe because /start can only fire after main()
+// has wired the channel and the bot is polling.
+const actionFilterRef: { value: SlyActionFilter } = { value: null as unknown as SlyActionFilter };
+
 // --- Main Setup ---
 
 function setupChannel(
@@ -630,12 +794,25 @@ function setupChannel(
   actionFilter: SlyActionFilter,
   voiceConfig: VoiceConfig,
 ): void {
+  // Expose actionFilter to module-level handlers (handleQuickLaunch) that need
+  // to invoke handleSessionLifecycle.
+  actionFilterRef.value = actionFilter;
+
   // Track current lane drilldown for back navigation
   let currentDrilldownStage: string | null = null;
 
   // --- /start ---
+  //
+  // Telegram passes any deeplink argument (`https://t.me/<bot>?start=<arg>`)
+  // through as `args`. When non-empty we treat it as a quick-launch shortcut
+  // token; otherwise we send the standard help text.
 
-  channel.onCommand('start', async () => {
+  channel.onCommand('start', async (args) => {
+    const token = (args || '').trim();
+    if (token) {
+      await handleQuickLaunch(token, channel, state, bridge, kanban);
+      return;
+    }
     await channel.sendText(
       `SlyCode Messaging (${channel.name})\n\n` +
       'Commands:\n' +
@@ -915,6 +1092,16 @@ function setupChannel(
 
       if (card) {
         if (card.priority) status += `Priority: ${card.priority}\n`;
+        // V2: surface the AI-set status line. Provenance (kind/tier) is intentionally
+        // hidden — it's implementation detail for the dashboard, not user-facing.
+        // Defensively tolerate malformed status objects (e.g. legacy V1 shapes).
+        const rawStatus = card.status as { text?: unknown; setAt?: unknown } | undefined;
+        if (rawStatus
+            && typeof rawStatus.text === 'string'
+            && typeof rawStatus.setAt === 'string'
+            && rawStatus.text.trim()) {
+          status += `Status: ${rawStatus.text} (set ${formatRelativeTimeMessaging(rawStatus.setAt)})\n`;
+        }
         if (card.created_at) status += `Created: ${card.created_at.slice(0, 10)}\n`;
         if (card.updated_at && card.updated_at !== card.created_at) {
           status += `Updated: ${card.updated_at.slice(0, 10)}\n`;
@@ -1579,6 +1766,21 @@ async function main() {
     return `${projectName} Terminal`;
   }
 
+  /** Derive a human-readable context slug for archived TTS filenames. */
+  function getSessionContextSlug(sessionName: string | undefined): string {
+    if (!sessionName) return 'global';
+    const parts = sessionName.split(':');
+    if (parts[0] === 'global') return 'global';
+    const projectId = parts[0];
+    if (parts.includes('card') && parts.length >= 4) {
+      const cardId = parts[parts.length - 1];
+      const cardInfo = kanban.getCard(projectId, cardId);
+      return cardInfo?.card.title || cardId;
+    }
+    const project = state.getProjects().find(p => p.id === projectId);
+    return project?.name || projectId;
+  }
+
   /** Build callback data for switching to a session's target. */
   function getSessionSwitchCallback(sessionName: string): string | null {
     const parts = sessionName.split(':');
@@ -1661,11 +1863,17 @@ async function main() {
       const mp3Buffer = await textToSpeech(message, voiceConfig, runtimeVoice?.id);
 
       let audioBuffer: Buffer;
+      let archiveExt: '.ogg' | '.mp3';
       try {
         audioBuffer = await convertToOgg(mp3Buffer);
+        archiveExt = '.ogg';
       } catch {
         audioBuffer = mp3Buffer;
+        archiveExt = '.mp3';
       }
+
+      const contextSlug = getSessionContextSlug(session || state.getSessionName());
+      audioArchive.save(audioBuffer, archiveExt, contextSlug);
 
       await channel.sendVoice(audioBuffer);
       res.json({ success: true });

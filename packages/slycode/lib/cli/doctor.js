@@ -46,6 +46,51 @@ function icon(result) {
         case 'fail': return '\u2717';
     }
 }
+const PREBUILT_PLATFORMS = new Set([
+    'darwin-arm64',
+    'darwin-x64',
+    'win32-arm64',
+    'win32-x64',
+    'linux-arm64',
+    'linux-x64',
+]);
+function hasCommand(cmd) {
+    try {
+        if (process.platform === 'win32') {
+            (0, child_process_1.execSync)(`where ${cmd}`, { stdio: 'ignore', windowsHide: true });
+        }
+        else {
+            (0, child_process_1.execSync)(`command -v ${cmd}`, { stdio: 'ignore', windowsHide: true, shell: '/bin/sh' });
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function buildToolsCheck() {
+    const key = `${process.platform}-${process.arch}`;
+    if (PREBUILT_PLATFORMS.has(key)) {
+        return { name: 'Build tools', result: 'ok', message: `No local build tools normally required (${key} prebuild)` };
+    }
+    const missing = [];
+    const hasC = !!process.env.CC || hasCommand('gcc') || hasCommand('clang') || hasCommand('cc');
+    const hasCxx = !!process.env.CXX || hasCommand('g++') || hasCommand('clang++') || hasCommand('c++');
+    const hasMake = hasCommand('make');
+    const hasPython = hasCommand('python3') || hasCommand('python');
+    if (!hasC)
+        missing.push('C compiler');
+    if (!hasCxx)
+        missing.push('C++ compiler');
+    if (!hasMake)
+        missing.push('make');
+    if (!hasPython)
+        missing.push('python3');
+    if (missing.length === 0) {
+        return { name: 'Build tools', result: 'ok', message: `C/C++ toolchain detected (required on ${key} — no prebuild)` };
+    }
+    return { name: 'Build tools', result: 'fail', message: `Missing on ${key}: ${missing.join(', ')}` };
+}
 function isPortInUse(port) {
     return new Promise((resolve) => {
         const server = net.createServer();
@@ -74,7 +119,11 @@ async function doctor(_args) {
             message: `v${process.versions.node} (requires >= 20.0.0)`,
         });
     }
-    // 2. Workspace
+    // 2. Build tools (only matters on platforms with no node-pty prebuild)
+    // Keep wording in sync with: packages/slycode/scripts/preinstall.js,
+    // packages/slycode/README.md, scripts/setup.sh:check_build_tools().
+    checks.push(buildToolsCheck());
+    // 3. Workspace
     const workspace = (0, workspace_1.resolveWorkspace)();
     if (workspace) {
         checks.push({ name: 'Workspace', result: 'ok', message: workspace });

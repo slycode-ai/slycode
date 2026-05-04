@@ -1,6 +1,6 @@
 ---
 name: challenge-implementation
-version: 1.1.0
+version: 1.2.0
 label: "Challenge Impl"
 description: "Send implementation to another AI provider for adversarial code review and methodology analysis"
 group: "Card Actions"
@@ -103,6 +103,16 @@ When the response arrives, critically evaluate each point:
    - Open questions
 
 Then **ask the user** which items to action. Only make code changes after they confirm.
+
+**If 3+ items need user decisions** (which fixes to apply, which improvements to take, which trade-offs to accept), author a questionnaire instead of asking inline (skip if you're responding via messaging — ask inline instead):
+
+1. Write JSON to `documentation/questionnaires/NNN_<slug>.json` (next available integer prefix)
+2. Use `boolean` items for "fix this? yes/no", `single_choice` (with `allow_other: true`) for trade-offs, `free_text` for open questions, `exposition` items to give the bug/improvement context for each group
+3. Attach: `sly-kanban update {{card.id}} --questionnaire-ref documentation/questionnaires/NNN_<slug>.json`
+4. In chat, briefly summarise the findings and what the questionnaire is asking, then wait
+5. The user's Submit lands in your session as a Q&A block — only then make the approved code changes
+
+For 1-2 items, ask inline.
 
 ---
 

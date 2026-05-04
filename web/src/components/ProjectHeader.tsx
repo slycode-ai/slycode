@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SlyActionConfigModal } from './SlyActionConfigModal';
 import { ActionUpdatesModal } from './ActionUpdatesModal';
+import { ShortcutsConfigModal } from './ShortcutsConfigModal';
 import { HealthMonitor } from './HealthMonitor';
 import { SearchBar } from './SearchBar';
 import { ThemeToggle } from './ThemeToggle';
@@ -26,6 +27,7 @@ interface ProjectHeaderProps {
 export function ProjectHeader({ name, description, tags: _tags, projectId, projectPath, showArchived = false, onToggleArchived, showAutomations = false, hasActiveAutomations = false, onToggleAutomations, onRefresh }: ProjectHeaderProps) {
   const [showCommandConfig, setShowCommandConfig] = useState(false);
   const [showActionUpdates, setShowActionUpdates] = useState(false);
+  const [showShortcutsConfig, setShowShortcutsConfig] = useState(false);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [actionUpdateCount, setActionUpdateCount] = useState(0);
@@ -149,6 +151,17 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
                 )}
               </button>
 
+              {/* Shortcuts button — ghost neon, sibling to Actions */}
+              <button
+                onClick={() => setShowShortcutsConfig(true)}
+                title="Quick-launch shortcuts"
+                className="relative hidden sm:flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </button>
+
               {/* Automations toggle button - ghost orange, pulses when automations are active */}
               <button
                 onClick={onToggleAutomations}
@@ -249,6 +262,15 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
               .then(d => setActionUpdateCount(d.actionEntries?.length ?? 0))
               .catch(() => {});
           }}
+        />
+      )}
+
+      {/* Quick-launch Shortcuts Modal */}
+      {showShortcutsConfig && projectId && (
+        <ShortcutsConfigModal
+          onClose={() => setShowShortcutsConfig(false)}
+          projectId={projectId}
+          projectName={name}
         />
       )}
     </>
