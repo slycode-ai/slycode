@@ -12,6 +12,8 @@ const eventLabels: Record<EventType, string> = {
   card_created: 'Created',
   card_moved: 'Moved',
   card_updated: 'Updated',
+  card_reordered: 'Reordered',
+  card_prompt: 'Prompt',
   problem_added: 'Problem',
   problem_resolved: 'Resolved',
   skill_deployed: 'Deployed',
@@ -25,6 +27,8 @@ const eventColors: Record<EventType, string> = {
   card_created: 'text-green-500',
   card_moved: 'text-neon-blue-500 dark:text-neon-blue-400',
   card_updated: 'text-void-500',
+  card_reordered: 'text-void-500',
+  card_prompt: 'text-purple-500',
   problem_added: 'text-red-500',
   problem_resolved: 'text-green-500',
   skill_deployed: 'text-neon-blue-500 dark:text-neon-blue-400',
@@ -33,6 +37,17 @@ const eventColors: Record<EventType, string> = {
   session_started: 'text-green-500',
   session_stopped: 'text-void-500',
 };
+
+const FALLBACK_LABEL = 'Event';
+const FALLBACK_COLOR = 'text-void-500';
+
+function eventLabel(type: string): string {
+  return eventLabels[type as EventType] ?? FALLBACK_LABEL;
+}
+
+function eventColor(type: string): string {
+  return eventColors[type as EventType] ?? FALLBACK_COLOR;
+}
 
 function relativeTime(timestamp: string): string {
   const diff = Date.now() - new Date(timestamp).getTime();
@@ -164,8 +179,8 @@ export function ActivityFeed({ projectFilter }: ActivityFeedProps) {
                     key={event.id}
                     className="flex items-start gap-2 px-4 py-2 text-xs"
                   >
-                    <span className={`mt-0.5 font-medium ${eventColors[event.type]}`}>
-                      {eventLabels[event.type]}
+                    <span className={`mt-0.5 font-medium ${eventColor(event.type)}`}>
+                      {eventLabel(event.type)}
                     </span>
                     <span className="flex-1 text-void-600 dark:text-void-400">
                       {renderDetail(event)}

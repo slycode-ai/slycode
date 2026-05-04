@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.38] - 2026-05-04
+
+### Added
+- Card numbering — every card now gets a sequential number (#0001, #0002, ...) on creation; assignments survive deletion via monotonic `nextCardNumber` tracking, with web and CLI sharing the same idempotent allocator
+- Activity feed event types: `card_reordered` and `card_prompt` — visible in the dashboard activity panel
+
+### Changed
+- Kanban skill v1.10.0 — adds questionnaire workflow, status line (manual + tiered auto-status), HTML attachment ref docs
+- Web kanban API preserves root-level metadata (e.g. `nextCardNumber`) on save instead of silently overwriting
+- Activity feed gracefully renders unknown event types with a fallback label and color instead of crashing
+- Event log validates entries on read and caps individual entry size at 4KB to prevent corruption from large payloads
+
 ## [0.2.37] - 2026-05-04
 
 ### Added

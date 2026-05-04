@@ -161,6 +161,7 @@ export interface KanbanBoard {
   project_id: string;
   stages: KanbanStages;
   last_updated: string;
+  nextCardNumber?: number;
 }
 
 // ============================================================================
@@ -443,6 +444,8 @@ export type EventType =
   | 'card_created'
   | 'card_moved'
   | 'card_updated'
+  | 'card_reordered'
+  | 'card_prompt'
   | 'problem_added'
   | 'problem_resolved'
   | 'skill_deployed'

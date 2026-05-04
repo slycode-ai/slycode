@@ -1,5 +1,35 @@
 [
   {
+    "version": "0.2.38",
+    "date": "2026-05-04",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "Card numbering — every card now gets a sequential number (#0001, #0002, ...) on creation; assignments survive deletion via monotonic nextCardNumber tracking, with web and CLI sharing the same idempotent allocator"
+      },
+      {
+        "type": "feature",
+        "description": "Activity feed event types: card_reordered and card_prompt — visible in the dashboard activity panel"
+      },
+      {
+        "type": "improvement",
+        "description": "Kanban skill v1.10.0 — adds questionnaire workflow, status line (manual + tiered auto-status), HTML attachment ref docs"
+      },
+      {
+        "type": "improvement",
+        "description": "Web kanban API preserves root-level metadata (e.g. nextCardNumber) on save instead of silently overwriting"
+      },
+      {
+        "type": "improvement",
+        "description": "Activity feed gracefully renders unknown event types with a fallback label and color instead of crashing"
+      },
+      {
+        "type": "improvement",
+        "description": "Event log validates entries on read and caps individual entry size at 4KB to prevent corruption from large payloads"
+      }
+    ]
+  },
+  {
     "version": "0.2.37",
     "date": "2026-05-04",
     "changes": [

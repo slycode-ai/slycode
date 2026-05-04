@@ -1,6 +1,6 @@
 ---
 name: context
-version: 1.0.0
+version: 1.1.0
 label: "Context"
 description: "Load codebase context for relevant areas"
 group: "Utilities"
@@ -21,3 +21,5 @@ classes:
 ---
 
 Load codebase context using `/context-priming`. If this is a card session, use the card's **Areas** to guide which areas to prime.
+
+If you don't already have the **kanban skill** loaded in memory, load it now — it covers the CLI surface, card lifecycle, status line, notes, questionnaires, and cross-card prompts. Without it you'll flounder on the SlyCode workflow primitives.

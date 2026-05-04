@@ -1,6 +1,6 @@
 ---
 name: onboard
-version: 1.1.0
+version: 1.2.0
 label: "Onboard"
 description: "Analyze and improve a backlog item, then move to design"
 group: "Card Actions"
@@ -19,6 +19,8 @@ classes:
 Onboard this backlog item. Analyze it, improve it, and move it to design.
 
 > Card details are provided above. Run `sly-kanban show {{card.id}}` only if you need additional detail.
+
+**Load the kanban skill if you don't already have it in memory** — it covers the CLI surface, card lifecycle, areas/types/priorities, status line, notes, and questionnaires. Without it you'll flounder on the SlyCode workflow primitives needed to do a clean onboarding.
 
 **Do this:**
 1. Analyze the card - understand the intent from title and description

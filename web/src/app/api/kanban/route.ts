@@ -13,6 +13,7 @@ import {
   BACKUP_TIERS,
   type BackupTier,
 } from '@/lib/kanban-paths';
+import { ensureCardNumbers } from '@/lib/kanban-numbering';
 
 // Number of versions to keep per tier
 const VERSIONS_PER_TIER = 3;
@@ -392,21 +393,30 @@ export async function POST(request: NextRequest) {
     // Normalize order values to prevent chaos
     const normalizedStages = normalizeStages(stages);
 
+    // Load existing on-disk data: needed both for event detection (oldStages)
+    // and to preserve any root-level fields the client doesn't send back
+    // (e.g. nextCardNumber). Without this spread, every web save silently
+    // wipes root metadata that the CLI relies on.
+    let diskData: KanbanBoard | null = null;
+    try {
+      const oldContent = await fs.readFile(kanbanPath, 'utf-8');
+      diskData = JSON.parse(oldContent) as KanbanBoard;
+    } catch {
+      // No existing file
+    }
+    const oldStages: KanbanStages | null = diskData?.stages ?? null;
+
     const data: KanbanBoard = {
+      ...(diskData ?? {}),
       project_id: projectId,
       stages: normalizedStages,
       last_updated: new Date().toISOString(),
     };
 
-    // Load old data for event detection
-    let oldStages: KanbanStages | null = null;
-    try {
-      const oldContent = await fs.readFile(kanbanPath, 'utf-8');
-      const oldData = JSON.parse(oldContent) as KanbanBoard;
-      oldStages = oldData.stages;
-    } catch {
-      // No existing file
-    }
+    // Idempotent: assigns numbers to any card.number == null (e.g. cards
+    // created via web handleCreateCard, which doesn't allocate one) and
+    // bumps nextCardNumber if needed. No-op when everything is consistent.
+    ensureCardNumbers(data);
 
     await fs.mkdir(path.dirname(kanbanPath), { recursive: true });
     await fs.writeFile(kanbanPath, JSON.stringify(data, null, 2));

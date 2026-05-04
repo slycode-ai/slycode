@@ -38,7 +38,8 @@ const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/[^a-zA-Z0-9-]/g, '-');
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
 const AREA_INDEX_PATH = path.join(PROJECT_ROOT, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
-const MAX_EVENTS = 500;
+const MAX_EVENTS = 100;
+const MAX_ENTRY_BYTES = 4 * 1024;
 
 const VALID_STAGES = ['backlog', 'design', 'implementation', 'testing', 'done'];
 const VALID_TYPES = ['feature', 'chore', 'bug'];
@@ -672,6 +673,7 @@ function readKanban() {
 
 function writeKanban(data) {
   data.last_updated = new Date().toISOString();
+  ensureCardNumbers(data);
   try {
     fs.writeFileSync(KANBAN_PATH, JSON.stringify(data, null, 2) + '\n');
   } catch (err) {
@@ -719,46 +721,46 @@ function getAllCards(kanban, includeArchived = false) {
 }
 
 /**
- * Backfill sequential card numbers for cards that don't have one.
- * Sorts all cards by created_at ascending and assigns numbers starting from 1.
- * Sets kanban.nextCardNumber to the next available number.
+ * Kanban card number assignment. Idempotent: safe to call on every write.
+ *
+ * KEEP IN SYNC with the web copy at web/src/lib/kanban-numbering.ts. Both
+ * copies MUST produce identical results for the same input — they take turns
+ * writing the same kanban.json. The CJS/ESM split makes a shared package
+ * over-engineered for one tiny pure function.
+ *
+ * Algorithm:
+ *  1. Walk every card in every stage (including archived).
+ *  2. Compute the highest existing card.number.
+ *  3. Assign sequential numbers to any card with number == null, starting at
+ *     max(existingMax, kanban.nextCardNumber ?? 0) + 1, in created_at
+ *     ascending order.
+ *  4. Set kanban.nextCardNumber to one past the highest in-use number, but
+ *     never lower it (preserves monotonic allocation across deletions and
+ *     across CLI/web write cycles).
  */
-function backfillCardNumbers(kanban) {
+function ensureCardNumbers(kanban) {
   const allCards = getAllCards(kanban, true); // include archived
-  // Sort by created_at ascending
   allCards.sort((a, b) => new Date(a.card.created_at) - new Date(b.card.created_at));
+
   let maxNumber = 0;
-  // First pass: find highest existing number
   for (const { card } of allCards) {
     if (card.number != null && card.number > maxNumber) {
       maxNumber = card.number;
     }
   }
-  // Second pass: assign numbers to cards without one
-  let nextNum = maxNumber + 1;
-  // Sort unnumbered cards by created_at, assign sequentially
-  const unnumbered = allCards.filter(({ card }) => card.number == null);
-  // If no cards have numbers yet, start from 1
-  if (maxNumber === 0) {
-    allCards.forEach(({ card }, index) => {
-      card.number = index + 1;
-    });
-    kanban.nextCardNumber = allCards.length + 1;
-  } else {
-    // Only backfill unnumbered cards
-    for (const { card } of unnumbered) {
-      card.number = nextNum++;
-    }
-    kanban.nextCardNumber = nextNum;
-  }
-}
 
-/**
- * Ensure kanban has sequential card numbers. Auto-backfills on first run.
- */
-function ensureCardNumbers(kanban) {
-  if (kanban.nextCardNumber == null) {
-    backfillCardNumbers(kanban);
+  const unnumbered = allCards.filter(({ card }) => card.number == null);
+  let nextNum = Math.max(maxNumber, kanban.nextCardNumber ?? 0) + 1;
+
+  for (const { card } of unnumbered) {
+    card.number = nextNum;
+    if (nextNum > maxNumber) maxNumber = nextNum;
+    nextNum++;
+  }
+
+  const target = maxNumber + 1;
+  if (kanban.nextCardNumber == null || kanban.nextCardNumber < target) {
+    kanban.nextCardNumber = target;
   }
 }
 
@@ -767,15 +769,31 @@ function generateId(prefix = 'card') {
 }
 
 /**
+ * Validate an event entry. Rejects non-string `type` or oversized serialization.
+ */
+function isValidEventEntry(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (typeof entry.type !== 'string') return false;
+  try {
+    if (JSON.stringify(entry).length > MAX_ENTRY_BYTES) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Append an event to the activity log.
  * Silent — never throws, never blocks card operations.
+ * Drops entries with non-string `type` or serialization >4 KB.
+ * Sanitizes the on-disk array on read so any pre-existing pollution self-heals.
  */
 function emitEvent(type, project, detail, cardId) {
   try {
     let events = [];
     if (fs.existsSync(EVENTS_PATH)) {
-      events = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf-8'));
-      if (!Array.isArray(events)) events = [];
+      const parsed = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf-8'));
+      events = Array.isArray(parsed) ? parsed.filter(isValidEventEntry) : [];
     }
     const event = {
       id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -786,7 +804,9 @@ function emitEvent(type, project, detail, cardId) {
       timestamp: new Date().toISOString(),
     };
     if (cardId) event.card = cardId;
-    events.push(event);
+    if (isValidEventEntry(event)) {
+      events.push(event);
+    }
     if (events.length > MAX_EVENTS) {
       events.splice(0, events.length - MAX_EVENTS);
     }
@@ -3278,7 +3298,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         // For fire-and-forget, prompt was passed as CLI arg — we're done
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} via session creation.`);
-          emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'fire-and-forget', created: true });
+          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget, new session)`, cardId);
           return;
         }
 
@@ -3315,7 +3335,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         // Fire-and-forget mode
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} (session: ${sessionName}).`);
-          emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'fire-and-forget' });
+          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget)`, cardId);
           return;
         }
       }
@@ -3336,7 +3356,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
             if (pollData.status === 'received' && pollData.data) {
               // Happy path: response received
               console.log(pollData.data);
-              emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'wait', outcome: 'received' });
+              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): response received`, cardId);
               return;
             }
           }
@@ -3390,7 +3410,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         console.error(`Session: ${sessionName}`);
       }
 
-      emitEvent(kanban, 'card.prompt', { cardId, provider, mode: 'wait', outcome: 'timeout', active: isActive });
+      emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): timeout (active=${isActive})`, cardId);
       process.exit(1);
 
     } catch (err) {

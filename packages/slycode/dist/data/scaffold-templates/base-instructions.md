@@ -45,6 +45,8 @@ After a context compaction or session continuation, reload context-priming (`/co
 
 **IMPORTANT:** Always use the `sly-kanban` CLI to manage cards. Keep the kanban board up-to-date as work progresses — move cards between stages, add problems, and check off items as they are completed.
 
+**Always load the `kanban` skill before any non-trivial card operation** if it isn't already in memory. The skill documents subcommands, status-line semantics, ref flags, questionnaires, and other behavior that the bare `--help` output doesn't fully cover — operating without it usually produces malformed JSON or wrong CLI usage. Load it via `/kanban` (or your provider's equivalent skill-loading mechanism) at the start of card-work sessions and after any compaction.
+
 ### Commands
 
 ```bash

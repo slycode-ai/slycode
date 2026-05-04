@@ -13,7 +13,20 @@ import { getSlycodeRoot } from './paths';
 
 const MASTER_PATH = getSlycodeRoot();
 const EVENTS_FILE = path.join(MASTER_PATH, 'documentation', 'events.json');
-const MAX_EVENTS = 500;
+const MAX_EVENTS = 100;
+const MAX_ENTRY_BYTES = 4 * 1024;
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+function isValidEntry(entry: unknown): entry is ActivityEvent {
+  if (!entry || typeof entry !== 'object') return false;
+  const e = entry as Record<string, unknown>;
+  if (typeof e.type !== 'string') return false;
+  if (JSON.stringify(entry).length > MAX_ENTRY_BYTES) return false;
+  return true;
+}
 
 // ============================================================================
 // Read / Write
@@ -24,7 +37,8 @@ function readEvents(): ActivityEvent[] {
     if (!fs.existsSync(EVENTS_FILE)) return [];
     const content = fs.readFileSync(EVENTS_FILE, 'utf-8');
     const data = JSON.parse(content);
-    return Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) return [];
+    return data.filter(isValidEntry);
   } catch {
     return [];
   }
@@ -44,10 +58,11 @@ function writeEvents(events: ActivityEvent[]): void {
 
 /**
  * Append a new event to the log. Generates an ID and trims old events if over cap.
+ * Silently drops the entry if it fails validation (non-string type or >4KB serialized).
  */
 export function appendEvent(
   event: Omit<ActivityEvent, 'id'>,
-): ActivityEvent {
+): ActivityEvent | null {
   const events = readEvents();
 
   const newEvent: ActivityEvent = {
@@ -55,9 +70,17 @@ export function appendEvent(
     ...event,
   };
 
+  if (!isValidEntry(newEvent)) {
+    // Still rewrite the file in case sanitize-on-read pruned old garbage.
+    if (events.length > MAX_EVENTS) {
+      events.splice(0, events.length - MAX_EVENTS);
+    }
+    writeEvents(events);
+    return null;
+  }
+
   events.push(newEvent);
 
-  // Trim oldest events if over cap
   if (events.length > MAX_EVENTS) {
     events.splice(0, events.length - MAX_EVENTS);
   }
