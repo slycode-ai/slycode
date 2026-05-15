@@ -752,3 +752,22 @@ body {
     animation: none;
   }
 }
+
+/* Deep-link focus pulse — used by SkillUpdateToast click routing to highlight
+   the target row in AssetMatrix / UpdatesView after scrollIntoView. */
+@keyframes skill-focus-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
+  60%  { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+}
+.skill-focus-pulse {
+  animation: skill-focus-pulse 1.2s ease-out 2;
+  outline: 2px solid rgba(251, 191, 36, 0.5);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skill-focus-pulse {
+    animation: none;
+  }
+}

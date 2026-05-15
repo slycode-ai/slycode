@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.39] - 2026-05-15
+
+### Added
+- Eager card creation — new cards persist to disk synchronously before user interaction, fixing the silent-drop bug when dragging a freshly-created card during the save debounce window
+- Telegram `send-file` — new `sly-messaging send-file` CLI command and `POST /send/file` HTTP endpoint deliver existing audio, video, and document files through Telegram (auto-detect by extension or force document delivery)
+- TTS generate — new `sly-messaging generate` CLI command and `POST /tts/generate` endpoint render text-to-speech audio to disk for reuse without sending
+- Skill update toast in the dashboard — per-project notification when watched skills (kanban, messaging) have a newer version available; click-through deep-links to CLI Assets with a 1-hour dismiss cool-off
+- Questionnaire-submit auto-status — submitting a questionnaire fires a medium-tier auto-status "Questionnaire submitted" on the card
+- Kanban skill v1.11.0 — adds auto-status documentation, `--html-ref` support, eager card-create coverage
+- Messaging skill v2.4.0 — adds `send-file` and `generate` command documentation
+
+### Changed
+- Questionnaire SingleChoice questions now let users add an "Other" entry per-instance even when the questionnaire definition did not opt in to `allow_other`
+- CardModal exposes pending/error state for the eager-create round-trip with retry/cancel UI
+- Web auto-status helpers (`tryAutoStatus`) mirror the CLI behavior so write paths from both produce consistent status updates
+
 ## [0.2.38] - 2026-05-04
 
 ### Added

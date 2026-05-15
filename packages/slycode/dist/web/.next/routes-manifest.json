@@ -222,6 +222,12 @@
       "namedRegex": "^/api/kanban(?:/)?$"
     },
     {
+      "page": "/api/kanban/cards",
+      "regex": "^/api/kanban/cards(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/kanban/cards(?:/)?$"
+    },
+    {
       "page": "/api/kanban/stream",
       "regex": "^/api/kanban/stream(?:/)?$",
       "routeKeys": {},
@@ -274,6 +280,12 @@
       "regex": "^/api/shortcuts(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/shortcuts(?:/)?$"
+    },
+    {
+      "page": "/api/skill-status",
+      "regex": "^/api/skill\\-status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/skill\\-status(?:/)?$"
     },
     {
       "page": "/api/sly-actions",

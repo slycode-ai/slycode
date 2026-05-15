@@ -197,6 +197,7 @@ export function UpdatesView({
           return (
             <div
               key={key}
+              data-skill-focus={entry.name}
               className="rounded-lg border border-void-200 bg-white p-4 dark:border-void-700 dark:bg-void-850"
             >
               <div className="flex items-start justify-between gap-4">

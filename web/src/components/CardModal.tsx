@@ -45,7 +45,12 @@ interface CardSession {
   displayName: string;
 }
 
-type NewCardData = Omit<KanbanCard, 'id' | 'order' | 'created_at' | 'updated_at'>;
+export type NewCardData = Omit<KanbanCard, 'id' | 'order' | 'created_at' | 'updated_at'>;
+
+export type CardCreatingState =
+  | { status: 'idle' }
+  | { status: 'pending' }
+  | { status: 'error'; message: string };
 
 interface CardModalProps {
   card: KanbanCard;
@@ -58,6 +63,14 @@ interface CardModalProps {
   onDelete?: (cardId: string) => void;
   isCreateMode?: boolean;
   onCreate?: (card: NewCardData) => void;
+  /**
+   * Pending/error state for the eager-create round-trip. While `pending`, the
+   * modal disables Submit and suppresses Escape-to-close. On `error`, an
+   * inline banner with Retry/Cancel is shown. See feature 063.
+   */
+  creatingState?: CardCreatingState;
+  onRetryCreate?: () => void;
+  onCancelCreate?: () => void;
   onAutomationToggle?: (isAutomation: boolean) => void;
   suppressAutoTerminal?: boolean;
   /**
@@ -203,7 +216,7 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
   return <div style={style}>{children}</div>;
 }
 
-export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
+export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const [docLoading, setDocLoading] = useState(false);
 
@@ -1158,6 +1171,8 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     if (voiceActive) return;
 
     if (isCreateMode && onCreate) {
+      // Block re-submit while a create round-trip is in flight.
+      if (creatingState?.status === 'pending') return;
       // In create mode, call onCreate with the card data
       if (!editedTitle.trim()) {
         onClose(); // Just close if no title
@@ -1174,14 +1189,19 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         checklist: checklistRef.current,
         ...(card.automation ? { automation: card.automation } : {}),
       });
-    } else {
-      // In edit mode, save any pending title change
-      if (editedTitle.trim() && editedTitle !== card.title) {
-        onUpdate({ ...card, title: editedTitle.trim(), updated_at: new Date().toISOString() });
-      }
+      // Do NOT call onClose() here — the parent decides when to close based
+      // on the eager-create response. On success, the parent unmounts this
+      // modal by clearing selectedCardId; on error, the modal stays open
+      // and renders the inline error banner.
+      return;
+    }
+
+    // Edit mode — save any pending title change, then close
+    if (editedTitle.trim() && editedTitle !== card.title) {
+      onUpdate({ ...card, title: editedTitle.trim(), updated_at: new Date().toISOString() });
     }
     onClose();
-  }, [isCreateMode, onCreate, editedTitle, editedDescription, card, onClose, onUpdate, voice.voiceState]);
+  }, [isCreateMode, onCreate, creatingState, editedTitle, editedDescription, card, onClose, onUpdate, voice.voiceState]);
 
   // Escape key handler — registered in capture phase with stopImmediatePropagation
   // so it fires before and blocks bubble-phase handlers (e.g. useKeyboardShortcuts)
@@ -1193,6 +1213,10 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       if (activeTab === 'terminal') return;
 
       e.stopImmediatePropagation();
+
+      // Suppress Escape-to-close while a card create is in flight — closing
+      // mid-flight could orphan the just-persisted card from the user's view.
+      if (isCreateMode && creatingState?.status === 'pending') return;
 
       // If delete confirmation is showing, close that instead
       if (showDeleteConfirm) {
@@ -1212,7 +1236,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeTab, showDeleteConfirm, handleCloseWithSave]);
+  }, [activeTab, showDeleteConfirm, handleCloseWithSave, isCreateMode, creatingState]);
 
   // Left/right arrow keys to navigate tabs (when not in a text input)
   useEffect(() => {
@@ -1490,6 +1514,54 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             )}
           </div>
         </div>
+
+        {/* Eager-create status banner (pending / error). Render only in create mode. */}
+        {isCreateMode && creatingState && creatingState.status !== 'idle' && (
+          <div
+            role={creatingState.status === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`flex items-center justify-between gap-3 border-b-2 px-5 py-3.5 text-base font-medium ${
+              creatingState.status === 'pending'
+                ? 'border-neon-blue-400/60 bg-neon-blue-100/80 text-neon-blue-800 dark:border-neon-blue-400/50 dark:bg-neon-blue-950/70 dark:text-neon-blue-100'
+                : 'border-red-400/60 bg-red-50 text-red-800 dark:border-red-500/50 dark:bg-red-950/60 dark:text-red-100'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              {creatingState.status === 'pending' ? (
+                <>
+                  <svg className="h-6 w-6 flex-shrink-0 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                    <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                  <span className="text-lg font-semibold tracking-wide">Saving card…</span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden className="flex-shrink-0 text-xl leading-none">⚠</span>
+                  <span className="truncate">Couldn&apos;t save: {creatingState.message}</span>
+                </>
+              )}
+            </div>
+            {creatingState.status === 'error' && (
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onRetryCreate?.()}
+                  className="rounded border border-red-400/50 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/50 dark:text-red-200 dark:hover:bg-red-900/40"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCancelCreate?.()}
+                  className="rounded border border-red-400/30 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:text-red-200 dark:hover:bg-red-900/40"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tabs — scrollable with arrow indicators */}
         <div className={`relative grain grain-soft ${modalStyles.tabsBorder} ${modalStyles.tabs}`}>

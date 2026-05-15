@@ -149,9 +149,49 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  async sendVoice(audio: Buffer): Promise<void> {
+  async sendVoice(audio: Buffer): Promise<{ messageId: number }> {
     if (!this.chatId) throw new Error('No active chat. Send a message from Telegram first.');
-    await this.apiSendVoice(this.chatId, audio, this.keyboardMarkup());
+    const messageId = await this.apiSendMultipart('sendVoice', 'voice', this.chatId, audio, {
+      mime: 'audio/ogg',
+      filename: 'voice.ogg',
+      reply_markup: this.keyboardMarkup().reply_markup,
+    });
+    return { messageId };
+  }
+
+  async sendMedia(req: { filePath: string; kind: 'voice' | 'audio' | 'video' | 'document'; caption?: string }): Promise<{ messageId: number }> {
+    if (!this.chatId) throw new Error('No active chat. Send a message from Telegram first.');
+    const buf = await fs.promises.readFile(req.filePath);
+    const filename = path.basename(req.filePath);
+    const map = {
+      voice:    { method: 'sendVoice'    as const, field: 'voice'    as const, mime: 'audio/ogg' },
+      audio:    { method: 'sendAudio'    as const, field: 'audio'    as const, mime: this.guessAudioMime(filename) },
+      video:    { method: 'sendVideo'    as const, field: 'video'    as const, mime: this.guessVideoMime(filename) },
+      document: { method: 'sendDocument' as const, field: 'document' as const, mime: 'application/octet-stream' },
+    };
+    const m = map[req.kind];
+    const messageId = await this.apiSendMultipart(m.method, m.field, this.chatId, buf, {
+      mime: m.mime,
+      filename,
+      caption: req.caption,
+      reply_markup: this.keyboardMarkup().reply_markup,
+    });
+    return { messageId };
+  }
+
+  private guessAudioMime(filename: string): string {
+    const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
+    if (ext === '.mp3') return 'audio/mpeg';
+    if (ext === '.m4a') return 'audio/mp4';
+    if (ext === '.ogg' || ext === '.opus') return 'audio/ogg';
+    return 'application/octet-stream';
+  }
+
+  private guessVideoMime(filename: string): string {
+    const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
+    if (ext === '.mp4') return 'video/mp4';
+    if (ext === '.mov') return 'video/quicktime';
+    return 'application/octet-stream';
   }
 
   async sendInlineKeyboard(text: string, buttons: InlineButton[][]): Promise<void> {
@@ -235,21 +275,29 @@ export class TelegramChannel implements Channel {
     return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
   }
 
-  /** Send a voice message (multipart/form-data for binary upload). */
-  private async apiSendVoice(chatId: number, audio: Buffer, opts?: Record<string, any>): Promise<any> {
+  /**
+   * Shared multipart upload helper for sendVoice/sendAudio/sendVideo/sendDocument.
+   * Returns the Telegram `message_id` of the sent message.
+   */
+  private async apiSendMultipart(
+    method: 'sendVoice' | 'sendAudio' | 'sendVideo' | 'sendDocument',
+    field: 'voice' | 'audio' | 'video' | 'document',
+    chatId: number,
+    file: Buffer,
+    opts: { mime: string; filename: string; caption?: string; reply_markup?: unknown },
+  ): Promise<number> {
     const form = new FormData();
     form.append('chat_id', String(chatId));
-    form.append('voice', new Blob([new Uint8Array(audio)], { type: 'audio/ogg' }), 'voice.ogg');
-    if (opts?.reply_markup) {
-      form.append('reply_markup', JSON.stringify(opts.reply_markup));
-    }
-    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendVoice`, {
+    form.append(field, new Blob([new Uint8Array(file)], { type: opts.mime }), opts.filename);
+    if (opts.caption) form.append('caption', opts.caption);
+    if (opts.reply_markup) form.append('reply_markup', JSON.stringify(opts.reply_markup));
+    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
       method: 'POST',
       body: form,
     });
     const data = await res.json() as TelegramApiResponse<any>;
-    if (!data.ok) throw new Error(`Telegram API error (sendVoice): ${data.description}`);
-    return data.result;
+    if (!data.ok) throw new Error(`Telegram API error (${method}): ${data.description}`);
+    return data.result.message_id;
   }
 
   /** Acknowledge a callback query. */

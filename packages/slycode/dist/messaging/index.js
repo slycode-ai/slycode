@@ -9,11 +9,13 @@ import { StateManager } from './state.js';
 import { KanbanClient } from './kanban-client.js';
 import { SlyActionFilter } from './sly-action-filter.js';
 import { transcribeAudio, validateSttConfig } from './stt.js';
-import { textToSpeech, convertToOgg } from './tts.js';
+import { renderTtsAudio } from './tts.js';
 import * as audioArchive from './audio-archive.js';
 import { searchVoices } from './voices.js';
 import { projectSessionKeys, escapeRegex } from './session-keys.js';
 import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
+import { preflightFile, resolveSendKind, FileSendError, preflightWritePath } from './file-send.js';
+import { buildGeneratedFilename, todayDateString } from './audio-utils.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // --- Shared Provider Labels ---
 const PROVIDER_LABELS = {
@@ -1543,7 +1545,7 @@ async function main() {
     // --- HTTP Server for Outbound Messages (called by CLI) ---
     const noChannelError = 'Messaging is not configured. Telegram bot token and user ID are not set. Tell the user they can configure messaging in .env or remove the messaging skill from this project.';
     const app = express();
-    app.use(express.json());
+    app.use(express.json({ limit: '16kb' }));
     app.post('/send', async (req, res) => {
         try {
             const { message, session } = req.body;
@@ -1602,15 +1604,25 @@ async function main() {
             }
             await channel.sendChatAction('upload_voice');
             const runtimeVoice = state.getVoice();
-            const mp3Buffer = await textToSpeech(message, voiceConfig, runtimeVoice?.id);
+            // Render MP3 once, then transcode to OGG separately so the fallback
+            // path can reuse the MP3 buffer without re-hitting ElevenLabs.
+            const mp3Render = await renderTtsAudio(message, voiceConfig, {
+                format: 'mp3',
+                voiceIdOverride: runtimeVoice?.id,
+            });
             let audioBuffer;
             let archiveExt;
             try {
-                audioBuffer = await convertToOgg(mp3Buffer);
+                const oggRender = await renderTtsAudio(message, voiceConfig, {
+                    format: 'ogg',
+                    voiceIdOverride: runtimeVoice?.id,
+                    sourceMp3: mp3Render.sourceMp3,
+                });
+                audioBuffer = oggRender.buffer;
                 archiveExt = '.ogg';
             }
             catch {
-                audioBuffer = mp3Buffer;
+                audioBuffer = mp3Render.buffer;
                 archiveExt = '.mp3';
             }
             const contextSlug = getSessionContextSlug(session || state.getSessionName());
@@ -1622,6 +1634,155 @@ async function main() {
             res.status(500).json({ error: err.message });
         }
     });
+    app.post('/send/file', async (req, res) => {
+        try {
+            const { path: filePath, cwd: callerCwd, caption, as } = req.body ?? {};
+            if (typeof filePath !== 'string' || filePath.length === 0) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'path must be a non-empty string' });
+            }
+            if (callerCwd !== undefined && (typeof callerCwd !== 'string' || !path.isAbsolute(callerCwd))) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'cwd must be an absolute path string' });
+            }
+            if (caption !== undefined) {
+                if (typeof caption !== 'string') {
+                    return res.status(400).json({ ok: false, error: 'bad_request', message: 'caption must be a string' });
+                }
+                if (caption.length > 1024) {
+                    return res.status(400).json({ ok: false, error: 'bad_request', message: 'caption exceeds 1024 characters' });
+                }
+            }
+            if (as !== undefined && as !== 'document') {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'as must be omitted or "document"' });
+            }
+            if (!channel)
+                return res.status(400).json({ ok: false, error: 'no_channel', message: noChannelError });
+            if (!channel.isReady())
+                return res.status(400).json({ ok: false, error: 'no_chat_configured', message: 'No active chat. Send a message from the channel first.' });
+            let preflight;
+            try {
+                preflight = await preflightFile(filePath, callerCwd);
+            }
+            catch (err) {
+                if (err instanceof FileSendError) {
+                    return res.status(err.httpStatus).json({ ok: false, error: err.code, message: err.message });
+                }
+                throw err;
+            }
+            const kind = resolveSendKind(preflight.kind, as);
+            if (kind === null) {
+                return res.status(415).json({
+                    ok: false,
+                    error: 'unsupported_media_type',
+                    message: `${path.extname(preflight.absolutePath) || '(no extension)'} is not a supported media type. Pass \`as: "document"\` to deliver as a file attachment.`,
+                });
+            }
+            if (typeof channel.sendMedia !== 'function') {
+                return res.status(501).json({
+                    ok: false,
+                    error: 'method_not_supported',
+                    message: `Channel ${channel.name} does not implement sendMedia`,
+                });
+            }
+            try {
+                const { messageId } = await channel.sendMedia({ filePath: preflight.absolutePath, kind, caption });
+                return res.json({ ok: true, channel: channel.name, kind, messageId, bytes: preflight.bytes });
+            }
+            catch (err) {
+                return res.status(502).json({ ok: false, error: 'telegram_error', message: err.message });
+            }
+        }
+        catch (err) {
+            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
+        }
+    });
+    // POST /tts/generate — render TTS audio and write to disk. Never emits to
+    // any channel. Structural invariant: this handler must not reference
+    // `channel` anywhere.
+    app.post('/tts/generate', async (req, res) => {
+        try {
+            const { text, voiceId, format, outDir, filename } = req.body ?? {};
+            if (typeof text !== 'string' || text.length === 0) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'text must be a non-empty string' });
+            }
+            const maxText = parseInt(process.env.TTS_GENERATE_MAX_TEXT || '5000', 10);
+            if (text.length > maxText) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: `text exceeds ${maxText} characters` });
+            }
+            const fmt = format ?? 'ogg';
+            if (fmt !== 'ogg' && fmt !== 'mp3') {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: "format must be 'ogg' or 'mp3'" });
+            }
+            if (voiceId !== undefined && (typeof voiceId !== 'string' || voiceId.length === 0)) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'voiceId must be a non-empty string when provided' });
+            }
+            if (outDir !== undefined && typeof outDir !== 'string') {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'outDir must be a string' });
+            }
+            if (filename !== undefined && (typeof filename !== 'string' || filename.length === 0)) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'filename must be a non-empty string when provided' });
+            }
+            if (!voiceConfig.elevenlabsApiKey) {
+                return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
+            }
+            const workspaceRoot = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
+            const defaultDirRel = process.env.TTS_GENERATE_DEFAULT_DIR || path.join('data', 'generated-audio');
+            const dirInput = outDir ?? path.join(defaultDirRel, todayDateString());
+            const dirAbsolute = path.isAbsolute(dirInput) ? dirInput : path.resolve(workspaceRoot, dirInput);
+            const effectiveFilename = filename ?? buildGeneratedFilename({ text, voiceId: voiceId ?? null, format: fmt });
+            const finalAbsolutePath = path.join(dirAbsolute, effectiveFilename);
+            // Sensitive-path guard runs before TTS to save ElevenLabs cost on a
+            // request that's going to be refused anyway.
+            try {
+                await preflightWritePath(finalAbsolutePath);
+            }
+            catch (err) {
+                if (err instanceof FileSendError) {
+                    return res.status(err.httpStatus).json({ ok: false, error: err.code, message: err.message });
+                }
+                throw err;
+            }
+            let buffer;
+            try {
+                const result = await renderTtsAudio(text, voiceConfig, { format: fmt, voiceIdOverride: voiceId });
+                buffer = result.buffer;
+            }
+            catch (err) {
+                return res.status(502).json({ ok: false, error: 'tts_failed', message: err.message });
+            }
+            try {
+                await fs.promises.mkdir(dirAbsolute, { recursive: true });
+                const fh = await fs.promises.open(finalAbsolutePath, 'wx');
+                try {
+                    await fh.writeFile(buffer);
+                }
+                finally {
+                    await fh.close();
+                }
+            }
+            catch (err) {
+                const code = err.code;
+                if (code === 'EEXIST') {
+                    return res.status(409).json({ ok: false, error: 'file_exists', message: `File already exists: ${finalAbsolutePath}` });
+                }
+                return res.status(500).json({ ok: false, error: 'write_failed', message: err.message });
+            }
+            const relativePath = finalAbsolutePath.startsWith(workspaceRoot + path.sep)
+                ? path.relative(workspaceRoot, finalAbsolutePath)
+                : finalAbsolutePath;
+            return res.json({
+                ok: true,
+                path: relativePath,
+                absolutePath: finalAbsolutePath,
+                filename: path.basename(finalAbsolutePath),
+                format: fmt,
+                bytes: buffer.length,
+                durationMs: null,
+            });
+        }
+        catch (err) {
+            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
+        }
+    });
     app.get('/health', (_, res) => {
         res.json({
             status: 'ok',
@@ -1629,9 +1790,18 @@ async function main() {
             ready: channel?.isReady() || false,
         });
     });
-    const listenHost = process.env.HOST || 'localhost';
-    app.listen(serviceConfig.servicePort, listenHost, () => {
-        console.log(`HTTP server listening on ${listenHost}:${serviceConfig.servicePort}`);
+    const requestedHost = process.env.MESSAGING_LISTEN_HOST || '127.0.0.1';
+    const isLocalBind = requestedHost === '127.0.0.1' || requestedHost === 'localhost' || requestedHost === '::1';
+    const allowRemote = process.env.MESSAGING_ALLOW_REMOTE_UNAUTHENTICATED === 'true';
+    if (!isLocalBind && !allowRemote) {
+        console.error(`Refusing to bind messaging service to ${requestedHost}: this service has no auth and exposes /send/file (file read) and /voice/send (TTS broadcast). Set MESSAGING_ALLOW_REMOTE_UNAUTHENTICATED=true to override (DANGEROUS).`);
+        process.exit(1);
+    }
+    if (!isLocalBind) {
+        console.warn(`[messaging] WARNING: bound to ${requestedHost} with no auth. /send/file and /voice are exposed.`);
+    }
+    app.listen(serviceConfig.servicePort, requestedHost, () => {
+        console.log(`HTTP server listening on ${requestedHost}:${serviceConfig.servicePort}`);
     });
     // Graceful shutdown
     const shutdown = () => {

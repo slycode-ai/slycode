@@ -1,7 +1,7 @@
 ---
 name: messaging
-version: 2.3.1
-updated: 2026-02-22
+version: 2.4.0
+updated: 2026-05-10
 description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc.
 ---
 
@@ -32,6 +32,56 @@ sly-messaging send "Your response message here"
 ```bash
 sly-messaging send "Your response message here" --tts
 ```
+
+### File Response (send an existing file)
+
+Deliver an audio, video, or document file that already exists on disk.
+Does **not** invoke TTS — for that, use `send --tts`.
+
+```bash
+# Auto-detected by extension
+sly-messaging send-file path/to/file.ogg                          # → Telegram voice bubble
+sly-messaging send-file path/to/file.mp3                          # → Telegram audio tile
+sly-messaging send-file path/to/preview.mp4 --caption "Confirm?"  # → inline video player with caption
+
+# Force document delivery for unsupported types (e.g. .txt, .pdf, .log)
+sly-messaging send-file path/to/notes.txt --as document
+```
+
+**Path handling:**
+- Relative paths resolve against your current working directory (the CLI passes
+  `process.cwd()` along automatically). Absolute paths are used as-is.
+- A small set of sensitive locations is refused (`.env*`, SSH keys,
+  `.aws/credentials`, `.netrc`, `/proc/`, `/dev/`, `/sys/`, `.docker/`,
+  `.kube/`). The endpoint will respond with `403 denied_path` if you hit one.
+
+**Supported auto-routed types:**
+
+| Extension(s) | Telegram method | Renders as |
+|---|---|---|
+| `.ogg`, `.opus` | `sendVoice` | Voice bubble with waveform |
+| `.mp3`, `.m4a` | `sendAudio` | Music tile (title/artist metadata) |
+| `.mp4`, `.mov` | `sendVideo` | Inline video player |
+
+Anything else (`.txt`, `.pdf`, `.json`, `.log`, etc.) returns
+`415 unsupported_media_type` unless you pass `--as document`, in which case
+Telegram delivers it as a generic file attachment.
+
+**Limits and errors:**
+- Max file size: 50 MB (Telegram bot limit). Larger files return `413 file_too_large`.
+- Missing file returns `404 file_not_found`.
+- The `--caption` text is limited to 1024 characters.
+- On Telegram API failure, the CLI prints `Error: telegram_error: <message>`.
+
+**When to use `send-file` instead of `send --tts`:**
+- You already have an audio/video file on disk that you want delivered as-is
+  (no TTS generation). Examples: rendered MP4 preview, recorded WAV note,
+  a screenshot saved from another tool, a log file you want the user to read.
+- You want the user to confirm a media artefact before it's published
+  elsewhere (e.g. the x_post confirm-before-post flow renders MP4 → sends
+  via `send-file` → waits for the user's reaction).
+- `send --tts` is still the right tool when you're *generating* fresh
+  speech from text — `send-file` only delivers what's already on disk.
 
 ## When to Use Voice (`--tts`)
 

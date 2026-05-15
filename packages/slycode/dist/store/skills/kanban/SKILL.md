@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.10.0
-updated: 2026-05-03
+version: 1.11.0
+updated: 2026-05-06
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -162,8 +162,9 @@ so agents picking up the card should NOT restate it in their first reply.
 
 #### Auto-status — events that emit a status update
 
-These CLI write paths automatically emit a status update when the underlying
-operation actually changes state (idempotent re-sets do NOT auto-status):
+These write paths automatically emit a status update when the underlying
+operation actually changes state (idempotent re-sets do NOT auto-status). Most
+fire from the CLI; questionnaire submit fires from the web API route:
 
 | Trigger | Tier | Auto-status text |
 |---|---|---|
@@ -179,6 +180,7 @@ operation actually changes state (idempotent re-sets do NOT auto-status):
 | `problem resolve` (some open) | medium | `Problem resolved: <N> open` |
 | `problem resolve` (all resolved) | medium | `All problems resolved` |
 | `prompt` (cross-card, target card) | low | `Prompt received` |
+| Questionnaire Submit (web Submit button) | medium | `Questionnaire submitted` |
 
 **Tier rules** (manual is level -1, sacred):
 

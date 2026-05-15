@@ -146,6 +146,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
               return (
                 <tr
                   key={`${row.type}-${row.name}`}
+                  data-skill-focus={row.name}
                   className={`border-b border-void-100 dark:border-void-800 ${
                     isIgnored ? 'opacity-40' : !row.masterAsset.isValid && isImported ? 'opacity-60' : ''
                   }`}

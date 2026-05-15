@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard, CardChangeType } from '@/lib/types';
+import type { NewCardData, CardCreatingState } from './CardModal';
 import { connectionManager } from '@/lib/connection-manager';
 import { tabSync } from '@/lib/tab-sync';
 import { usePolling } from '@/hooks/usePolling';
@@ -15,6 +16,7 @@ import { ContextMenu, type ContextMenuGroup } from './ContextMenu';
 import { readStatus, getStatusAgeLabel } from '@/lib/status';
 import { ConfirmDialog } from './ConfirmDialog';
 import { VersionUpdateToast } from './VersionUpdateToast';
+import { SkillUpdateToast } from './SkillUpdateToast';
 import { projectKeyAlternation } from '@/lib/session-keys';
 
 interface SessionInfo {
@@ -89,6 +91,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const consumedCardParamRef = useRef<string | null>(null);
   const editedCardIdsRef = useRef<Set<string>>(new Set());
   const movedCardIdsRef = useRef<Set<string>>(new Set());
+
+  // Eager-create round-trip state (feature 063). The card is persisted via
+  // POST /api/kanban/cards BEFORE it appears on the board, so a follow-up
+  // drag can never tag a phantom (un-persisted) card as 'move' and trip
+  // the silent-drop branch in the typed merge.
+  const [creatingState, setCreatingState] = useState<CardCreatingState>({ status: 'idle' });
+  const lastCreatePayloadRef = useRef<NewCardData | null>(null);
 
   // Quick-launch shortcut state — populated when ProjectKanban is opened via
   // /project/<id>/<token>. The token route resolves and redirects with these
@@ -605,24 +614,86 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     setIsCreatingCard(true);
   };
 
-  // Handle creating a new card from the modal
-  const handleCreateCard = (cardData: Omit<KanbanCard, 'id' | 'order' | 'created_at' | 'updated_at'>) => {
-    const now = new Date().toISOString();
-    const newCard: KanbanCard = {
-      ...cardData,
-      id: `card-${Date.now()}`,
-      order: stages.backlog.length > 0
-        ? Math.max(...stages.backlog.map((c) => c.order)) + 10
-        : 10,
-      created_at: now,
-      updated_at: now,
-    };
+  // Eager-save card create (feature 063). Synchronously POSTs to
+  // /api/kanban/cards, splices the server-numbered card into local state on
+  // success, and surfaces an inline error with Retry/Cancel on failure.
+  // The card never appears on the board in an unpersisted state, which
+  // means a follow-up drag can never be the silent-drop bug.
+  const performCreate = useCallback(async (cardData: NewCardData): Promise<void> => {
+    setCreatingState({ status: 'pending' });
+    // Snapshot the request token (the payload ref) so a late response from a
+    // cancelled-in-flight request can't muck with state after Cancel.
+    const requestPayload = cardData;
+    lastCreatePayloadRef.current = requestPayload;
+    try {
+      const res = await fetch('/api/kanban/cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, card: cardData }),
+      });
+      // If the user clicked Cancel during the round-trip, the payload ref was
+      // cleared. Persist the card on disk regardless (server already wrote it),
+      // but don't disturb the now-closed modal state.
+      const cancelled = lastCreatePayloadRef.current !== requestPayload;
 
-    setStages((prev) => ({
-      ...prev,
-      backlog: [...prev.backlog, newCard],
-    }));
-  };
+      if (!res.ok) {
+        if (cancelled) return;
+        let message = `Create failed (${res.status})`;
+        try {
+          const errBody = await res.json();
+          if (errBody?.error) message = String(errBody.error);
+        } catch {
+          // Fall back to status-line message
+        }
+        setCreatingState({ status: 'error', message });
+        return;
+      }
+      const data = (await res.json()) as { card: KanbanCard };
+      const persisted = data.card;
+
+      // Splice into stages and update the clean baseline so the SSE
+      // reconciler doesn't see this card as a phantom edit on the next pass.
+      const next: KanbanStages = {
+        ...stagesRef.current,
+        backlog: [...(stagesRef.current.backlog || []), persisted],
+      };
+      cleanBaselineRef.current = next;
+      lastSaveTimestampRef.current = new Date().toISOString();
+      setStages(next);
+
+      if (cancelled) return;
+      lastCreatePayloadRef.current = null;
+      setCreatingState({ status: 'idle' });
+      setSelectedCardId(null);
+      setSelectedStage(null);
+      setIsCreatingCard(false);
+      setPlaceholderCard(null);
+    } catch (err) {
+      if (lastCreatePayloadRef.current !== requestPayload) return;
+      const message = err instanceof Error ? err.message : 'Network error';
+      setCreatingState({ status: 'error', message });
+    }
+  }, [project.id]);
+
+  const handleCreateCard = useCallback((cardData: NewCardData) => {
+    lastCreatePayloadRef.current = cardData;
+    void performCreate(cardData);
+  }, [performCreate]);
+
+  const handleRetryCreate = useCallback(() => {
+    const payload = lastCreatePayloadRef.current;
+    if (!payload) return;
+    void performCreate(payload);
+  }, [performCreate]);
+
+  const handleCancelCreate = useCallback(() => {
+    lastCreatePayloadRef.current = null;
+    setCreatingState({ status: 'idle' });
+    setSelectedCardId(null);
+    setSelectedStage(null);
+    setIsCreatingCard(false);
+    setPlaceholderCard(null);
+  }, []);
 
   const handleUpdateCard = (updatedCard: KanbanCard) => {
     // In create mode, update placeholder instead of stages
@@ -1018,6 +1089,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       {/* Connection status indicator - fixed position */}
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
+      <SkillUpdateToast projectId={project.id} />
 
       {/* Save status indicator - absolute positioned */}
       <div className="absolute top-1 right-4 z-10 flex gap-3">
@@ -1120,6 +1192,9 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             onDelete={handleDeleteCard}
             isCreateMode={isCreatingCard}
             onCreate={isCreatingCard ? handleCreateCard : undefined}
+            creatingState={isCreatingCard ? creatingState : undefined}
+            onRetryCreate={isCreatingCard ? handleRetryCreate : undefined}
+            onCancelCreate={isCreatingCard ? handleCancelCreate : undefined}
             onAutomationToggle={onAutomationToggle}
             suppressAutoTerminal={suppressAutoTerminal}
             pendingShortcut={pendingShortcut && pendingShortcut.cardId === selectedCard.id ? pendingShortcut : null}

@@ -28,8 +28,19 @@ export interface Channel {
   /** Send a raw text message without formatting (preserves special chars like brackets) */
   sendTextRaw(text: string): Promise<void>;
 
-  /** Send a voice message to the user */
-  sendVoice(audio: Buffer): Promise<void>;
+  /** Send a voice message to the user (buffer-based, used by the TTS path) */
+  sendVoice(audio: Buffer): Promise<{ messageId: number }>;
+
+  /**
+   * Send a media file (audio/video/document/voice) by file path.
+   * Optional — channels that don't support file delivery omit it; the
+   * `/send/file` route returns 501 method_not_supported in that case.
+   */
+  sendMedia?(req: {
+    filePath: string;
+    kind: 'voice' | 'audio' | 'video' | 'document';
+    caption?: string;
+  }): Promise<{ messageId: number }>;
 
   /** Send an inline keyboard with breadcrumb and optional message */
   sendInlineKeyboard(text: string, buttons: InlineButton[][]): Promise<void>;

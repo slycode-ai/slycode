@@ -32,6 +32,33 @@ export async function textToSpeech(text: string, config: VoiceConfig, voiceIdOve
   return Buffer.from(arrayBuffer);
 }
 
+/**
+ * Render TTS audio in the requested format.
+ *
+ * Always calls ElevenLabs once (returns MP3) unless `sourceMp3` is supplied,
+ * in which case it reuses that buffer (used by /voice's OGG-fail fallback to
+ * avoid re-hitting the API).
+ *
+ * - format='mp3': zero transcode, returns the ElevenLabs buffer directly.
+ * - format='ogg': runs convertToOgg(); throws on failure (caller decides
+ *   fallback policy — /voice falls back to MP3, /tts/generate returns 502).
+ *
+ * Returns the source MP3 alongside the final buffer so callers can implement
+ * format fallbacks without a second API call.
+ */
+export async function renderTtsAudio(
+  text: string,
+  config: VoiceConfig,
+  opts: { format: 'ogg' | 'mp3'; voiceIdOverride?: string; sourceMp3?: Buffer },
+): Promise<{ buffer: Buffer; format: 'ogg' | 'mp3'; sourceMp3: Buffer }> {
+  const sourceMp3 = opts.sourceMp3 ?? await textToSpeech(text, config, opts.voiceIdOverride);
+  if (opts.format === 'mp3') {
+    return { buffer: sourceMp3, format: 'mp3', sourceMp3 };
+  }
+  const ogg = await convertToOgg(sourceMp3);
+  return { buffer: ogg, format: 'ogg', sourceMp3 };
+}
+
 export async function convertToOgg(mp3Buffer: Buffer): Promise<Buffer> {
   // Use ffmpeg to convert MP3 to OGG/Opus (Telegram's preferred format)
   const { spawn } = await import('child_process');

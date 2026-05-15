@@ -223,6 +223,14 @@ function autoStatusPromptReceived(card) {
   return tryAutoStatus(card, { text: 'Prompt received', tier: 'low' });
 }
 
+function autoStatusQuestionnaireSubmitted(card) {
+  // Fixed text — questionnaire `name` is agent-authored but kept out for
+  // consistency with autoStatusPromptReceived and to avoid widening the helper
+  // signature for the multi-questionnaire case (the board already shows the
+  // card; users can click in for which questionnaire was answered).
+  return tryAutoStatus(card, { text: 'Questionnaire submitted', tier: 'medium' });
+}
+
 function formatRelativeTimeStatus(pastIso, now = new Date()) {
   const past = new Date(pastIso);
   if (isNaN(past.getTime())) return '';

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveProjectRoot, ProjectResolutionError, getKanbanPath } from '@/lib/kanban-paths';
 import { promises as fs } from 'fs';
+import { randomBytes } from 'crypto';
 import {
   buildSubmitMessage,
   loadQuestionnaire,
@@ -9,6 +10,9 @@ import {
   QuestionnaireValidationError,
 } from '@/lib/questionnaire';
 import { getBridgeUrl } from '@/lib/paths';
+import { loadRegistry } from '@/lib/registry';
+import { sessionNameCandidates } from '@/lib/session-keys';
+import { autoStatusQuestionnaireSubmitted } from '@/lib/status';
 import type { KanbanCard, KanbanBoard } from '@/lib/types';
 
 interface SubmitBody {
@@ -56,10 +60,11 @@ export async function POST(
     throw err;
   }
 
-  const ref = await findQuestionnaireRef(projectId, name);
-  if (!ref) {
+  const found = await findQuestionnaireRef(projectId, name);
+  if (!found) {
     return NextResponse.json({ error: `No questionnaire named "${name}"` }, { status: 404 });
   }
+  const { ref, card, board, kanbanPath } = found;
 
   let absPath: string;
   try {
@@ -84,25 +89,31 @@ export async function POST(
   const message = buildSubmitMessage(questionnaire, ref);
   const autoSubmit = body.autoSubmit !== false;
 
-  // Resolve the bridge URL and try to deliver the message.
+  // Resolve the bridge URL and build alias-aware session-name candidates.
+  // The client-passed sessionName is used as the first candidate, then we add
+  // canonical+alias forms derived from the project registry so we don't miss a
+  // session that lives under an old alias key (a real-world flake when client
+  // state was stale at click time).
   const bridgeUrl = getBridgeUrl();
-  const sessionName = body.sessionName;
+  const candidates = await buildSessionCandidates(projectId, body.sessionName, body.provider);
 
   try {
-    // Probe whether the session exists and is in a writable state.
-    const probeRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`);
-    let isWritable = false;
-    if (probeRes.ok) {
+    // Probe each candidate; first writable session wins.
+    let resolvedName: string | null = null;
+    for (const candidate of candidates) {
+      const probeRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(candidate)}`);
+      if (!probeRes.ok) continue;
       const data = await probeRes.json();
       // Bridge returns 200 with null body when session is missing.
       if (data && (data.status === 'running' || data.status === 'detached')) {
-        isWritable = true;
+        resolvedName = candidate;
+        break;
       }
     }
 
-    if (isWritable) {
+    if (resolvedName) {
       // Session is up — paste with bracketed-paste markers, then optionally Enter.
-      const pasteRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+      const pasteRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(resolvedName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: `\x1b[200~${message}\x1b[201~` }),
@@ -115,7 +126,7 @@ export async function POST(
       }
       if (autoSubmit) {
         await new Promise((r) => setTimeout(r, 600));
-        const enterRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+        const enterRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(resolvedName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: '\r' }),
@@ -125,6 +136,7 @@ export async function POST(
           // status (the message is on the prompt line) and return success.
           // Surface the warning so the UI can show a toast.
           await markSubmitted(absPath, questionnaire);
+          await emitSubmittedStatus(card, board, kanbanPath);
           return NextResponse.json({
             ok: true,
             warning: `Enter submission failed (${enterRes.status}); message pasted but not auto-submitted`,
@@ -132,23 +144,25 @@ export async function POST(
         }
       }
     } else {
-      // No active session — create one. Same shape as GlobalClaudePanel /
-      // pushToTerminal does: pass the prompt body; the bridge delivers it as
-      // part of session startup.
+      // No active session under any alias — create one. Use the canonical
+      // (first) candidate so the new session is created under the canonical
+      // name, not an alias.
       if (!body.provider || !body.cwd) {
         return NextResponse.json(
           {
             error:
               'No active session for this card. To start one, include "provider" and "cwd" in the request body.',
+            triedCandidates: candidates,
           },
           { status: 409 }
         );
       }
+      const createName = candidates[0] ?? body.sessionName;
       const createRes = await fetch(`${bridgeUrl}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: sessionName,
+          name: createName,
           provider: body.provider,
           skipPermissions: true,
           cwd: body.cwd,
@@ -166,6 +180,7 @@ export async function POST(
     }
 
     await markSubmitted(absPath, questionnaire);
+    await emitSubmittedStatus(card, board, kanbanPath);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
@@ -175,6 +190,51 @@ export async function POST(
   }
 }
 
+/**
+ * Build the ordered list of session-name candidates to probe for this submit.
+ *
+ * Why iterate: bridge sessions can live under either the canonical sessionKey
+ * or an alias (e.g., projects upgraded from a registry id that diverged from
+ * path.basename). Probing only the client-passed name produces the
+ * "no active session" false negative we hit in the wild — same pattern that
+ * GlobalClaudePanel and the messaging bridge resolver use.
+ *
+ * Order:
+ *   1. Client-passed sessionName (gives priority to whatever the UI thinks)
+ *   2. Canonical-first alias forms derived from the project + cardId + provider
+ */
+async function buildSessionCandidates(
+  projectId: string,
+  passedSessionName: string,
+  passedProvider: string | undefined,
+): Promise<string[]> {
+  const candidates: string[] = [];
+  if (passedSessionName) candidates.push(passedSessionName);
+
+  // Parse `<key>:<provider>:card:<cardId>` from the passed name to derive
+  // alias forms with the same provider+cardId.
+  const cardMatch = passedSessionName?.match(/:card:(.+)$/);
+  const cardId = cardMatch?.[1];
+  const providerMatch = passedSessionName?.match(/^[^:]+:([^:]+):card:/);
+  const provider = providerMatch?.[1] || passedProvider;
+
+  if (cardId && provider) {
+    try {
+      const registry = await loadRegistry();
+      const project = registry.projects.find((p) => p.id === projectId);
+      if (project) {
+        for (const alias of sessionNameCandidates(project, provider, cardId)) {
+          if (!candidates.includes(alias)) candidates.push(alias);
+        }
+      }
+    } catch {
+      // Registry unavailable — fall back to whatever the client gave us.
+    }
+  }
+
+  return candidates;
+}
+
 async function markSubmitted(absPath: string, q: import('@/lib/questionnaire').Questionnaire): Promise<void> {
   q.status = 'submitted';
   q.submitted_at = new Date().toISOString();
@@ -182,7 +242,35 @@ async function markSubmitted(absPath: string, q: import('@/lib/questionnaire').Q
   await saveQuestionnaire(absPath, q);
 }
 
-async function findQuestionnaireRef(projectId: string, name: string): Promise<string | null> {
+/**
+ * Try to emit the medium-tier auto-status `"Questionnaire submitted"` on the
+ * card and persist the board if it took. Skips the kanban write if the helper
+ * declined (e.g., a manual or higher-tier auto-status is currently set), so we
+ * don't churn `last_updated` when nothing actually changed.
+ */
+async function emitSubmittedStatus(
+  card: KanbanCard,
+  board: KanbanBoard,
+  kanbanPath: string,
+): Promise<void> {
+  if (autoStatusQuestionnaireSubmitted(card)) {
+    card.updated_at = new Date().toISOString();
+    card.last_modified_by = 'agent';
+    await persistKanbanStatus(board, kanbanPath);
+  }
+}
+
+interface FoundQuestionnaire {
+  ref: string;
+  card: KanbanCard;
+  board: KanbanBoard;
+  kanbanPath: string;
+}
+
+async function findQuestionnaireRef(
+  projectId: string,
+  name: string,
+): Promise<FoundQuestionnaire | null> {
   const projectRoot = await resolveProjectRoot(projectId);
   const kanbanPath = await getKanbanPath(projectId);
   let board: KanbanBoard;
@@ -192,21 +280,39 @@ async function findQuestionnaireRef(projectId: string, name: string): Promise<st
   } catch {
     return null;
   }
-  const allCards: KanbanCard[] = [];
-  for (const stage of Object.keys(board.stages || {}) as Array<keyof typeof board.stages>) {
-    allCards.push(...(board.stages[stage] || []));
-  }
-  for (const card of allCards) {
-    const refs = card.questionnaire_refs || [];
-    for (const ref of refs) {
-      try {
-        const abs = resolveQuestionnaireAbsPath(projectRoot, ref);
-        const q = await loadQuestionnaire(abs);
-        if (q.name === name) return ref;
-      } catch {
-        // skip
+  const stageKeys = Object.keys(board.stages || {}) as Array<keyof typeof board.stages>;
+  for (const stage of stageKeys) {
+    for (const card of board.stages[stage] || []) {
+      const refs = card.questionnaire_refs || [];
+      for (const ref of refs) {
+        try {
+          const abs = resolveQuestionnaireAbsPath(projectRoot, ref);
+          const q = await loadQuestionnaire(abs);
+          if (q.name === name) return { ref, card, board, kanbanPath };
+        } catch {
+          // skip
+        }
       }
     }
   }
   return null;
+}
+
+/**
+ * Atomic write of the kanban board after an auto-status mutation. Updates
+ * `last_updated` on the board; the per-card `last_modified_by` is stamped by
+ * the caller (auto-status emissions are system-driven, so callers use
+ * `'agent'`). Mirrors the temp+rename pattern used by saveQuestionnaire.
+ *
+ * Concurrency note: this is a full-board overwrite, so a simultaneous human
+ * web edit racing this write could lose a field. The window is small (submit
+ * is rare and user-initiated) and acceptable for a single-user app; if it
+ * becomes a problem, route through /api/kanban POST surgical-save instead.
+ */
+async function persistKanbanStatus(board: KanbanBoard, kanbanPath: string): Promise<void> {
+  board.last_updated = new Date().toISOString();
+  const json = JSON.stringify(board, null, 2);
+  const tmpPath = `${kanbanPath}.tmp.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}`;
+  await fs.writeFile(tmpPath, json, 'utf-8');
+  await fs.rename(tmpPath, kanbanPath);
 }

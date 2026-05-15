@@ -621,6 +621,8 @@ function SingleChoiceInput({
 }) {
   const isOther = typeof item.answer === 'string' && item.answer.startsWith('Other:');
   const otherText = isOther ? (item.answer as string).slice('Other:'.length).trimStart() : '';
+  const [userAddedOther, setUserAddedOther] = useState(false);
+  const showOther = !!item.allow_other || isOther || userAddedOther;
 
   return (
     <div className="space-y-1">
@@ -636,7 +638,7 @@ function SingleChoiceInput({
           {opt}
         </label>
       ))}
-      {item.allow_other && (
+      {showOther && (
         <div className="space-y-1">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
             <input
@@ -660,15 +662,12 @@ function SingleChoiceInput({
           )}
         </div>
       )}
-      {item.answer !== null && (
-        <button
-          onClick={() => onChange(null)}
-          className="text-xs text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300"
-          title="Clear selection"
-        >
-          Clear
-        </button>
-      )}
+      <ChoiceFooter
+        canClear={item.answer !== null}
+        onClear={() => onChange(null)}
+        canAddOther={!showOther}
+        onAddOther={() => setUserAddedOther(true)}
+      />
     </div>
   );
 }
@@ -684,6 +683,8 @@ function MultiChoiceInput({
   const otherEntry = current.find((v) => v.startsWith('Other:'));
   const otherText = otherEntry ? otherEntry.slice('Other:'.length).trimStart() : '';
   const isOther = !!otherEntry;
+  const [userAddedOther, setUserAddedOther] = useState(false);
+  const showOther = !!item.allow_other || isOther || userAddedOther;
 
   function toggleOption(opt: string) {
     const has = current.includes(opt);
@@ -717,7 +718,7 @@ function MultiChoiceInput({
           {opt}
         </label>
       ))}
-      {item.allow_other && (
+      {showOther && (
         <div className="space-y-1">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
             <input
@@ -740,6 +741,58 @@ function MultiChoiceInput({
           )}
         </div>
       )}
+      <ChoiceFooter
+        canClear={false}
+        canAddOther={!showOther}
+        onAddOther={() => setUserAddedOther(true)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Footer row for choice inputs: optional Clear (left) and "+ Other" (right).
+ * Renders nothing when neither action is available.
+ */
+function ChoiceFooter({
+  canClear,
+  onClear,
+  canAddOther,
+  onAddOther,
+}: {
+  canClear: boolean;
+  onClear?: () => void;
+  canAddOther: boolean;
+  onAddOther: () => void;
+}) {
+  if (!canClear && !canAddOther) return null;
+  return (
+    <div className="flex items-center justify-between pt-0.5">
+      <div>
+        {canClear && (
+          <button
+            onClick={onClear}
+            className="text-xs text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300"
+            title="Clear selection"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div>
+        {canAddOther && (
+          <button
+            onClick={onAddOther}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-400 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-500"
+            title="Add an 'Other' option for a free-text answer"
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            Other
+          </button>
+        )}
+      </div>
     </div>
   );
 }

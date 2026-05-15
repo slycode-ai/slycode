@@ -618,3 +618,27 @@ export interface SystemStats {
     total: number;  // bytes
   };
 }
+
+// ============================================================================
+// Skill Update Status (per-project freshness of installed skills)
+// ============================================================================
+
+export type SkillUpdateState =
+  | 'none'             // up to date or unactionable
+  | 'accept'           // updates/ semver-newer than store/ — needs accepting upstream
+  | 'deploy'           // store/ semver-newer than project — needs deploying to this project
+  | 'ahead'            // project semver-newer than store/ (local bump) — no toast
+  | 'invalidVersion';  // missing/unparsable frontmatter — no toast in v1
+
+export type WatchedSkillName = 'kanban' | 'messaging';
+
+export interface SkillUpdateStatus {
+  name: WatchedSkillName;
+  state: SkillUpdateState;
+  latestVersion: string | null;
+  projectVersion: string | null;
+}
+
+export interface SkillStatusResponse {
+  skills: SkillUpdateStatus[];
+}

@@ -30,7 +30,18 @@ export declare class TelegramChannel implements Channel {
     onCallback(prefix: string, handler: (data: string) => void): void;
     sendText(text: string): Promise<void>;
     sendTextRaw(text: string): Promise<void>;
-    sendVoice(audio: Buffer): Promise<void>;
+    sendVoice(audio: Buffer): Promise<{
+        messageId: number;
+    }>;
+    sendMedia(req: {
+        filePath: string;
+        kind: 'voice' | 'audio' | 'video' | 'document';
+        caption?: string;
+    }): Promise<{
+        messageId: number;
+    }>;
+    private guessAudioMime;
+    private guessVideoMime;
     sendInlineKeyboard(text: string, buttons: InlineButton[][]): Promise<void>;
     setPersistentKeyboard(buttons: string[][]): Promise<void>;
     sendTyping(): Promise<void>;
@@ -48,8 +59,11 @@ export declare class TelegramChannel implements Channel {
     private apiSendMessage;
     /** Get a file download URL from a file_id. */
     private apiGetFileLink;
-    /** Send a voice message (multipart/form-data for binary upload). */
-    private apiSendVoice;
+    /**
+     * Shared multipart upload helper for sendVoice/sendAudio/sendVideo/sendDocument.
+     * Returns the Telegram `message_id` of the sent message.
+     */
+    private apiSendMultipart;
     /** Acknowledge a callback query. */
     private apiAnswerCallbackQuery;
     private pollLoop;

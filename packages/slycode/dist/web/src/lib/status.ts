@@ -136,6 +136,40 @@ export function formatStatusForPrompt(status: CardStatus | null, now: Date = new
   ];
 }
 
+// ============================================================================
+// Auto-status writers (web mirror of scripts/kanban.js)
+//
+// CLI is canonical — only mirror the helpers that web routes actually call.
+// Adding a new helper here MUST be paired with the same helper in
+// scripts/kanban.js so the wording, tier, and overwrite semantics match.
+// ============================================================================
+
+interface CardLike {
+  status?: CardStatus;
+}
+
+// Auto write: builds the candidate, runs canOverwriteStatus, only mutates if
+// allowed. Returns true if written, false if denied. Never churns setAt on a
+// denied write. Mirrors tryAutoStatus in scripts/kanban.js.
+export function tryAutoStatus(
+  card: CardLike,
+  opts: { text: string; tier: CardStatusTier },
+): boolean {
+  const { text, tier } = opts;
+  if (tier !== 'high' && tier !== 'medium' && tier !== 'low') return false;
+  const normalized = normalizeStatus(text);
+  if (!normalized) return false;
+  const candidate: CardStatus = { text: normalized, setAt: new Date().toISOString(), kind: 'auto', tier };
+  const current = readStatus(card.status);
+  if (!canOverwriteStatus(current, candidate)) return false;
+  card.status = candidate;
+  return true;
+}
+
+export function autoStatusQuestionnaireSubmitted(card: CardLike): boolean {
+  return tryAutoStatus(card, { text: 'Questionnaire submitted', tier: 'medium' });
+}
+
 // Stage → color map. Keep this alongside the .stage-* CSS classes in globals.css.
 export const STAGE_COLORS: Record<string, string> = {
   backlog:        '#8aa6c4',

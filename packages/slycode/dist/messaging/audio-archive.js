@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { slugifyForFilename } from './audio-utils.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ARCHIVE_EXTENSIONS = new Set(['.ogg', '.mp3']);
 const DEFAULT_MAX_FILES = 10;
@@ -24,18 +25,8 @@ function resolveMax() {
     const n = parseInt(raw, 10);
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_FILES;
 }
-export function slugify(text, maxLen = 40) {
-    // Strip ElevenLabs audio tags ([excited], [pause], etc.) before slugifying
-    const stripped = text.replace(/\[[^\]]*\]/g, ' ');
-    const slug = stripped
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    if (!slug)
-        return 'untitled';
-    return slug.length > maxLen ? slug.slice(0, maxLen).replace(/-+$/, '') : slug;
-}
-function timestamp() {
+export const slugify = slugifyForFilename;
+function archiveTimestamp() {
     const d = new Date();
     const pad = (n, w = 2) => String(n).padStart(w, '0');
     return (`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
@@ -46,8 +37,8 @@ export function save(buffer, ext, contextSlug) {
     try {
         const dir = resolveDir();
         fs.mkdirSync(dir, { recursive: true });
-        const safeContext = slugify(contextSlug);
-        const filename = `${timestamp()}_${safeContext}${ext}`;
+        const safeContext = slugifyForFilename(contextSlug);
+        const filename = `${archiveTimestamp()}_${safeContext}${ext}`;
         fs.writeFileSync(path.join(dir, filename), buffer);
         prune(resolveMax());
     }

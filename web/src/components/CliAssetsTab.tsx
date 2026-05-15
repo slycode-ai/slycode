@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { usePolling } from '@/hooks/usePolling';
 import type { PendingChange, AssetType, CliAssetsData, StoreData, ProviderId, UpdateEntry, UpdatesData } from '@/lib/types';
 import { AssetMatrix } from './AssetMatrix';
@@ -56,7 +57,19 @@ export function CliAssetsTab() {
   const [fullSkillFolder, setFullSkillFolder] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
-  const [activeView, setActiveView] = useState<ActiveView>('projects');
+  // Initial view honours ?focus=<skill> (updates) and ?skill=<name> (projects)
+  // from SkillUpdateToast deep-link routing. Reading window.location in the
+  // initializer avoids the cascading-render lint hit from a setState inside
+  // an effect.
+  const initialView: ActiveView = (() => {
+    if (typeof window === 'undefined') return 'projects';
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'updates' && params.get('focus')) return 'updates';
+    if (tab === 'cli-assets' && params.get('skill')) return 'projects';
+    return 'projects';
+  })();
+  const [activeView, setActiveView] = useState<ActiveView>(initialView);
   const [activeProvider, setActiveProvider] = useState<ProviderId>('claude');
   const [fixTarget, setFixTarget] = useState<FixTarget | null>(null);
   const [assistantTarget, setAssistantTarget] = useState<AssistantTarget | null>(null);
@@ -74,6 +87,50 @@ export function CliAssetsTab() {
       return stored ? new Set(JSON.parse(stored)) : new Set();
     } catch { return new Set(); }
   });
+  // Deep-link routing from SkillUpdateToast:
+  //   ?tab=updates&focus=<skill>   → Updates sub-view + scroll to entry
+  //   ?tab=cli-assets&skill=<name> → Projects sub-view + scroll to row
+  // activeView is set via the useState initializer above; here we only pick
+  // up the focus target and strip the params so a refresh doesn't re-fire.
+  const router = useRouter();
+  const pathname = usePathname();
+  const initialFocusSkill: string | null = (() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'updates') return params.get('focus');
+    if (tab === 'cli-assets') return params.get('skill');
+    return null;
+  })();
+  const consumedDeepLinkRef = useRef(false);
+  const [focusSkill, setFocusSkill] = useState<string | null>(initialFocusSkill);
+  useEffect(() => {
+    if (consumedDeepLinkRef.current) return;
+    if (initialFocusSkill) {
+      consumedDeepLinkRef.current = true;
+      // Strip params after first paint so refresh is clean.
+      router.replace(pathname, { scroll: false });
+    }
+  }, [initialFocusSkill, pathname, router]);
+
+  // Scroll the focused row into view + flash highlight after data lands.
+  useEffect(() => {
+    if (!focusSkill) return;
+    // Wait a tick for the active view to render its rows.
+    const t = setTimeout(() => {
+      const el = document.querySelector(
+        `[data-skill-focus="${CSS.escape(focusSkill)}"]`,
+      ) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('skill-focus-pulse');
+        setTimeout(() => el.classList.remove('skill-focus-pulse'), 2500);
+      }
+      setFocusSkill(null);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [focusSkill, data, updatesData, activeView]);
+
   const fetchCliAssets = useCallback(async (signal: AbortSignal) => {
     try {
       // Fetch CLI assets + updates in parallel

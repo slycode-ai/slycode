@@ -90,7 +90,50 @@ export class TelegramChannel {
     async sendVoice(audio) {
         if (!this.chatId)
             throw new Error('No active chat. Send a message from Telegram first.');
-        await this.apiSendVoice(this.chatId, audio, this.keyboardMarkup());
+        const messageId = await this.apiSendMultipart('sendVoice', 'voice', this.chatId, audio, {
+            mime: 'audio/ogg',
+            filename: 'voice.ogg',
+            reply_markup: this.keyboardMarkup().reply_markup,
+        });
+        return { messageId };
+    }
+    async sendMedia(req) {
+        if (!this.chatId)
+            throw new Error('No active chat. Send a message from Telegram first.');
+        const buf = await fs.promises.readFile(req.filePath);
+        const filename = path.basename(req.filePath);
+        const map = {
+            voice: { method: 'sendVoice', field: 'voice', mime: 'audio/ogg' },
+            audio: { method: 'sendAudio', field: 'audio', mime: this.guessAudioMime(filename) },
+            video: { method: 'sendVideo', field: 'video', mime: this.guessVideoMime(filename) },
+            document: { method: 'sendDocument', field: 'document', mime: 'application/octet-stream' },
+        };
+        const m = map[req.kind];
+        const messageId = await this.apiSendMultipart(m.method, m.field, this.chatId, buf, {
+            mime: m.mime,
+            filename,
+            caption: req.caption,
+            reply_markup: this.keyboardMarkup().reply_markup,
+        });
+        return { messageId };
+    }
+    guessAudioMime(filename) {
+        const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
+        if (ext === '.mp3')
+            return 'audio/mpeg';
+        if (ext === '.m4a')
+            return 'audio/mp4';
+        if (ext === '.ogg' || ext === '.opus')
+            return 'audio/ogg';
+        return 'application/octet-stream';
+    }
+    guessVideoMime(filename) {
+        const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
+        if (ext === '.mp4')
+            return 'video/mp4';
+        if (ext === '.mov')
+            return 'video/quicktime';
+        return 'application/octet-stream';
     }
     async sendInlineKeyboard(text, buttons) {
         if (!this.chatId)
@@ -160,22 +203,26 @@ export class TelegramChannel {
         const file = await this.apiCall('getFile', { file_id: fileId });
         return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
     }
-    /** Send a voice message (multipart/form-data for binary upload). */
-    async apiSendVoice(chatId, audio, opts) {
+    /**
+     * Shared multipart upload helper for sendVoice/sendAudio/sendVideo/sendDocument.
+     * Returns the Telegram `message_id` of the sent message.
+     */
+    async apiSendMultipart(method, field, chatId, file, opts) {
         const form = new FormData();
         form.append('chat_id', String(chatId));
-        form.append('voice', new Blob([new Uint8Array(audio)], { type: 'audio/ogg' }), 'voice.ogg');
-        if (opts?.reply_markup) {
+        form.append(field, new Blob([new Uint8Array(file)], { type: opts.mime }), opts.filename);
+        if (opts.caption)
+            form.append('caption', opts.caption);
+        if (opts.reply_markup)
             form.append('reply_markup', JSON.stringify(opts.reply_markup));
-        }
-        const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendVoice`, {
+        const res = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
             method: 'POST',
             body: form,
         });
         const data = await res.json();
         if (!data.ok)
-            throw new Error(`Telegram API error (sendVoice): ${data.description}`);
-        return data.result;
+            throw new Error(`Telegram API error (${method}): ${data.description}`);
+        return data.result.message_id;
     }
     /** Acknowledge a callback query. */
     async apiAnswerCallbackQuery(callbackQueryId) {

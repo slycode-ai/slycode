@@ -92,16 +92,92 @@ async function send(message: string, tts: boolean, port: number): Promise<void> 
   }
 }
 
+async function generate(
+  text: string,
+  opts: { voiceId?: string; outDir?: string; filename?: string; format?: 'ogg' | 'mp3' },
+  port: number,
+): Promise<void> {
+  const url = `http://localhost:${port}/tts/generate`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        ...(opts.voiceId !== undefined && { voiceId: opts.voiceId }),
+        ...(opts.outDir !== undefined && { outDir: opts.outDir }),
+        ...(opts.filename !== undefined && { filename: opts.filename }),
+        ...(opts.format !== undefined && { format: opts.format }),
+      }),
+    });
+    const data = await res.json() as { ok?: boolean; absolutePath?: string; path?: string; format?: string; bytes?: number; error?: string; message?: string };
+    if (!res.ok || !data.ok) {
+      console.error(`Error: ${data.error || 'unknown'}: ${data.message || 'no message'}`);
+      process.exit(1);
+    }
+    writeCachedPort(port);
+    console.log(data.absolutePath);
+  } catch (err) {
+    if ((err as Error).message.includes('ECONNREFUSED') || (err as Error).message === 'fetch failed') {
+      console.error('Error: Messaging service is not running. Start it with sly-start.sh or sly-dev.sh.');
+    } else {
+      console.error(`Error: ${(err as Error).message}`);
+    }
+    process.exit(1);
+  }
+}
+
+async function sendFile(filePath: string, caption: string | undefined, asOverride: 'document' | undefined, port: number): Promise<void> {
+  const url = `http://localhost:${port}/send/file`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: filePath,
+        cwd: process.cwd(),
+        ...(caption !== undefined && { caption }),
+        ...(asOverride !== undefined && { as: asOverride }),
+      }),
+    });
+    const data = await res.json() as { ok?: boolean; channel?: string; kind?: string; messageId?: number; bytes?: number; error?: string; message?: string };
+    if (!res.ok || !data.ok) {
+      console.error(`Error: ${data.error || 'unknown'}: ${data.message || 'no message'}`);
+      process.exit(1);
+    }
+    writeCachedPort(port);
+    console.log(`Sent ${data.kind} (channel=${data.channel}, message_id=${data.messageId}, bytes=${data.bytes})`);
+  } catch (err) {
+    if ((err as Error).message.includes('ECONNREFUSED') || (err as Error).message === 'fetch failed') {
+      console.error('Error: Messaging service is not running. Start it with sly-start.sh or sly-dev.sh.');
+    } else {
+      console.error(`Error: ${(err as Error).message}`);
+    }
+    process.exit(1);
+  }
+}
+
 function printUsage(): void {
-  console.log(`Usage: messaging-cli send <message> [--tts]
+  console.log(`Usage: messaging-cli <command> [args]
 
 Commands:
-  send <message>         Send a text message to the active channel
-  send <message> --tts   Send a voice message (text-to-speech)
+  send <message>                       Send a text message to the active channel
+  send <message> --tts                 Send a voice message (text-to-speech)
+  send-file <path> [--caption "..."]   Send an existing audio/video file
+                  [--as document]      Force document delivery (escape hatch
+                                       for unsupported MIME types)
+  generate <text> [--voice-id <id>]    Render TTS audio to disk without sending.
+                  [--out-dir <path>]   Default: data/generated-audio/<date>/.
+                  [--filename <name>]  Default format: ogg. Prints absolute
+                  [--format ogg|mp3]   path on success.
 
 Examples:
   messaging-cli send "The build is complete"
-  messaging-cli send "Here's a summary of the changes" --tts`);
+  messaging-cli send "Here's a summary of the changes" --tts
+  messaging-cli send-file ./tmp/preview.mp4 --caption "Confirm before posting?"
+  messaging-cli send-file ./logs/run.txt --as document
+  messaging-cli generate "intro for the new feature"
+  messaging-cli generate "[whispers] secret stuff" --format mp3 --out-dir /tmp`);
 }
 
 // Parse arguments
@@ -130,6 +206,118 @@ if (command === 'send') {
 
   const port = await detectPort();
   send(parsed, tts, port);
+} else if (command === 'send-file') {
+  // Parse: send-file <path> [--caption "..."] [--as document] [-- <path-with-leading-dash>]
+  const rest = args.slice(1);
+  let filePath: string | undefined;
+  let caption: string | undefined;
+  let asOverride: 'document' | undefined;
+  let i = 0;
+  let pastSeparator = false;
+  while (i < rest.length) {
+    const arg = rest[i];
+    if (!pastSeparator && arg === '--') {
+      pastSeparator = true;
+      i++;
+      continue;
+    }
+    if (!pastSeparator && arg === '--caption') {
+      caption = rest[i + 1];
+      if (caption === undefined) {
+        console.error('Error: --caption requires a value');
+        process.exit(1);
+      }
+      i += 2;
+      continue;
+    }
+    if (!pastSeparator && arg === '--as') {
+      const value = rest[i + 1];
+      if (value !== 'document') {
+        console.error("Error: --as only accepts 'document' in v1");
+        process.exit(1);
+      }
+      asOverride = 'document';
+      i += 2;
+      continue;
+    }
+    if (!pastSeparator && arg.startsWith('--')) {
+      console.error(`Error: unknown flag: ${arg}`);
+      process.exit(1);
+    }
+    if (filePath === undefined) {
+      filePath = arg;
+      i++;
+      continue;
+    }
+    console.error(`Error: unexpected argument: ${arg}`);
+    process.exit(1);
+  }
+
+  if (!filePath) {
+    console.error('Error: send-file requires a path argument');
+    printUsage();
+    process.exit(1);
+  }
+
+  const port = await detectPort();
+  sendFile(filePath, caption, asOverride, port);
+} else if (command === 'generate') {
+  // Parse: generate <text> [--voice-id <id>] [--out-dir <path>] [--filename <name>] [--format ogg|mp3]
+  const rest = args.slice(1);
+  let text: string | undefined;
+  let voiceId: string | undefined;
+  let outDir: string | undefined;
+  let filename: string | undefined;
+  let format: 'ogg' | 'mp3' | undefined;
+  let i = 0;
+  while (i < rest.length) {
+    const arg = rest[i];
+    if (arg === '--voice-id') {
+      voiceId = rest[i + 1];
+      if (voiceId === undefined) { console.error('Error: --voice-id requires a value'); process.exit(1); }
+      i += 2;
+      continue;
+    }
+    if (arg === '--out-dir') {
+      outDir = rest[i + 1];
+      if (outDir === undefined) { console.error('Error: --out-dir requires a value'); process.exit(1); }
+      i += 2;
+      continue;
+    }
+    if (arg === '--filename') {
+      filename = rest[i + 1];
+      if (filename === undefined) { console.error('Error: --filename requires a value'); process.exit(1); }
+      i += 2;
+      continue;
+    }
+    if (arg === '--format') {
+      const v = rest[i + 1];
+      if (v !== 'ogg' && v !== 'mp3') { console.error("Error: --format must be 'ogg' or 'mp3'"); process.exit(1); }
+      format = v;
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      console.error(`Error: unknown flag: ${arg}`);
+      process.exit(1);
+    }
+    if (text === undefined) {
+      text = arg;
+      i++;
+      continue;
+    }
+    console.error(`Error: unexpected argument: ${arg}`);
+    process.exit(1);
+  }
+
+  if (!text) {
+    console.error('Error: generate requires a text argument');
+    printUsage();
+    process.exit(1);
+  }
+
+  const port = await detectPort();
+  await generate(text, { voiceId, outDir, filename, format }, port);
 } else {
   console.error(`Unknown command: ${command}`);
   printUsage();
