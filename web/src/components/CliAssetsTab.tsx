@@ -113,11 +113,15 @@ export function CliAssetsTab() {
     }
   }, [initialFocusSkill, pathname, router]);
 
-  // Scroll the focused row into view + flash highlight after data lands.
+  // Scroll the focused row into view + flash highlight. We can't assume the
+  // matrix/updates list is in the DOM by the time the effect fires (data/
+  // updatesData load async after mount), so retry every 200ms up to ~3s and
+  // only clear focusSkill once we actually find the element.
   useEffect(() => {
     if (!focusSkill) return;
-    // Wait a tick for the active view to render its rows.
-    const t = setTimeout(() => {
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts += 1;
       const el = document.querySelector(
         `[data-skill-focus="${CSS.escape(focusSkill)}"]`,
       ) as HTMLElement | null;
@@ -125,11 +129,16 @@ export function CliAssetsTab() {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('skill-focus-pulse');
         setTimeout(() => el.classList.remove('skill-focus-pulse'), 2500);
+        clearInterval(interval);
+        setFocusSkill(null);
+      } else if (attempts >= 15) {
+        // ~3s budget — give up so we don't leak the interval.
+        clearInterval(interval);
+        setFocusSkill(null);
       }
-      setFocusSkill(null);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [focusSkill, data, updatesData, activeView]);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [focusSkill, activeView]);
 
   const fetchCliAssets = useCallback(async (signal: AbortSignal) => {
     try {

@@ -68,7 +68,6 @@ export async function GET(
     status?: string;
     answered?: number;
     answerable?: number;
-    requiredMissing?: number;
     error?: string;
   }> = [];
 
@@ -84,7 +83,6 @@ export async function GET(
         status: q.status,
         answered: counts.answered,
         answerable: counts.answerable,
-        requiredMissing: counts.requiredMissing,
       });
     } catch (err) {
       items.push({

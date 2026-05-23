@@ -31,4 +31,35 @@ export function escapeRegex(s) {
 export function projectKeyAlternation(project) {
     return projectSessionKeys(project).map(escapeRegex).join('|');
 }
+/**
+ * Resolve an arbitrary project key (canonical project.id, sessionKey, or
+ * sessionKeyAlias) to the canonical project.id. Used by the Telegram
+ * sw_card_ / sw_proj_ callback handlers, which can receive any of those
+ * forms depending on when the button was emitted: post-fix buttons embed
+ * canonical project.id; pre-fix buttons still in Telegram history embed
+ * sessionKey; buttons emitted before a dashboard path rename embed the
+ * old sessionKey (now living in sessionKeyAliases).
+ *
+ * Match order is intentional: id → sessionKey → alias. Returns null when
+ * nothing matches.
+ */
+export function resolveCanonicalProjectId(key, projects) {
+    const byId = projects.find(p => p.id === key);
+    if (byId)
+        return { id: byId.id, via: 'id' };
+    const bySessionKey = projects.find(p => {
+        const sk = p.sessionKey ?? computeSessionKey(p.path);
+        return sk === key;
+    });
+    if (bySessionKey)
+        return { id: bySessionKey.id, via: 'sessionKey' };
+    const byAlias = projects.find(p => {
+        const sk = p.sessionKey ?? computeSessionKey(p.path);
+        const aliases = p.sessionKeyAliases ?? (p.id !== sk ? [p.id] : []);
+        return aliases.includes(key);
+    });
+    if (byAlias)
+        return { id: byAlias.id, via: 'alias' };
+    return null;
+}
 //# sourceMappingURL=session-keys.js.map

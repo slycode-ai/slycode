@@ -47,9 +47,17 @@ loadParentEnv();
 
 const BRIDGE_URL = getBridgeUrl();
 const CONFIGURED_TIMEZONE = process.env.TZ || 'UTC';
-const CHECK_INTERVAL_MS = 30_000; // Check every 30 seconds
-const GRACE_WINDOW_MS = 60_000;   // Only catch up ticks missed within this window
+const CHECK_INTERVAL_MS = 30_000;                     // Check every 30 seconds
+const GRACE_WINDOW_MS = 60_000;                       // Catch up recently-missed ticks when lastRun is present
+const FIRST_FIRE_WINDOW_MS = 24 * 60 * 60 * 1000;     // For never-run automations: catch a missed tick up to 24h old
+const RE_FIRE_GUARD_MS = 60_000;                      // Minimum gap between fires for the same automation (prevents self-perpetuating loops)
+const MAX_KICKOFFS_PER_TICK = 1;                      // Cap parallel kickoffs per scheduler tick (avoids rapid-succession session-association issues)
 const FETCH_TIMEOUT_MS = 10_000;  // Timeout for bridge HTTP calls
+
+// NOTE: kanban.json is read-modify-write without a cross-process lock. If two
+// scheduler processes share the same documentation/kanban.json (e.g. dev :3003
+// AND prod :7591 running at once on the same machine), they can double-fire
+// the same automation. Run only one scheduler instance per kanban.json.
 
 const AUTOMATION_LOG_PATH = path.join(os.homedir(), '.slycode', 'logs', 'automation.log');
 const AUTOMATION_LOG_MAX_BYTES = 1_000_000; // 1MB cap
@@ -231,28 +239,63 @@ export function getNextRun(schedule: string, scheduleType: 'recurring' | 'one-sh
 
 /**
  * Check if an automation is due to fire.
- * For recurring schedules, compute next tick from lastRun using croner.
- * For one-shot, use the stored schedule (ISO datetime) directly.
+ *
+ * Primary check (recurring): trust stored `config.nextRun` — populated by the
+ * web UI's refreshNextRun on save and by the post-fire recompute. This makes
+ * the frontend `NOW` badge and the scheduler firing decision share a source
+ * of truth.
+ *
+ * Fallback (recurring): when `nextRun` is missing/unparseable, compute from
+ * the cron + a reference time. The reference uses two distinct windows:
+ *
+ *   - lastRun present     → ref = max(lastRun, now - GRACE_WINDOW_MS).
+ *                            Suppresses stale ticks from long-disabled
+ *                            automations (re-enable shouldn't fire a backlog).
+ *   - lastRun null        → ref = now - FIRST_FIRE_WINDOW_MS (24h).
+ *                            Catches the "created today for a tick that
+ *                            already passed" case (e.g. created 22:30 with
+ *                            cron "0 22 * * *").
+ *
+ * Re-fire guard: if `lastRun` is within the last RE_FIRE_GUARD_MS, suppress.
+ * Prevents self-perpetuating loops when post-fire recompute lands another
+ * past `nextRun` (fire took longer than one cron period; or process died
+ * before the line ~723 recompute landed).
+ *
+ * One-shot: unchanged — uses the stored ISO timestamp directly.
  */
-function isDue(config: AutomationConfig): boolean {
+export function isDue(config: AutomationConfig): boolean {
   if (!config.enabled || !config.schedule) return false;
+  const now = Date.now();
 
   if (config.scheduleType === 'one-shot') {
     const target = new Date(config.schedule);
-    return !isNaN(target.getTime()) && target.getTime() <= Date.now();
+    return !isNaN(target.getTime()) && target.getTime() <= now;
   }
 
-  // Recurring: compute next tick using a grace-aware reference point.
-  // If lastRun exists, clamp it to at most GRACE_WINDOW_MS ago so stale
-  // ticks (from long-disabled automations) are invisible.
-  // If never run, use now — new automations always wait for their first tick.
+  // Re-fire guard: never fire twice within RE_FIRE_GUARD_MS of the previous fire.
+  if (config.lastRun) {
+    const lastRunMs = new Date(config.lastRun).getTime();
+    if (!isNaN(lastRunMs) && (now - lastRunMs) < RE_FIRE_GUARD_MS) {
+      return false;
+    }
+  }
+
+  // Primary: trust stored config.nextRun when it's a valid timestamp.
+  if (config.nextRun) {
+    const nextRunMs = new Date(config.nextRun).getTime();
+    if (!isNaN(nextRunMs)) {
+      return nextRunMs <= now;
+    }
+  }
+
+  // Fallback: nextRun missing or unparseable — compute from cron.
   try {
     const job = new Cron(config.schedule, { timezone: CONFIGURED_TIMEZONE });
-    const now = Date.now();
-    const ref = config.lastRun
-      ? new Date(Math.max(new Date(config.lastRun).getTime(), now - GRACE_WINDOW_MS))
-      : new Date(now);
-    const nextTick = job.nextRun(ref);
+    const refFloor = config.lastRun
+      ? Math.max(new Date(config.lastRun).getTime(), now - GRACE_WINDOW_MS)
+      : now - FIRST_FIRE_WINDOW_MS;
+    // -1ms so a tick landing exactly at refFloor counts as "next" rather than "past".
+    const nextTick = job.nextRun(new Date(refFloor - 1));
     if (!nextTick) return false;
     return nextTick.getTime() <= now;
   } catch {
@@ -670,10 +713,14 @@ async function sendErrorNotification(cardTitle: string, error: string, sessionNa
  */
 async function checkAutomations(): Promise<void> {
   state.lastCheck = new Date().toISOString();
+  let kickoffsThisTick = 0;
 
   try {
     const registry = await loadRegistry();
 
+    // Labeled loop so we can stop scanning once we hit the per-tick cap.
+    // Deferred cards naturally pick up on the next 30s tick.
+    scanLoop:
     for (const project of registry.projects) {
       const kanbanPath = path.join(project.path, 'documentation', 'kanban.json');
 
@@ -691,7 +738,30 @@ async function checkAutomations(): Promise<void> {
           if (card.archived) continue;
           if (state.activeKickoffs.has(card.id)) continue;
 
+          // Self-heal: a CLI-created or legacy automation may lack nextRun.
+          // Compute and persist it so the frontend NOW badge and isDue() share
+          // a single source of truth from this point forward.
+          if (card.automation.schedule && !card.automation.nextRun) {
+            const computed = getNextRun(card.automation.schedule, card.automation.scheduleType);
+            if (computed) {
+              const iso = computed.toISOString();
+              try {
+                await updateCardAutomation(project.path, card.id, { nextRun: iso });
+                card.automation.nextRun = iso; // keep in-memory copy consistent
+              } catch {
+                // Non-fatal — isDue's fallback path will still handle it this tick.
+              }
+            }
+          }
+
           if (isDue(card.automation)) {
+            if (kickoffsThisTick >= MAX_KICKOFFS_PER_TICK) {
+              // Cap reached. Stop the entire scan — remaining due cards fire on
+              // subsequent ticks. This avoids rapid-succession session-association
+              // bugs when many automations unstick at once (e.g. post-deploy).
+              break scanLoop;
+            }
+            kickoffsThisTick++;
             state.activeKickoffs.add(card.id);
 
             // Write lastRun BEFORE kickoff so it survives server restarts.

@@ -68,6 +68,12 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
   const router = useRouter();
   const inferredTag = useMemo(() => inferProjectTag(projectName), [projectName]);
   const [tag, setTag] = useState('');
+  // Snapshot of the last successfully-loaded/saved values, used to compute the
+  // dirty flag. When `tag !== savedTag` or the shortcuts JSON differs from
+  // savedShortcutsJson, there are unsaved changes — surface that prominently
+  // so users don't close the modal thinking their pre-fill was persisted.
+  const [savedTag, setSavedTag] = useState('');
+  const [savedShortcutsJson, setSavedShortcutsJson] = useState('[]');
   const [drafts, setDrafts] = useState<ShortcutDraft[]>([]);
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [tagMap, setTagMap] = useState<TagMap>({});
@@ -104,11 +110,15 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
         if (cancelled) return;
         if (shortcutsRes.ok) {
           const file = (await shortcutsRes.json()) as ShortcutsFile;
-          // Pre-fill with the inferred tag when the project has none yet —
-          // user can edit before saving. Saved tag wins if present.
-          setTag(file.projectTag || inferredTag);
+          // Only fill the input with the saved tag. The inferred value is
+          // surfaced as a "Suggested: X — Use" hint below the input so the
+          // unsaved state is honest (the inferred tag only affects disk
+          // after the user clicks Save).
+          setTag(file.projectTag || '');
+          setSavedTag(file.projectTag || '');
           const initialDrafts = withKeys(file);
           setDrafts(initialDrafts);
+          setSavedShortcutsJson(JSON.stringify(file.shortcuts || []));
           // Existing shortcuts start collapsed for a tidy list.
           setCollapsed(new Set(initialDrafts.map((d) => d._key)));
         }
@@ -239,6 +249,9 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
         return;
       }
       setSavedAt(Date.now());
+      // Snapshot the just-persisted state so the dirty flag resets to clean.
+      setSavedTag(body.projectTag);
+      setSavedShortcutsJson(JSON.stringify(body.shortcuts));
       setTimeout(() => setSavedAt(null), 1500);
     } catch (err) {
       console.error(err);
@@ -253,10 +266,33 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
   // typed, else the inferred default, else a generic placeholder.
   const exampleTag = (tag.trim().toLowerCase() || inferredTag || 'tag');
 
+  // Dirty = any field differs from the last loaded/saved snapshot. Drives the
+  // Save-button highlight, the dirty badge in the footer, and the warn-on-close.
+  const currentShortcutsJson = useMemo(() => JSON.stringify(stripKeys(drafts)), [drafts]);
+  const isDirty = tag.trim().toLowerCase() !== savedTag || currentShortcutsJson !== savedShortcutsJson;
+
+  // Wrap onClose so users don't lose work by clicking away — but only ask
+  // if there's something actually unsaved.
+  const handleClose = useCallback(() => {
+    if (isDirty) {
+      const ok = typeof window !== 'undefined'
+        ? window.confirm('You have unsaved changes. Discard and close?')
+        : true;
+      if (!ok) return;
+    }
+    onClose();
+  }, [isDirty, onClose]);
+
+  // Only show the suggestion when the input is empty AND we have an inferred
+  // candidate. Hiding it once typed avoids steering the user away from their
+  // chosen value.
+  const showSuggestion = !tag && !!inferredTag && !savedTag;
+  const applySuggestion = () => setTag(inferredTag);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
       <div className="flex h-[90vh] w-[90vw] max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-(--shadow-overlay) dark:bg-void-900">
         {/* Header */}
@@ -266,7 +302,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
             <p className="text-xs text-void-500 dark:text-void-400">Project: {projectName}</p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md p-1 text-void-500 hover:bg-void-100 hover:text-void-800 dark:text-void-400 dark:hover:bg-void-800 dark:hover:text-void-200"
             aria-label="Close"
           >
@@ -284,17 +320,29 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
               {/* Project tag */}
               <section className="mb-6">
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-void-500 dark:text-void-400">Project tag</label>
-                <input
-                  value={tag}
-                  onChange={(e) => setTag(e.target.value.toLowerCase())}
-                  placeholder={inferredTag || 'cm'}
-                  maxLength={6}
-                  className={`w-32 rounded-md border bg-white px-2 py-1.5 font-mono text-sm dark:bg-void-800 ${
-                    liveTagError || tagError
-                      ? 'border-red-400 focus:outline-none focus:ring-2 focus:ring-red-300'
-                      : 'border-void-300 focus:border-neon-blue-400 focus:outline-none focus:ring-2 focus:ring-neon-blue-200 dark:border-void-700'
-                  }`}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    value={tag}
+                    onChange={(e) => setTag(e.target.value.toLowerCase())}
+                    placeholder={inferredTag || 'cm'}
+                    maxLength={6}
+                    className={`w-32 rounded-md border bg-white px-2 py-1.5 font-mono text-sm dark:bg-void-800 ${
+                      liveTagError || tagError
+                        ? 'border-red-400 focus:outline-none focus:ring-2 focus:ring-red-300'
+                        : 'border-void-300 focus:border-neon-blue-400 focus:outline-none focus:ring-2 focus:ring-neon-blue-200 dark:border-void-700'
+                    }`}
+                  />
+                  {showSuggestion && (
+                    <button
+                      type="button"
+                      onClick={applySuggestion}
+                      className="rounded-md border border-amber-400/50 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-400/20 dark:text-amber-300"
+                      title="Use the suggested tag (you still need to click Save)"
+                    >
+                      Suggest: <span className="font-mono">{inferredTag}</span>
+                    </button>
+                  )}
+                </div>
                 {(liveTagError || tagError) && (
                   <p className="mt-1 text-xs text-red-600 dark:text-red-400">{liveTagError || tagError}</p>
                 )}
@@ -536,20 +584,33 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-void-200 px-6 py-3 dark:border-void-700">
-          <span className="text-xs text-void-500">
-            {savedAt ? 'Saved.' : ''}
+          <span className="text-xs">
+            {savedAt ? (
+              <span className="text-emerald-600 dark:text-emerald-400">Saved.</span>
+            ) : isDirty ? (
+              <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Unsaved changes
+              </span>
+            ) : (
+              <span className="text-void-500">&nbsp;</span>
+            )}
           </span>
           <div className="flex gap-2">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="rounded-md border border-void-300 px-3 py-1.5 text-sm text-void-700 hover:bg-void-100 dark:border-void-600 dark:text-void-200 dark:hover:bg-void-800"
             >
               Close
             </button>
             <button
               onClick={handleSave}
-              disabled={saving || hasErrors}
-              className="rounded-md bg-neon-blue-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={saving || hasErrors || !isDirty}
+              className={`rounded-md px-4 py-1.5 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+                isDirty && !hasErrors
+                  ? 'bg-neon-blue-500 shadow-[0_0_12px_rgba(0,191,255,0.45)] hover:bg-neon-blue-600'
+                  : 'bg-neon-blue-500 hover:bg-neon-blue-600'
+              }`}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>

@@ -2773,15 +2773,12 @@ function _qIsAnswerFilled(item) {
 function _qCounts(q) {
   let answered = 0;
   let answerable = 0;
-  let requiredMissing = 0;
   for (const item of q.items || []) {
     if (!_qIsAnswerable(item)) continue;
     answerable++;
-    const filled = _qIsAnswerFilled(item);
-    if (filled) answered++;
-    if (item.required && !filled) requiredMissing++;
+    if (_qIsAnswerFilled(item)) answered++;
   }
-  return { answered, answerable, requiredMissing };
+  return { answered, answerable };
 }
 
 function _qFormatAnswer(item) {
@@ -2942,11 +2939,8 @@ function _cmdQuestionnaireList(args) {
     try {
       const { q } = _qLoad(ref);
       const counts = _qCounts(q);
-      const required = counts.requiredMissing > 0
-        ? `  ${counts.requiredMissing} required missing`
-        : '';
       console.log(
-        `${q.name}  [${q.status}]  ${counts.answered}/${counts.answerable} answered${required}`
+        `${q.name}  [${q.status}]  ${counts.answered}/${counts.answerable} answered`
       );
       console.log(`   ${ref}`);
     } catch (err) {

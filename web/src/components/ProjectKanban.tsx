@@ -99,6 +99,83 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const [creatingState, setCreatingState] = useState<CardCreatingState>({ status: 'idle' });
   const lastCreatePayloadRef = useRef<NewCardData | null>(null);
 
+  // Drag-to-pan on the kanban board's horizontal scroll container.
+  // Pointer-down on empty lane / board background captures the pointer and
+  // translates scrollLeft as the user drags. Cards, headers, and interactive
+  // elements are excluded by target filtering so existing click / native-DnD /
+  // text-selection behavior is preserved.
+  const boardScrollRef = useRef<HTMLDivElement>(null);
+  const panStateRef = useRef<{
+    startX: number;
+    startScrollLeft: number;
+    pointerId: number;
+    moved: boolean;
+  } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const PAN_MOVE_THRESHOLD = 4; // px before a press counts as a drag
+
+  const handleBoardPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Desktop-only: skip touch (browser handles native touch scroll fine).
+    if (e.pointerType === 'touch') return;
+    // Primary button only.
+    if (e.button !== 0) return;
+
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    // Skip cards (native HTML5 DnD), column headers (text), and interactive elements.
+    if (target.closest('[draggable="true"]')) return;
+    if (target.closest('h1, h2, h3, h4, h5, h6')) return;
+    if (target.closest('button, a, input, textarea, select, [contenteditable="true"], [role="button"]')) return;
+
+    const container = boardScrollRef.current;
+    if (!container) return;
+
+    panStateRef.current = {
+      startX: e.clientX,
+      startScrollLeft: container.scrollLeft,
+      pointerId: e.pointerId,
+      moved: false,
+    };
+    try { container.setPointerCapture(e.pointerId); } catch { /* synthetic events have no live pointer */ }
+    // Flip isPanning eagerly (before threshold) so snap-mandatory softens to
+    // snap-proximity in the CSS BEFORE the first scrollLeft assignment in
+    // pointermove. Without this, snap-mandatory fights the early pixels of
+    // scroll on narrow viewports and the pan feels stuck.
+    setIsPanning(true);
+  }, []);
+
+  const handleBoardPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = panStateRef.current;
+    if (!state || e.pointerId !== state.pointerId) return;
+
+    const dx = e.clientX - state.startX;
+    if (!state.moved) {
+      if (Math.abs(dx) < PAN_MOVE_THRESHOLD) return;
+      state.moved = true;
+    }
+    const container = boardScrollRef.current;
+    if (container) {
+      container.scrollLeft = state.startScrollLeft - dx;
+    }
+    e.preventDefault();
+  }, []);
+
+  const endBoardPan = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = panStateRef.current;
+    if (!state || e.pointerId !== state.pointerId) return;
+
+    const container = boardScrollRef.current;
+    if (container) {
+      try {
+        if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId);
+      } catch { /* defensive — synthetic events */ }
+    }
+    panStateRef.current = null;
+    setIsPanning(false);
+  }, []);
+
   // Quick-launch shortcut state — populated when ProjectKanban is opened via
   // /project/<id>/<token>. The token route resolves and redirects with these
   // params on the canonical project URL; this component consumes them, hands
@@ -1158,7 +1235,23 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           />
         ) : (
           /* Kanban Board */
-          <div className="flex-1 overflow-x-auto p-4 pt-2 snap-x snap-mandatory sm:snap-none">
+          <div
+            ref={boardScrollRef}
+            onPointerDown={handleBoardPointerDown}
+            onPointerMove={handleBoardPointerMove}
+            onPointerUp={endBoardPan}
+            onPointerCancel={endBoardPan}
+            className={`flex-1 overflow-x-auto p-4 pt-2 sm:snap-none ${
+              // Mutually-exclusive snap modes. During pan we drop the snap-x
+              // declaration entirely (not just override its strictness) — the
+              // browser snaps programmatic scrollLeft writes back to the
+              // nearest snap point even with proximity strictness, so any
+              // snap declaration on the scroll axis makes the pan feel stuck
+              // on narrow viewports. snap-mandatory is restored on release.
+              isPanning
+                ? 'snap-none cursor-grabbing select-none [&_*]:!cursor-grabbing'
+                : 'snap-x snap-mandatory cursor-grab'
+            }`}>
             <div className="mx-auto flex h-full w-full max-w-[1984px] gap-4">
               {STAGE_CONFIG.map((stageConfig) => (
                 <KanbanColumn

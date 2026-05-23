@@ -1,6 +1,6 @@
 ---
 name: kanban
-version: 1.11.0
+version: 1.11.1
 updated: 2026-05-06
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
@@ -395,7 +395,7 @@ The agent writes the JSON file directly — same pattern as feature specs.
 | `scale` | Segmented integer scale (e.g. 1-5). Requires `min` and `max`; optional `step` (default 1). | `number` |
 | `number` | Free numeric input. Optional `min`, `max`, `step`. | `number` |
 
-**Required questions** (`required: true`) block Submit until answered. Use sparingly — only for things the agent genuinely can't proceed without.
+**All questions are optional.** Do not add `required: true` flags — they are intentionally unsupported. If the user skips a question and you genuinely need the answer, ask in chat after Submit lands.
 
 **Item ids** (`q1`, `q2`, …) are load-bearing for the autosave pipeline — the UI patches answers by id. When editing an existing questionnaire you may freely reorder, rename labels, or change wording, but **do not rename or remove ids while a user might be filling it out**. If you do need a structural change after answers exist, the saved values are preserved as-is (the UI shows "(no longer in options)" for stale choice answers).
 
@@ -425,8 +425,6 @@ The agent writes the JSON file directly — same pattern as feature specs.
 - `boolean` → `id`, `question`, `answer`
 - `scale` → `id`, `question`, `min`, `max` (must satisfy `min < max`), `answer`. Optional: `step` (default 1, must be > 0)
 - `number` → `id`, `question`, `answer`. Optional: `min`, `max`, `step` (must be > 0 if set)
-
-All non-exposition items also accept `required: true` (default false).
 
 **Authoring rules:**
 

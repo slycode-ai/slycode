@@ -12,7 +12,7 @@ import { transcribeAudio, validateSttConfig } from './stt.js';
 import { renderTtsAudio } from './tts.js';
 import * as audioArchive from './audio-archive.js';
 import { searchVoices } from './voices.js';
-import { projectSessionKeys, escapeRegex } from './session-keys.js';
+import { projectSessionKeys, escapeRegex, resolveCanonicalProjectId } from './session-keys.js';
 import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
 import { preflightFile, resolveSendKind, FileSendError, preflightWritePath } from './file-send.js';
 import { buildGeneratedFilename, todayDateString } from './audio-utils.js';
@@ -1245,8 +1245,22 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             return;
         }
         if (data.startsWith('sw_proj_')) {
-            const projectId = data.replace('sw_proj_', '');
-            state.selectProject(projectId);
+            const rawProjectId = data.replace('sw_proj_', '');
+            // Handler-side resolver: accept canonical id, sessionKey, or alias so
+            // old buttons from before the emit-side fix (or from before a dashboard
+            // path rename) still resolve.
+            const resolved = resolveCanonicalProjectId(rawProjectId, state.getProjects());
+            if (!resolved) {
+                console.log(`[sw-resolver] handler sw_proj_: no project matched key='${rawProjectId}'`);
+                await channel.sendText('⚠️ Error changing to project (no matching project).');
+                return;
+            }
+            console.log(`[sw-resolver] handler sw_proj_: key='${rawProjectId}' resolved via ${resolved.via} → project.id='${resolved.id}'`);
+            const projectId = resolved.id;
+            if (!state.selectProject(projectId)) {
+                await channel.sendText('⚠️ Error changing to project.');
+                return;
+            }
             // Resolve provider: sticky override > earliest bridge session > global default
             const override = state.getProviderOverride();
             if (override) {
@@ -1273,7 +1287,22 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         if (data.startsWith('sw_card_')) {
             const payload = data.replace('sw_card_', '');
             // Format: cardId or cardId|projectId (the latter from mismatch switch buttons)
-            const [cardId, explicitProjectId] = payload.split('|');
+            const [cardId, rawExplicitProjectId] = payload.split('|');
+            // Handler-side resolver: accept canonical id, sessionKey, or alias so
+            // old buttons from before the emit-side fix (or from before a dashboard
+            // path rename) still resolve. Run BEFORE the cross-project comparison
+            // below so same-project switches aren't wrongly treated as cross-project.
+            let explicitProjectId;
+            if (rawExplicitProjectId) {
+                const resolved = resolveCanonicalProjectId(rawExplicitProjectId, state.getProjects());
+                if (!resolved) {
+                    console.log(`[sw-resolver] handler sw_card_: no project matched key='${rawExplicitProjectId}' (cardId='${cardId}')`);
+                    await channel.sendText('⚠️ Error changing to card (project not found).');
+                    return;
+                }
+                console.log(`[sw-resolver] handler sw_card_: key='${rawExplicitProjectId}' resolved via ${resolved.via} → project.id='${resolved.id}'`);
+                explicitProjectId = resolved.id;
+            }
             const projectId = explicitProjectId || state.getTarget().projectId;
             if (!projectId) {
                 await channel.sendText('No project selected.');
@@ -1286,7 +1315,12 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             }
             // Look up card to get its stage
             const cardInfo = kanban.getCard(projectId, cardId);
-            const cardStage = cardInfo?.stage;
+            if (!cardInfo) {
+                console.log(`[sw-resolver] handler sw_card_: card not found project='${projectId}' cardId='${cardId}'`);
+                await channel.sendText('⚠️ Error changing to card (card not found — it may have been archived or removed).');
+                return;
+            }
+            const cardStage = cardInfo.stage;
             state.selectCard(projectId, cardId, cardStage);
             // Resolve provider: sticky override > earliest bridge session > stage default > global default
             const override = state.getProviderOverride();
@@ -1535,7 +1569,18 @@ async function main() {
         const parts = sessionName.split(':');
         if (parts[0] === 'global')
             return 'sw_global';
-        const projectId = parts[0];
+        // Session names are keyed on canonical sessionKey, but the sw_card_/sw_proj_
+        // handlers (and downstream state.selectProject / kanban.getCard) expect the
+        // canonical project.id. Resolve up-front so new buttons carry the canonical
+        // id on the wire — keeps the handler's lookups straightforward and makes
+        // the handler-side comparison at `explicitProjectId !== target.projectId`
+        // meaningful again (id vs id, not sessionKey vs id).
+        const resolved = resolveCanonicalProjectId(parts[0], state.getProjects());
+        if (!resolved) {
+            console.log(`[sw-resolver] emit: no project matched key='${parts[0]}' for session='${sessionName}' — no switch button`);
+            return null;
+        }
+        const projectId = resolved.id;
         if (parts.includes('card') && parts.length >= 4) {
             const cardId = parts[parts.length - 1];
             return `sw_card_${cardId}|${projectId}`;

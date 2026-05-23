@@ -15,7 +15,6 @@ interface IndexItem {
   status?: string;
   answered?: number;
   answerable?: number;
-  requiredMissing?: number;
   error?: string;
 }
 
@@ -53,8 +52,6 @@ export function QuestionnaireTab({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitToast, setSubmitToast] = useState<string | null>(null);
-  const [missingHighlight, setMissingHighlight] = useState<string | null>(null);
-  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Fetch index whenever the card's refs change.
   useEffect(() => {
@@ -233,21 +230,6 @@ export function QuestionnaireTab({
 
   const counts = useMemo(() => (questionnaire ? computeCounts(questionnaire) : null), [questionnaire]);
 
-  const handleDisabledSubmitClick = useCallback(() => {
-    if (!questionnaire) return;
-    const firstMissing = questionnaire.items.find((it) => isAnswerable(it) && it.required && !isAnswerFilled(it)) as
-      | AnswerableItem
-      | undefined;
-    if (firstMissing) {
-      const node = itemRefs.current[firstMissing.id];
-      if (node) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setMissingHighlight(firstMissing.id);
-        setTimeout(() => setMissingHighlight(null), 1500);
-      }
-    }
-  }, [questionnaire]);
-
   // ------ Empty state ------
   if (refs.length === 0) {
     return (
@@ -319,11 +301,6 @@ export function QuestionnaireTab({
                     {item.answered ?? 0} / {item.answerable} answered
                   </span>
                 )}
-                {item.requiredMissing !== undefined && item.requiredMissing > 0 && (
-                  <span className="font-mono text-xs text-amber-600 dark:text-amber-400">
-                    {item.requiredMissing} required missing
-                  </span>
-                )}
               </div>
             </div>
           </button>
@@ -375,11 +352,7 @@ export function QuestionnaireTab({
                 <ItemControl
                   key={isAnswerable(item) ? item.id : `exp-${idx}`}
                   item={item}
-                  highlight={isAnswerable(item) && missingHighlight === item.id}
                   onChange={(value, debounce) => isAnswerable(item) && updateAnswer(item.id, value, debounce ?? 0)}
-                  containerRef={(el) => {
-                    if (isAnswerable(item)) itemRefs.current[item.id] = el;
-                  }}
                 />
               ))}
             </div>
@@ -400,11 +373,6 @@ export function QuestionnaireTab({
               <span className="font-mono">
                 {counts.answered} / {counts.answerable} answered
               </span>
-              {counts.requiredMissing > 0 && (
-                <span className="ml-2 font-mono text-amber-600 dark:text-amber-400">
-                  · {counts.requiredMissing} required missing
-                </span>
-              )}
               {questionnaire.submission_count > 0 && questionnaire.submitted_at && (
                 <span className="ml-2 text-[10px] opacity-70">
                   · submitted {questionnaire.submission_count}× (last:{' '}
@@ -412,19 +380,13 @@ export function QuestionnaireTab({
                 </span>
               )}
             </div>
-            <div onClick={submitDisabled() ? handleDisabledSubmitClick : undefined}>
-              <button
-                onClick={handleSubmit}
-                disabled={submitDisabled()}
-                className="rounded-lg border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none"
-              >
-                {submitting
-                  ? 'Submitting…'
-                  : counts.requiredMissing > 0
-                  ? `Submit (${counts.requiredMissing} required missing)`
-                  : 'Submit to terminal'}
-              </button>
-            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={submitDisabled()}
+              className="rounded-lg border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none"
+            >
+              {submitting ? 'Submitting…' : 'Submit to terminal'}
+            </button>
           </div>
         </div>
       )}
@@ -434,7 +396,6 @@ export function QuestionnaireTab({
   function submitDisabled(): boolean {
     if (!questionnaire || !counts) return true;
     if (submitting) return true;
-    if (counts.requiredMissing > 0) return true;
     if (saveState === 'saving' || saveState === 'failed') return true;
     return false;
   }
@@ -469,14 +430,10 @@ function SaveStatusBadge({ state, error }: { state: SaveState; error: string | n
 
 function ItemControl({
   item,
-  highlight,
   onChange,
-  containerRef,
 }: {
   item: QuestionnaireItem;
-  highlight?: boolean;
   onChange: (value: unknown, debounceMs?: number) => void;
-  containerRef?: (el: HTMLDivElement | null) => void;
 }) {
   if (item.type === 'exposition') {
     return (
@@ -486,17 +443,10 @@ function ItemControl({
     );
   }
 
-  const wrapperClass = `rounded-md border px-3 py-2.5 transition-all ${
-    highlight
-      ? 'border-amber-400/80 bg-amber-50/40 dark:border-amber-500/60 dark:bg-amber-950/20 ring-2 ring-amber-400/50'
-      : 'border-void-200/60 bg-white/30 dark:border-void-700/40 dark:bg-void-900/30'
-  }`;
-
   return (
-    <div ref={containerRef} className={wrapperClass}>
+    <div className="rounded-md border border-void-200/60 bg-white/30 px-3 py-2.5 dark:border-void-700/40 dark:bg-void-900/30">
       <label className="mb-1.5 block text-sm font-medium text-void-900 dark:text-void-100">
         {item.question}
-        {item.required && <span className="ml-1 text-red-500">*</span>}
       </label>
       {renderInput(item, onChange)}
     </div>
@@ -666,7 +616,13 @@ function SingleChoiceInput({
         canClear={item.answer !== null}
         onClear={() => onChange(null)}
         canAddOther={!showOther}
-        onAddOther={() => setUserAddedOther(true)}
+        onAddOther={() => {
+          setUserAddedOther(true);
+          // Auto-select Other so the question registers as answered.
+          // Without this the radio just appears unselected and required-check
+          // still fails, which surprised users in testing.
+          onChange('Other:');
+        }}
       />
     </div>
   );
@@ -744,7 +700,12 @@ function MultiChoiceInput({
       <ChoiceFooter
         canClear={false}
         canAddOther={!showOther}
-        onAddOther={() => setUserAddedOther(true)}
+        onAddOther={() => {
+          setUserAddedOther(true);
+          // Auto-check Other so the question registers as answered (matches
+          // the singular case — click +Other and you've added it).
+          if (!isOther) onChange([...current, 'Other:']);
+        }}
       />
     </div>
   );
@@ -824,13 +785,10 @@ function isAnswerFilled(item: AnswerableItem): boolean {
 function computeCounts(q: Questionnaire) {
   let answered = 0;
   let answerable = 0;
-  let requiredMissing = 0;
   for (const item of q.items) {
     if (!isAnswerable(item)) continue;
     answerable++;
-    const filled = isAnswerFilled(item);
-    if (filled) answered++;
-    if (item.required && !filled) requiredMissing++;
+    if (isAnswerFilled(item)) answered++;
   }
-  return { answered, answerable, requiredMissing };
+  return { answered, answerable };
 }

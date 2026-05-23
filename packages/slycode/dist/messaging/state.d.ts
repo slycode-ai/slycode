@@ -8,6 +8,7 @@ export declare class StateManager {
     private selectedProvider;
     private selectedModel;
     private providerOverrides;
+    private targetPrefs;
     private _pendingInstructionFileConfirm;
     private chatId;
     constructor();
@@ -17,6 +18,14 @@ export declare class StateManager {
     getProjects(): Project[];
     getSelectedProject(): Project | null;
     reloadProjects(): void;
+    /**
+     * For every project in the registry, ensure targetPrefs has explicit values
+     * for any field that's currently missing. Anchors with the current top-level
+     * (most-recently-set) value at the moment of anchoring. After this runs, a
+     * write to one project's voice/mode/tone no longer leaks to other projects
+     * via the top-level mirror.
+     */
+    private anchorProjectsFromRegistry;
     selectGlobal(): void;
     selectProject(projectId: string): Project | null;
     selectCard(projectId: string, cardId: string, stage?: string): Project | null;
@@ -40,6 +49,11 @@ export declare class StateManager {
     getLegacySessionName(): string;
     getSessionCwd(): string;
     getSelectedCardId(): string | null;
+    /** Returns the project id for the active target, or null when at global. */
+    private getCurrentProjectId;
+    private prefsFor;
+    private writePref;
+    private clearPref;
     getVoice(): {
         id: string;
         name: string;

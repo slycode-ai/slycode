@@ -23,6 +23,10 @@ export class StateManager {
     selectedProvider = 'claude';
     selectedModel = ''; // '' = Default (no flag)
     providerOverrides = {}; // per-target provider overrides (sticky)
+    // Per-project voice/mode/tone overrides. Keyed by project.id. The top-level
+    // voiceId/responseMode/voiceTone fields above act as the inheritance source
+    // ("most-recently-set value") for any project that has no entry here.
+    targetPrefs = {};
     _pendingInstructionFileConfirm = null;
     chatId = null;
     constructor() {
@@ -104,10 +108,20 @@ export class StateManager {
             if (data.providerOverrides && typeof data.providerOverrides === 'object') {
                 this.providerOverrides = data.providerOverrides;
             }
+            if (data.targetPrefs && typeof data.targetPrefs === 'object') {
+                this.targetPrefs = data.targetPrefs;
+            }
         }
         catch {
             // No persisted state, that's fine
         }
+        // Anchor any registry project that doesn't yet have an entry. This locks
+        // each project's effective voice/mode/tone to the current top-level value
+        // (the "global" pre-upgrade, or the most-recently-set value when a new
+        // project later joins the registry). Without this, target=project writes
+        // that mirror to top-level would silently change every other project that
+        // hadn't been touched yet.
+        this.anchorProjectsFromRegistry();
     }
     saveState() {
         try {
@@ -123,6 +137,7 @@ export class StateManager {
                 selectedProvider: this.selectedProvider,
                 selectedModel: this.selectedModel,
                 providerOverrides: this.providerOverrides,
+                targetPrefs: this.targetPrefs,
                 chatId: this.chatId,
             }, null, 2));
         }
@@ -152,6 +167,41 @@ export class StateManager {
                 this.saveState();
             }
         }
+        // Anchor any newly-registered project so it gets the current most-recent
+        // values rather than dynamically tracking top-level forever.
+        this.anchorProjectsFromRegistry();
+    }
+    /**
+     * For every project in the registry, ensure targetPrefs has explicit values
+     * for any field that's currently missing. Anchors with the current top-level
+     * (most-recently-set) value at the moment of anchoring. After this runs, a
+     * write to one project's voice/mode/tone no longer leaks to other projects
+     * via the top-level mirror.
+     */
+    anchorProjectsFromRegistry() {
+        let mutated = false;
+        for (const project of this.state.projects) {
+            const entry = this.targetPrefs[project.id] ?? {};
+            let changed = false;
+            if (entry.voice === undefined && this.voiceId) {
+                entry.voice = { id: this.voiceId, name: this.voiceName || this.voiceId };
+                changed = true;
+            }
+            if (entry.responseMode === undefined) {
+                entry.responseMode = this.responseMode;
+                changed = true;
+            }
+            if (entry.voiceTone === undefined && this.voiceTone !== null) {
+                entry.voiceTone = this.voiceTone;
+                changed = true;
+            }
+            if (changed) {
+                this.targetPrefs[project.id] = entry;
+                mutated = true;
+            }
+        }
+        if (mutated)
+            this.saveState();
     }
     // --- Target Navigation ---
     selectGlobal() {
@@ -283,35 +333,122 @@ export class StateManager {
     getSelectedCardId() {
         return this.state.selectedCardId;
     }
+    // --- Per-project pref resolution -------------------------------------
+    //
+    // For target=project|card, writes land in targetPrefs[projectId] and are
+    // also mirrored to the top-level field as the "most-recently-set" value.
+    // Reads on target=project|card return the per-project override if present,
+    // otherwise fall back to the top-level (which gives a brand-new project
+    // the most-recently-set value automatically).
+    //
+    // For target=global, writes only update the top-level; reads only consult
+    // the top-level. Clears never mirror — clearing a project's override
+    // removes the override, but the top-level "most-recent" remains.
+    /** Returns the project id for the active target, or null when at global. */
+    getCurrentProjectId() {
+        const target = this.getTarget();
+        if (target.type === 'global')
+            return null;
+        return target.projectId ?? null;
+    }
+    prefsFor(projectId) {
+        return this.targetPrefs[projectId];
+    }
+    writePref(projectId, key, value) {
+        const existing = this.targetPrefs[projectId] ?? {};
+        existing[key] = value;
+        this.targetPrefs[projectId] = existing;
+    }
+    clearPref(projectId, key) {
+        const existing = this.targetPrefs[projectId];
+        if (!existing)
+            return;
+        delete existing[key];
+        if (Object.keys(existing).length === 0)
+            delete this.targetPrefs[projectId];
+    }
     // --- Voice ---
     getVoice() {
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            const v = this.prefsFor(projectId)?.voice;
+            if (v)
+                return { id: v.id, name: v.name || v.id };
+        }
         if (!this.voiceId)
             return null;
         return { id: this.voiceId, name: this.voiceName || this.voiceId };
     }
     setVoice(id, name) {
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            this.writePref(projectId, 'voice', { id, name });
+        }
+        // Mirror to top-level as the most-recently-set value (applies at global
+        // target too, and serves as the inheritance source for new projects).
         this.voiceId = id;
         this.voiceName = name;
         this.saveState();
     }
     clearVoice() {
-        this.voiceId = null;
-        this.voiceName = null;
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            // Clear only the project's override; preserve top-level "most-recent"
+            // so other projects without their own entry still inherit it.
+            this.clearPref(projectId, 'voice');
+        }
+        else {
+            this.voiceId = null;
+            this.voiceName = null;
+        }
         this.saveState();
     }
     // --- Response Preferences ---
     getResponseMode() {
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            const m = this.prefsFor(projectId)?.responseMode;
+            if (m)
+                return m;
+        }
         return this.responseMode;
     }
     setResponseMode(mode) {
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            this.writePref(projectId, 'responseMode', mode);
+        }
         this.responseMode = mode;
         this.saveState();
     }
     getVoiceTone() {
+        const projectId = this.getCurrentProjectId();
+        if (projectId) {
+            const t = this.prefsFor(projectId)?.voiceTone;
+            if (t !== undefined)
+                return t;
+        }
         return this.voiceTone;
     }
     setVoiceTone(tone) {
-        this.voiceTone = tone;
+        const projectId = this.getCurrentProjectId();
+        if (tone === null) {
+            // Clear semantics: at project target, remove only the project's
+            // override (top-level "most-recent" stays). At global target, clear
+            // the top-level.
+            if (projectId) {
+                this.clearPref(projectId, 'voiceTone');
+            }
+            else {
+                this.voiceTone = null;
+            }
+        }
+        else {
+            if (projectId) {
+                this.writePref(projectId, 'voiceTone', tone);
+            }
+            this.voiceTone = tone;
+        }
         this.saveState();
     }
     // --- Provider ---

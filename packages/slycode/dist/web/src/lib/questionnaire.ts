@@ -34,7 +34,6 @@ export interface FreeTextItem {
   type: 'free_text';
   id: string;
   question: string;
-  required?: boolean;
   answer: string | null;
 }
 
@@ -44,7 +43,6 @@ export interface SingleChoiceItem {
   question: string;
   options: string[];
   allow_other?: boolean;
-  required?: boolean;
   answer: string | null;
 }
 
@@ -54,7 +52,6 @@ export interface MultiChoiceItem {
   question: string;
   options: string[];
   allow_other?: boolean;
-  required?: boolean;
   answer: string[] | null;
 }
 
@@ -62,7 +59,6 @@ export interface BooleanItem {
   type: 'boolean';
   id: string;
   question: string;
-  required?: boolean;
   answer: boolean | null;
 }
 
@@ -73,7 +69,6 @@ export interface ScaleItem {
   min: number;
   max: number;
   step?: number;
-  required?: boolean;
   answer: number | null;
 }
 
@@ -84,7 +79,6 @@ export interface NumberItem {
   min?: number;
   max?: number;
   step?: number;
-  required?: boolean;
   answer: number | null;
 }
 
@@ -214,9 +208,8 @@ function validateItem(raw: unknown, index: number, seenIds: Set<string>): void {
   if (!isString(item.question)) {
     throw new QuestionnaireValidationError(`items[${index}] (${item.id}).question must be a string`);
   }
-  if (item.required !== undefined && typeof item.required !== 'boolean') {
-    throw new QuestionnaireValidationError(`items[${index}] (${item.id}).required must be boolean`);
-  }
+  // Legacy: `required` is no longer a supported field but tolerated on read so
+  // older questionnaire files don't break. We silently ignore it.
 
   switch (type) {
     case 'free_text':
@@ -325,18 +318,18 @@ export function validateAnswerValue(item: QuestionnaireItem, value: unknown): vo
       break;
     case 'single_choice':
       if (!isString(value)) throw new QuestionnaireValidationError(`${item.id}: answer must be a string`);
-      if (!isValidChoice(value, item.options, item.allow_other)) {
+      if (!isValidChoice(value, item.options)) {
         throw new QuestionnaireValidationError(
-          `${item.id}: answer "${value}" is not in options${item.allow_other ? ' (and not Other:)' : ''}`
+          `${item.id}: answer "${value}" is not in options (and not "Other: …")`
         );
       }
       break;
     case 'multi_choice':
       if (!isStringArray(value)) throw new QuestionnaireValidationError(`${item.id}: answer must be a string[]`);
       for (const v of value) {
-        if (!isValidChoice(v, item.options, item.allow_other)) {
+        if (!isValidChoice(v, item.options)) {
           throw new QuestionnaireValidationError(
-            `${item.id}: "${v}" is not in options${item.allow_other ? ' (and not Other:)' : ''}`
+            `${item.id}: "${v}" is not in options (and not "Other: …")`
           );
         }
       }
@@ -361,9 +354,18 @@ export function validateAnswerValue(item: QuestionnaireItem, value: unknown): vo
   }
 }
 
-function isValidChoice(value: string, options: string[], allowOther?: boolean): boolean {
+/**
+ * Accept any of the listed options OR any string starting with "Other:".
+ *
+ * Note: we deliberately ignore the schema's `allow_other` flag here. The UI
+ * lets users add an "Other" option even when the agent didn't enable it
+ * (the bottom-right "+ Other" button), so the server must accept those answers
+ * too. `allow_other` is now purely a UI hint for whether to show Other by
+ * default — it does not gate what answers are storable.
+ */
+function isValidChoice(value: string, options: string[]): boolean {
   if (options.includes(value)) return true;
-  if (allowOther && value.startsWith('Other:')) return true;
+  if (value.startsWith('Other:')) return true;
   return false;
 }
 
@@ -468,27 +470,23 @@ export async function patchAnswer(
 }
 
 // ---------------------------------------------------------------------------
-// Counts & required-check
+// Counts
 // ---------------------------------------------------------------------------
 
 export interface AnsweredCounts {
   answered: number;
   answerable: number;
-  requiredMissing: number;
 }
 
 export function getAnsweredCounts(q: Questionnaire): AnsweredCounts {
   let answered = 0;
   let answerable = 0;
-  let requiredMissing = 0;
   for (const item of q.items) {
     if (!isAnswerableItem(item)) continue;
     answerable++;
-    const filled = isAnswerFilled(item);
-    if (filled) answered++;
-    if (item.required && !filled) requiredMissing++;
+    if (isAnswerFilled(item)) answered++;
   }
-  return { answered, answerable, requiredMissing };
+  return { answered, answerable };
 }
 
 /** True if the item has a non-null, non-empty answer. */

@@ -16,4 +16,21 @@ export declare function sessionNameFor(project: ProjectKeyShape, provider: strin
 export declare function sessionBelongsToProject(sessionName: string, project: ProjectKeyShape): boolean;
 export declare function escapeRegex(s: string): string;
 export declare function projectKeyAlternation(project: ProjectKeyShape): string;
+export type ResolveProjectIdResult = {
+    id: string;
+    via: 'id' | 'sessionKey' | 'alias';
+} | null;
+/**
+ * Resolve an arbitrary project key (canonical project.id, sessionKey, or
+ * sessionKeyAlias) to the canonical project.id. Used by the Telegram
+ * sw_card_ / sw_proj_ callback handlers, which can receive any of those
+ * forms depending on when the button was emitted: post-fix buttons embed
+ * canonical project.id; pre-fix buttons still in Telegram history embed
+ * sessionKey; buttons emitted before a dashboard path rename embed the
+ * old sessionKey (now living in sessionKeyAliases).
+ *
+ * Match order is intentional: id → sessionKey → alias. Returns null when
+ * nothing matches.
+ */
+export declare function resolveCanonicalProjectId(key: string, projects: ProjectKeyShape[]): ResolveProjectIdResult;
 export {};

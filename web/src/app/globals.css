@@ -754,11 +754,18 @@ body {
 }
 
 /* Deep-link focus pulse — used by SkillUpdateToast click routing to highlight
-   the target row in AssetMatrix / UpdatesView after scrollIntoView. */
+   the target row in AssetMatrix / UpdatesView after scrollIntoView.
+   The row outline can be clipped by sticky child cells (AssetMatrix's first
+   column has position:sticky with a solid bg), so we also pulse each child's
+   background so the sticky cell flashes amber alongside the rest of the row. */
 @keyframes skill-focus-pulse {
   0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
   60%  { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
   100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+}
+@keyframes skill-focus-cell-pulse {
+  0%   { background-color: rgba(251, 191, 36, 0.35); }
+  100% { background-color: transparent; }
 }
 .skill-focus-pulse {
   animation: skill-focus-pulse 1.2s ease-out 2;
@@ -766,8 +773,12 @@ body {
   outline-offset: -2px;
   border-radius: 6px;
 }
+.skill-focus-pulse > * {
+  animation: skill-focus-cell-pulse 1.2s ease-out 2;
+}
 @media (prefers-reduced-motion: reduce) {
-  .skill-focus-pulse {
+  .skill-focus-pulse,
+  .skill-focus-pulse > * {
     animation: none;
   }
 }

@@ -32,16 +32,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [isGlobalActive, setIsGlobalActive] = useState(false);
   const voice = useVoice();
   const [bridgeCounts, setBridgeCounts] = useState<Record<string, number> | null>(null);
-  // Initial tab honours ?tab=updates|cli-assets so deep-link routing from
-  // SkillUpdateToast lands on CLI Assets without a flicker through Projects.
-  // Reading searchParams in the initializer is safe — useSearchParams is
-  // stable for the initial mount and we strip the param after consumption.
-  const initialTabParam = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('tab')
-    : null;
-  const [activeTab, setActiveTab] = useState<Tab>(
-    initialTabParam === 'updates' || initialTabParam === 'cli-assets' ? 'cli-assets' : 'projects'
-  );
+  const [activeTab, setActiveTab] = useState<Tab>('projects');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -55,9 +46,22 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const openGlobalRequested = searchParams.get('openGlobal') === '1';
   const consumedOpenGlobalRef = useRef(false);
 
-  // (?tab=updates|cli-assets is honoured by the initialTabParam initializer
-  // above. Sub-view focus params — focus, projectId, skill — are consumed
-  // inside CliAssetsTab itself.)
+  // Activate the CLI Assets tab when arriving via ?tab=updates|cli-assets.
+  // Used by SkillUpdateToast click routing. Has to be in an effect because
+  // useState initializer runs during SSR (no window) and hydration uses the
+  // SSR value, so the URL param is never read. The setState-in-effect lint
+  // rule is suppressed — same shape as other consumers in this codebase
+  // (CliAssetsTab provider switch, html-viewer, etc.).
+  const requestedTab = searchParams.get('tab');
+  const consumedTabRef = useRef(false);
+  useEffect(() => {
+    if (consumedTabRef.current) return;
+    if (requestedTab === 'updates' || requestedTab === 'cli-assets') {
+      consumedTabRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab('cli-assets');
+    }
+  }, [requestedTab]);
 
   // Fetch SlyCode version on mount
   useEffect(() => {

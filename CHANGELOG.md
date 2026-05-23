@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.40] - 2026-05-23
+
+### Added
+- Drag-to-pan on the kanban board — desktop users can click and drag empty board background to scroll horizontally; cards, headers, and interactive elements pass through untouched
+- Per-project voice, response-mode, and tone overrides in messaging — settings can be project-specific while still falling back to the top-level default
+
+### Fixed
+- Telegram `sw_proj_` and `sw_card_` callback handlers resolve canonical project.id, sessionKey, or alias — backward compatible with old buttons in Telegram history from before dashboard path renames
+- CliAssetsTab row focus from SkillUpdateToast deep-link now retries every 200ms up to 3s — handles async data loads so the target row reliably scrolls into view
+
+### Changed
+- Scheduler `isDue()` refactored — uses stored `config.nextRun` as primary firing decision (shared source of truth with dashboard NOW badge), 24h first-fire window for never-run automations, 60s re-fire guard against self-perpetuating loops, max 1 kickoff per tick
+- Shortcuts config modal tracks dirty state — surfaces unsaved changes prominently; inferred project tag is a suggestion ("Use" button) instead of silently pre-filling the input
+- Dashboard tab routing — `?tab=updates|cli-assets` deep links handled in a proper effect instead of an initializer hack
+- Questionnaire schema simplification — all questions are optional (`required:true` is no longer supported); removes `requiredMissing` counts and the scroll-to-first-missing UX
+- Kanban skill v1.11.1 — questionnaire docs updated to match the optional-only schema
+
 ## [0.2.39] - 2026-05-15
 
 ### Added
