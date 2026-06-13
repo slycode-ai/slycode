@@ -104,16 +104,47 @@ export async function update(_args: string[]): Promise<void> {
     console.log('');
   }
 
-  // Step 1: npm update @slycode/slycode
+  // Step 1: install @slycode/slycode@latest
+  //
+  // We use `npm install @slycode/slycode@latest` rather than `npm update` so a
+  // running install picks up the newest version regardless of the workspace
+  // package.json semver range. `npm update` respects the existing range, and
+  // npm's caret behaviour on 0.x versions (`^0.2.0` ⇒ `>=0.2.0 <0.3.0`) means
+  // `npm update` will silently refuse to cross 0.minor boundaries — this used
+  // to leave users stuck on the last 0.2.x release when 0.3.0 shipped. The
+  // same trap applies to any 0.minor → 0.minor+1 (and 1.x → 2.x) upgrade, so
+  // we always install @latest and rewrite the range to match.
+  const pkgPath = path.join(workspace, 'node_modules', '@slycode', 'slycode', 'package.json');
+  const readInstalledVersion = (): string | null => {
+    if (!fs.existsSync(pkgPath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version ?? null;
+    } catch { return null; }
+  };
+  const versionBefore = readInstalledVersion();
+
   console.log('Updating SlyCode...');
   console.log('');
   try {
-    console.log('  Running npm update...');
-    execSync('npm update @slycode/slycode', { cwd: workspace, stdio: 'inherit' });
+    console.log('  Installing @slycode/slycode@latest...');
+    execSync('npm install @slycode/slycode@latest', { cwd: workspace, stdio: 'inherit' });
     console.log('');
   } catch {
-    console.error('  npm update failed. Check your network connection and try again.');
+    console.error('  npm install failed. Check your network connection and try again.');
     process.exit(1);
+  }
+
+  // Sanity check: did the version actually change? If npm reported success but
+  // the installed version is still the same as before, something silently
+  // refused to upgrade (range constraint, lockfile pin, cache weirdness) and
+  // the user should know — never let an update lie about what it did.
+  const versionAfter = readInstalledVersion();
+  if (versionBefore && versionAfter && versionBefore === versionAfter) {
+    console.warn(`  ! Installed version is still v${versionAfter} after the install — npm reported success but did not change the version.`);
+    console.warn('    If you expected a newer release, your workspace package.json may have a range that excludes it.');
+    console.warn(`    Try forcing the latest from inside ${workspace}:`);
+    console.warn('      npm install @slycode/slycode@latest --save');
+    console.warn('');
   }
 
   // Step 1b: Re-link CLI commands to pick up updated binaries
@@ -196,13 +227,7 @@ export async function update(_args: string[]): Promise<void> {
   }
 
   // Summary
-  const pkgPath = path.join(workspace, 'node_modules', '@slycode', 'slycode', 'package.json');
-  let version = 'unknown';
-  if (fs.existsSync(pkgPath)) {
-    try {
-      version = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version;
-    } catch { /* ignore */ }
-  }
+  const version = versionAfter ?? 'unknown';
   console.log(`SlyCode updated to v${version}.`);
   if (result.refreshed > 0) {
     console.log(`  ${result.refreshed} skill update(s) refreshed.`);

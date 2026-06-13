@@ -576,7 +576,7 @@ export async function main(args: string[]): Promise<void> {
         console.log('  global commands (sly-kanban, etc.) will point to the new one.');
         console.log('');
         console.log('  If you want to update your existing workspace instead:');
-        console.log(`    cd ${existing.home} && npm update @slycode/slycode`);
+        console.log(`    cd ${existing.home} && slycode update`);
         console.log('');
         if (!autoYes) {
           const rlCheck = readline.createInterface({ input: process.stdin, output: process.stdout });

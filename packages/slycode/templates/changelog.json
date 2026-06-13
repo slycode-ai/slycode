@@ -1,83 +1,105 @@
 [
   {
+    "version": "0.3.1",
+    "date": "2026-06-13",
+    "changes": [
+      {
+        "type": "bugfix",
+        "description": "IMPORTANT — if you are still on 0.2.40 and `slycode update` says everything is up to date even though the dashboard shows v0.3.x available, npm is refusing to cross the 0.2 → 0.3 boundary because of how it interprets caret ranges on pre-1.0 versions. One-time unstick: from inside your workspace directory run `npm install @slycode/slycode@latest` and then `slycode update`. After that, future `slycode update` runs (including 0.3 → 0.4 etc.) will work normally."
+      },
+      {
+        "type": "bugfix",
+        "description": "`slycode update` now uses `npm install @latest` instead of `npm update`, so it correctly upgrades across 0.x minor boundaries and any future major-version bumps."
+      },
+      {
+        "type": "bugfix",
+        "description": "`slycode update` now checks the installed version before and after install and warns clearly if npm reported success but the version did not actually change — so a silent upgrade failure can never go unnoticed again."
+      },
+      {
+        "type": "improvement",
+        "description": "`create-slycode` now recommends `slycode update` (instead of the broken `npm update`) when offering to upgrade an existing workspace."
+      }
+    ]
+  },
+  {
     "version": "0.3.0",
     "date": "2026-06-13",
     "changes": [
       {
         "type": "feature",
-        "description": "Web UI auth layer (feature 068) — single-password gate for the SlyCode dashboard with first-run setup, session cookies signed with HMAC-SHA256, and credential stored in ~/.slycode/auth.json (mode 600). Bridge and messaging remain localhost-only and untouched"
+        "description": "Dashboard login — single-password gate with a first-run setup flow. The dashboard is now protected; bridge and messaging keep their existing posture."
       },
       {
         "type": "feature",
-        "description": "slycode reset-password CLI (feature 068) — clears the web dashboard password and bumps the cookie secret so old sessions are invalidated"
+        "description": "`slycode reset-password` CLI — reset the dashboard password and invalidate any existing sessions."
       },
       {
         "type": "feature",
-        "description": "Cleartext warning banner — persistent banner when the dashboard is served over plain HTTP to a non-loopback host; silent on loopback and HTTPS"
+        "description": "Warning banner when the dashboard is being served over plain HTTP to a non-loopback address."
       },
       {
         "type": "feature",
-        "description": "Self-verifying prompt submit (feature 070) — bridge classifies the terminal snapshot to confirm the pasted prompt actually went into the input box before sending Enter; retries with bracketed-paste fallback if it sees the prompt stranded outside the input region"
+        "description": "Self-verifying prompt submit — the bridge now confirms your pasted prompt actually landed in the input box before pressing Enter, and retries if it didn’t. Cuts down on silent failures when your model TUI is busy redrawing."
       },
       {
         "type": "feature",
-        "description": "In-order single-flight terminal input queue (feature 071) — fixes terminal input getting reordered on slow connections; coalesces consecutive raw keystrokes so latency stays bounded at ~2×RTT regardless of typing speed"
+        "description": "Terminal input no longer gets reordered on slow connections — keystrokes are delivered in the order you sent them regardless of network latency."
       },
       {
         "type": "feature",
-        "description": "Multi HTML attachments on cards (feature 072) — cards can hold multiple HTML attachments instead of one; new HTML Attachments tab shows an index list with auto-select-when-one and back-to-list affordance"
+        "description": "Multiple HTML attachments per card — index list when there are several, auto-select when there is just one, easy back-to-list navigation."
       },
       {
         "type": "feature",
-        "description": "HTML attachment Print view (feature 072) — open any attachment via ?print=1 in a dedicated tab for clean printing without app chrome"
+        "description": "Print view for HTML attachments — open any attachment in a dedicated tab for clean printing without dashboard chrome."
       },
       {
         "type": "feature",
-        "description": "Global provider/model default (feature 073) — set a workspace-wide default provider and per-provider model from the dashboard; new sessions inherit unless explicitly overridden"
+        "description": "Global provider and model default — set a workspace-wide default from the dashboard; new sessions inherit it unless explicitly overridden."
       },
       {
         "type": "feature",
-        "description": "Per-project TTS voice — voice selection persists per project alongside the existing voice/mode/tone overrides"
+        "description": "Per-project TTS voice — voice selection persists alongside the existing per-project mode and tone overrides."
       },
       {
         "type": "feature",
-        "description": "Messaging voice search endpoint — sly-messaging voice search <query> proxies ElevenLabs voice search for picking voices from the CLI"
+        "description": "`sly-messaging voice search <query>` — search ElevenLabs voices from the CLI."
       },
       {
         "type": "feature",
-        "description": "Timestamp prefix on forwarded voice messages and Sly Actions — surfaces when a forwarded item was originally sent"
+        "description": "Forwarded voice messages and Sly Actions are prefixed with the time they were originally sent."
       },
       {
         "type": "bugfix",
-        "description": "Card modal no longer loses its terminal session link when an external action renames or moves the open card — session pill stays attached to the right card"
+        "description": "Card modal keeps its terminal session attached when the card is renamed or moved externally — no more orphaned terminal pills."
       },
       {
         "type": "bugfix",
-        "description": "Light-mode design for card status boxes — no more washed-out unreadable text in light theme"
+        "description": "Better light-mode design for card status boxes — no more washed-out text in light theme."
       },
       {
         "type": "bugfix",
-        "description": "Closed two command-injection sinks and cleared all dependency high-severity advisories (feature 069 — security remediation)"
+        "description": "Security hardening pass — tightened input handling and cleared outstanding high-severity dependency advisories."
       },
       {
         "type": "bugfix",
-        "description": "Hardened send-file path resolution against directory traversal"
+        "description": "Stricter file path validation on send-file to prevent unintended file access."
       },
       {
         "type": "bugfix",
-        "description": "Diagnose and fix automation silent non-submit — duplicate-fire follow-up to the earlier scheduler isDue work; merged-prompt firings no longer get dropped"
+        "description": "Fix automation runs occasionally dropping their prompt without surfacing an error."
       },
       {
         "type": "improvement",
-        "description": "Secure-by-default bind hardening — bridge and messaging bind to 127.0.0.1 by default; web binds to 0.0.0.0 only when explicitly configured (no longer the default)"
+        "description": "Secure defaults — backing services bind to localhost by default; exposing a service on a public interface now requires explicit configuration."
       },
       {
         "type": "improvement",
-        "description": "Kanban skill v1.12.0 — covers global provider default, multi HTML attachments, and the self-verifying submit semantics"
+        "description": "Kanban skill v1.12.0 — covers the global provider default, multi HTML attachments, and the new self-verifying submit semantics."
       },
       {
         "type": "improvement",
-        "description": "Deployed-install model data fix — installed packages now pick up the latest provider model lists instead of shipping a stale snapshot"
+        "description": "Installed packages now pick up the latest provider model lists instead of shipping a stale snapshot."
       }
     ]
   },

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-13
+
+### Fixed
+- **IMPORTANT — if you are still on 0.2.40 and `slycode update` says everything is up to date even though the dashboard shows v0.3.x available**, npm is refusing to cross the `0.2 → 0.3` boundary because of how it interprets caret ranges on pre-1.0 versions. **One-time unstick:** from inside your workspace directory, run:
+  ```
+  npm install @slycode/slycode@latest
+  slycode update
+  ```
+  After that, future `slycode update` runs (including `0.3 → 0.4` etc.) will work normally.
+- `slycode update` now uses `npm install @latest` instead of `npm update`, so it correctly upgrades across `0.x` minor boundaries and any future major-version bumps.
+- `slycode update` now checks the installed version before and after install and warns clearly if npm reported success but the version did not actually change — so a silent upgrade failure can never go unnoticed again.
+
+### Changed
+- `create-slycode` now recommends `slycode update` (instead of the broken `npm update`) when offering to upgrade an existing workspace.
+
 ## [0.3.0] - 2026-06-13
 
 ### Added
