@@ -33,7 +33,20 @@ const CSP = [
   "frame-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
+  // Sandbox the document even when loaded TOP-LEVEL (feature 072). Without
+  // this, navigating to the raw URL (or the print tab opening it) runs the
+  // attachment on the app origin — cookies/localStorage readable, and CSP
+  // does NOT block top-level navigation as an exfil channel. With it, the
+  // document gets an opaque origin exactly like the embedding iframes
+  // (effective flags = intersection, so iframe rendering is unchanged).
+  // allow-modals only takes effect top-level — it permits window.print().
+  'sandbox allow-scripts allow-modals',
 ].join('; ');
+
+// Auto-print hook injected when serving in print mode (?print=1). Inline
+// script is permitted by script-src 'unsafe-inline'; the load-event delay
+// lets CDN libs/fonts render before the dialog snapshots the page.
+const PRINT_SCRIPT = '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},150);});</script>';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -88,6 +101,14 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Failed to read HTML attachment:', error);
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
+  }
+
+  // Print mode: inject the auto-print hook before </body> (append if absent).
+  if (searchParams.get('print') === '1') {
+    const bodyClose = content.lastIndexOf('</body>');
+    content = bodyClose >= 0
+      ? content.slice(0, bodyClose) + PRINT_SCRIPT + content.slice(bodyClose)
+      : content + PRINT_SCRIPT;
   }
 
   return new NextResponse(content, {

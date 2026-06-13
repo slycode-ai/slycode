@@ -112,7 +112,48 @@ export async function POST(
     }
 
     if (resolvedName) {
-      // Session is up — paste with bracketed-paste markers, then optionally Enter.
+      if (autoSubmit) {
+        // Verified delivery (feature 070): the bridge pastes, confirms the
+        // Q&A block is queued, sends Enter, and verifies the input region
+        // actually cleared (resending Enter — never the paste — if not).
+        // The questionnaire is only marked submitted on a confirmed delivery.
+        const subRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(resolvedName)}/submit-verified`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: message, force: true }),
+        });
+        if (!subRes.ok) {
+          const text = await subRes.text().catch(() => '');
+          return NextResponse.json(
+            { error: `PTY write failed (${subRes.status}): ${text}` },
+            { status: 502 }
+          );
+        }
+        const result = await subRes.json();
+        const delivery = result.delivery as
+          | { outcome: string; reason?: string; warnings?: string[]; attempts?: number; resends?: number }
+          | undefined;
+
+        if (delivery && delivery.outcome !== 'delivered') {
+          // failed | ambiguous | blocked — do NOT mark submitted; the user's
+          // draft answers are preserved and they can retry after clearing
+          // whatever is in the way.
+          const detail = delivery.reason ? ` (${delivery.reason})` : '';
+          const uiError =
+            delivery.outcome === 'blocked'
+              ? `The session is blocked by an update/dialog — open the Terminal tab and clear it, then submit again${detail}`
+              : `Delivery ${delivery.outcome}${detail} — the message could not be confirmed as submitted. Check the Terminal tab and retry.`;
+          return NextResponse.json({ error: uiError, delivery }, { status: 502 });
+        }
+
+        const warnings = delivery?.warnings?.length ? delivery.warnings.join('; ') : undefined;
+        await markSubmitted(absPath, questionnaire);
+        await emitSubmittedStatus(card, board, kanbanPath);
+        return NextResponse.json(warnings ? { ok: true, warning: warnings } : { ok: true });
+      }
+
+      // autoSubmit=false — deliberately paste-only; raw /input stays raw
+      // (no submit semantics, no verification).
       const pasteRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(resolvedName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -123,25 +164,6 @@ export async function POST(
           { error: `PTY write failed (${pasteRes.status})` },
           { status: 502 }
         );
-      }
-      if (autoSubmit) {
-        await new Promise((r) => setTimeout(r, 600));
-        const enterRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(resolvedName)}/input`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: '\r' }),
-        });
-        if (!enterRes.ok) {
-          // Paste landed but Enter failed — partial delivery. Still mutate
-          // status (the message is on the prompt line) and return success.
-          // Surface the warning so the UI can show a toast.
-          await markSubmitted(absPath, questionnaire);
-          await emitSubmittedStatus(card, board, kanbanPath);
-          return NextResponse.json({
-            ok: true,
-            warning: `Enter submission failed (${enterRes.status}); message pasted but not auto-submitted`,
-          });
-        }
       }
     } else {
       // No active session under any alias — create one. Use the canonical
@@ -168,12 +190,24 @@ export async function POST(
           cwd: body.cwd,
           fresh: false,
           prompt: message,
+          verifyDelivery: true,
         }),
       });
       if (!createRes.ok) {
         const text = await createRes.text().catch(() => '');
         return NextResponse.json(
           { error: `Session create failed (${createRes.status}): ${text}` },
+          { status: 502 }
+        );
+      }
+      // Resume/create path delivers via spawn (argv on POSIX, deferred paste
+      // on Windows) — the bridge reports it in the additive delivery field.
+      const createData = await createRes.json().catch(() => null);
+      const createDelivery = createData?.delivery as { outcome: string; reason?: string } | undefined;
+      if (createDelivery && createDelivery.outcome !== 'delivered') {
+        const detail = createDelivery.reason ? ` (${createDelivery.reason})` : '';
+        return NextResponse.json(
+          { error: `Delivery ${createDelivery.outcome}${detail} — session was started but the message could not be confirmed as submitted.`, delivery: createDelivery },
           { status: 502 }
         );
       }

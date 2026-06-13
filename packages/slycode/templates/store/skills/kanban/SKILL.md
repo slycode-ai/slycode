@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.11.1
-updated: 2026-05-06
+version: 1.12.0
+updated: 2026-06-11
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -73,9 +73,9 @@ sly-kanban update card-123 --title "New title" --areas "web-frontend,terminal-br
 # Link documentation to card
 sly-kanban update card-123 --design-ref "documentation/designs/foo.md"
 sly-kanban update card-123 --feature-ref "documentation/features/bar.md"
-sly-kanban update card-123 --html-ref "documentation/designs/foo.html"
+sly-kanban update card-123 --html-ref "documentation/designs/foo.html"   # appends — cards can hold multiple
 
-# Clear an attached document (pass empty string)
+# Clear an attached document (pass empty string; html/questionnaire refs clear ALL)
 sly-kanban update card-123 --html-ref ""
 
 # Move card
@@ -282,7 +282,7 @@ Cards support dedicated reference fields for documentation:
 | Design Doc | `--design-ref` | Link to design document (Markdown) |
 | Feature Spec | `--feature-ref` | Link to feature specification (Markdown) |
 | Test Doc | `--test-ref` | Link to test documentation (Markdown) |
-| HTML Attachment | `--html-ref` | Link to a single self-contained HTML file (rendered in a sandboxed iframe in the card modal) |
+| HTML Attachment | `--html-ref` | Append a self-contained HTML file (multiple per card, rendered in sandboxed iframes). Pass `""` to clear ALL. |
 | Questionnaire | `--questionnaire-ref` | Append a structured Q&A questionnaire (JSON, multiple per card). See "Questionnaires" below. |
 
 ```bash
@@ -295,14 +295,15 @@ sly-kanban update card-123 --feature-ref "documentation/features/001_my_feature.
 # Link test doc when test plan exists
 sly-kanban update card-123 --test-ref "documentation/tests/my-feature-tests.md"
 
-# Link an HTML mockup, POC, or interactive preview
+# Append an HTML mockup, POC, or interactive preview (cards can have multiple)
 sly-kanban update card-123 --html-ref "documentation/designs/my-feature-mockup.html"
 
 # Append a questionnaire (cards can have multiple)
 sly-kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
 
-# Clear any ref by passing an empty string (for questionnaires, clears ALL)
+# Clear any ref by passing an empty string (html + questionnaires clear ALL)
 sly-kanban update card-123 --design-ref ""
+sly-kanban update card-123 --html-ref ""
 sly-kanban update card-123 --questionnaire-ref ""
 ```
 
@@ -318,6 +319,8 @@ These appear as dedicated fields on the card (not in description).
 - The HTML cannot reach SlyCode app state (cookies, localStorage, /api/kanban, parent page).
 
 The intended use is single-file mockups, design previews, and small interactive POCs — not full web apps.
+
+**Multiple attachments & print:** cards can hold multiple HTML attachments — `--html-ref` appends (duplicates ignored), `""` clears all; there is no single-ref remove (re-add the keepers instead). The card modal's HTML tab shows an index list when more than one is attached (friendly label from the doc's own `<title>` tag, fallback filename). A Print button in the viewer header opens the attachment in a dedicated sandboxed print tab — no app chrome in the output, and the document's own CSS `page-break-*` rules are honored. Give print-worthy attachments a `<title>` and explicit page-break CSS.
 
 ## Questionnaires
 

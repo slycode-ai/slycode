@@ -70,11 +70,11 @@ export declare class ResponseStore {
     /**
      * Check if a session is locked by an active --wait call.
      */
-    isSessionLocked(sessionName: string): boolean;
+    isSessionLocked(sessionName: string, excludeResponseId?: string): boolean;
     /**
      * Get the active lock info for a session (for error messages).
      */
-    getActiveLock(sessionName: string): {
+    getActiveLock(sessionName: string, excludeResponseId?: string): {
         callingSession: string;
         lockedAt: number;
     } | null;

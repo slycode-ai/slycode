@@ -2,7 +2,7 @@ import * as pty from 'node-pty';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 // On macOS, node-pty uses a `spawn-helper` binary for PTY forking.
 // npm doesn't always preserve the executable bit when installing packages,
 // which causes every pty.spawn() to fail with "posix_spawnp failed".
@@ -74,6 +74,27 @@ function ensureLoginShellPath() {
 // Cache of resolved command paths: bare name -> absolute path
 const resolvedCommands = new Map();
 /**
+ * Whether a session command is safe to spawn / resolve.
+ *
+ * The bridge only ever opens providers (claude/codex/gemini → bare command
+ * names), 'bash'/'powershell.exe', or an absolute path. Anything else — in
+ * particular a string carrying shell metacharacters — must never reach the
+ * shell used by resolveCommand. This is the boundary check; resolveCommand
+ * also binds the input as a positional arg so it can't be interpolated.
+ *
+ * Allowed:
+ *   - absolute paths (node-pty spawns these directly, no shell)
+ *   - bare tokens matching ^[\w.-]+$ (bash, powershell.exe, claude, codex, …)
+ * Rejected: anything containing /bin/sh metacharacters (; $ ` ( ) | & < > ' " space …)
+ */
+export function isCommandShellSafe(command) {
+    if (!command)
+        return false;
+    if (path.isAbsolute(command))
+        return true; // resolved directly, never shell-interpolated
+    return /^[\w.-]+$/.test(command);
+}
+/**
  * Resolve a bare command name to its absolute path.
  * On macOS, posix_spawnp can fail on npm bin stubs (symlinks to scripts
  * with shebangs) even when the command IS on PATH. Passing an absolute
@@ -84,12 +105,21 @@ function resolveCommand(command) {
         return command; // already a path
     if (os.platform() === 'win32')
         return command;
+    // Defense-in-depth: callers already gate on isCommandShellSafe, but never
+    // build a shell string from `command` here either. `command -v` is a POSIX
+    // shell builtin (no standalone binary to execFile), so we run it via sh but
+    // pass `command` as the positional `$1` — it is bound, never interpolated,
+    // and so cannot break out even if a metacharacter payload slipped through.
+    if (!isCommandShellSafe(command)) {
+        console.warn(`[pty] Refusing to resolve unsafe command '${command}', using bare name`);
+        return command;
+    }
     const cached = resolvedCommands.get(command);
     if (cached)
         return cached;
     // Strategy 1: resolve in the bridge's current PATH
     try {
-        const resolved = execSync(`command -v ${command}`, {
+        const resolved = execFileSync('/bin/sh', ['-c', 'command -v "$1"', '_', command], {
             encoding: 'utf-8',
             timeout: 5000,
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -106,7 +136,7 @@ function resolveCommand(command) {
         const userShell = process.env.SHELL || '/bin/bash';
         const knownShells = ['/bin/bash', '/bin/zsh', '/bin/sh', '/usr/bin/bash', '/usr/bin/zsh'];
         const loginShell = knownShells.includes(userShell) ? userShell : '/bin/bash';
-        const resolved = execSync(`${loginShell} -l -c 'command -v ${command}'`, {
+        const resolved = execFileSync(loginShell, ['-l', '-c', 'command -v "$1"', '_', command], {
             encoding: 'utf-8',
             timeout: 10000,
             stdio: ['pipe', 'pipe', 'pipe'],

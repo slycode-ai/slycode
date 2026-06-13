@@ -50,10 +50,10 @@ export interface ProviderDefault {
 
 export interface ProvidersData {
   providers: Record<string, ProviderConfig>;
+  // Single global default (feature 073). Legacy files may still carry
+  // `stages`/`projects` keys — readers ignore them.
   defaults: {
-    stages: Record<string, ProviderDefault>;
     global: ProviderDefault;
-    projects: Record<string, ProviderDefault>;
   };
 }
 

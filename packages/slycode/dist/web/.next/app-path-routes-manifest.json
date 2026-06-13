@@ -2,6 +2,10 @@
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
   "/api/areas/route": "/api/areas",
+  "/api/auth/login/route": "/api/auth/login",
+  "/api/auth/logout/route": "/api/auth/logout",
+  "/api/auth/setup/route": "/api/auth/setup",
+  "/api/auth/status/route": "/api/auth/status",
   "/api/bridge/[...path]/route": "/api/bridge/[...path]",
   "/api/changelog/route": "/api/changelog",
   "/api/cli-assets/assistant/route": "/api/cli-assets/assistant",
@@ -44,7 +48,9 @@
   "/api/version-check/route": "/api/version-check",
   "/global/page": "/global",
   "/html-viewer/[...path]/page": "/html-viewer/[...path]",
+  "/login/page": "/login",
   "/page": "/",
   "/project/[id]/[token]/page": "/project/[id]/[token]",
-  "/project/[id]/page": "/project/[id]"
+  "/project/[id]/page": "/project/[id]",
+  "/setup/page": "/setup"
 }

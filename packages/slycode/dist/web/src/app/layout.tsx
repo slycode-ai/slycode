@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono, JetBrains_Mono, Press_Start_2P } from 'next/font/google';
 import './globals.css';
 import { VoiceProvider } from '@/contexts/VoiceContext';
+import CleartextWarningBanner from '@/components/CleartextWarningBanner';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -49,6 +50,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${pressStart2P.variable} font-sans antialiased`}
       >
+        <CleartextWarningBanner />
         <VoiceProvider>{children}</VoiceProvider>
       </body>
     </html>

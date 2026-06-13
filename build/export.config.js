@@ -75,9 +75,17 @@ module.exports = {
     // Runtime state and logs (anywhere)
     '**/nohup.out',
     '**/bridge-sessions.json',
+    '**/bridge-sessions.json.tmp.*',
     '**/bridge-config.json',
     '**/messaging-state.json',
     '**/*.log',
+
+    // Test fixtures and unit tests — development scaffolding, not runtime
+    'bridge/src/__fixtures__/**',
+    'bridge/src/**/*.test.ts',
+    'web/src/**/*.test.ts',
+    'packages/slycode/dist/bridge/**/*.test.*',
+    'packages/slycode/dist/bridge/__fixtures__/**',
   ],
 
   // Files/dirs in the public repo that export NEVER deletes or overwrites.

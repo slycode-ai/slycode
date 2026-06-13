@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.migrateLegacyHost = migrateLegacyHost;
 exports.config = config;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -124,6 +125,35 @@ module.exports = {
   },
 };
 `;
+}
+/**
+ * Zero-impact migration for Feature 068's default-bind flip.
+ *
+ * The default `host` changed from `0.0.0.0` to `127.0.0.1`. Configs with an
+ * explicit `host:` line are unaffected (resolveConfig prefers them). The only
+ * at-risk case is a config that has NO explicit host key — flipping the default
+ * would silently switch it to localhost and break remote access. This pins such
+ * a config to the PRIOR default (`0.0.0.0`) so behaviour is preserved exactly.
+ *
+ * Idempotent: once host is explicit it never triggers again. Best-effort —
+ * never throws into the start path.
+ */
+function migrateLegacyHost(workspace) {
+    try {
+        const configPath = path.join(workspace, 'slycode.config.js');
+        if (!fs.existsSync(configPath))
+            return; // fresh install → new 127.0.0.1 default is correct
+        const current = readConfigFile(configPath);
+        if (current.host !== undefined)
+            return; // explicit host → leave untouched
+        setNestedValue(current, 'host', '0.0.0.0');
+        fs.writeFileSync(configPath, generateConfigJs(current));
+        console.log('[slycode] Preserved your existing web bind (0.0.0.0). New installs now default to 127.0.0.1; ' +
+            'run "slycode config host 127.0.0.1" to switch to localhost-only.');
+    }
+    catch {
+        /* never block startup on a migration */
+    }
 }
 async function config(args) {
     if (args[0] === '--help' || args[0] === '-h') {

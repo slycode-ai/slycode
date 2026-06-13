@@ -20,6 +20,9 @@ const devHostname = getParentEnv('DEV_HOSTNAME');
 const nextConfig: NextConfig = {
   // Standalone output for npm distribution (self-contained server)
   output: "standalone",
+  // Auth gate (Feature 068): middleware runs on the Node.js runtime (stable in
+  // Next 16, set via `export const config.runtime = 'nodejs'` in middleware.ts)
+  // so it can read ~/.slycode/auth.json and verify the cookie with node:crypto.
   // Only include devHostname in dev mode — production builds should not leak infra details
   ...(process.env.NODE_ENV !== 'production' && {
     allowedDevOrigins: [

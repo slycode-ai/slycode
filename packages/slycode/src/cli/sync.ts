@@ -155,6 +155,11 @@ export function refreshActionUpdates(workspace: string): RefreshResult {
 /**
  * Replace the providers block in workspace providers.json with the template version.
  * Preserves the defaults block (user preferences).
+ *
+ * INVARIANT (feature 073): `defaults` is user config — the single global
+ * default provider/model (including free-text custom model ids) lives there.
+ * It MUST survive the providers-block replacement; never extend this merge
+ * to overwrite `defaults`.
  */
 export function refreshProviders(workspace: string): { updated: boolean } {
   const packageDir = resolvePackageDir(workspace);

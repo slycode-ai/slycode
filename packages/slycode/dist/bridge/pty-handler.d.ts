@@ -9,6 +9,21 @@ export interface PtyOptions {
     onData: (data: string) => void;
     onExit: (code: number) => void;
 }
+/**
+ * Whether a session command is safe to spawn / resolve.
+ *
+ * The bridge only ever opens providers (claude/codex/gemini → bare command
+ * names), 'bash'/'powershell.exe', or an absolute path. Anything else — in
+ * particular a string carrying shell metacharacters — must never reach the
+ * shell used by resolveCommand. This is the boundary check; resolveCommand
+ * also binds the input as a positional arg so it can't be interpolated.
+ *
+ * Allowed:
+ *   - absolute paths (node-pty spawns these directly, no shell)
+ *   - bare tokens matching ^[\w.-]+$ (bash, powershell.exe, claude, codex, …)
+ * Rejected: anything containing /bin/sh metacharacters (; $ ` ( ) | & < > ' " space …)
+ */
+export declare function isCommandShellSafe(command: string): boolean;
 export declare function spawnPty(options: PtyOptions): IPty;
 export declare function writeToPty(ptyProcess: IPty, data: string): void;
 /**

@@ -15,6 +15,7 @@
     }
   ],
   "headers": [],
+  "onMatchHeaders": [],
   "rewrites": {
     "beforeFiles": [],
     "afterFiles": [],
@@ -130,6 +131,30 @@
       "regex": "^/api/areas(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/areas(?:/)?$"
+    },
+    {
+      "page": "/api/auth/login",
+      "regex": "^/api/auth/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/login(?:/)?$"
+    },
+    {
+      "page": "/api/auth/logout",
+      "regex": "^/api/auth/logout(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/logout(?:/)?$"
+    },
+    {
+      "page": "/api/auth/setup",
+      "regex": "^/api/auth/setup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/setup(?:/)?$"
+    },
+    {
+      "page": "/api/auth/status",
+      "regex": "^/api/auth/status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/status(?:/)?$"
     },
     {
       "page": "/api/changelog",
@@ -334,6 +359,18 @@
       "regex": "^/global(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/global(?:/)?$"
+    },
+    {
+      "page": "/login",
+      "regex": "^/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/login(?:/)?$"
+    },
+    {
+      "page": "/setup",
+      "regex": "^/setup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/setup(?:/)?$"
     }
   ],
   "dataRoutes": [],

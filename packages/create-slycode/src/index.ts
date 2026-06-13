@@ -58,7 +58,9 @@ async function runSetup(rl: readline.Interface, autoYes: boolean): Promise<Setup
   if (autoYes) {
     return {
       timezone: detectedTz,
-      host: '0.0.0.0',
+      // Feature 068: secure-by-default. --yes installs bind the web UI to
+      // localhost; opt into remote access explicitly with `slycode config host 0.0.0.0`.
+      host: '127.0.0.1',
       webPort: 7591,
       bridgePort: 7592,
       messagingPort: 7593,
@@ -84,15 +86,17 @@ async function runSetup(rl: readline.Interface, autoYes: boolean): Promise<Setup
   console.log('');
   console.log('  Web UI access');
   console.log('  ─────────────');
-  console.log('  By default, the web UI only listens on localhost (127.0.0.1). This means');
-  console.log('  you can only access it from this machine. Internal services (bridge,');
-  console.log('  messaging) always stay on localhost for safety.');
+  console.log('  Choose how the web UI is reachable. Internal services (bridge, messaging)');
+  console.log('  always stay on localhost regardless of this choice.');
   console.log('');
-  console.log('  If you access this machine remotely (e.g. via Tailscale, SSH, or a VPN),');
-  console.log('  you can bind the web UI to all interfaces (0.0.0.0) so it\'s reachable');
-  console.log('  from other devices. Only do this on a trusted network.');
+  console.log('    127.0.0.1 (default)  Local machine only. Use this if you reach the UI');
+  console.log('                         via Tailscale serve, an SSH tunnel, or on the box.');
+  console.log('    0.0.0.0              Reachable from other devices / the internet. The UI');
+  console.log('                         is password-protected (you set one on first launch),');
+  console.log('                         but you should still serve it over HTTPS — use');
+  console.log('                         "tailscale serve" or a reverse proxy (Caddy/nginx).');
   console.log('');
-  const bindAll = await promptYN(rl, 'Allow remote access to web UI? (bind to 0.0.0.0)');
+  const bindAll = await promptYN(rl, 'Allow access from other devices? (bind to 0.0.0.0)');
   const host = bindAll ? '0.0.0.0' : '127.0.0.1';
 
   // --- Ports ---

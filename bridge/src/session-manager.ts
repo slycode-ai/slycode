@@ -1,7 +1,7 @@
 import os from 'os';
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
-import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty } from './pty-handler.js';
+import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import {
   getProviderSessionDir,
   listProviderSessionFiles,
@@ -30,7 +30,16 @@ import type {
   SubmitRequest,
   SubmitResult,
   SnapshotResult,
+  VerifiedSubmitResult,
+  DeliveryResult,
 } from './types.js';
+import {
+  classifyInputRegion,
+  extractInputRegion,
+  decideNextAction,
+  type SubmitProvider,
+  type InputRegionClassification,
+} from './submit-verify.js';
 import type { ResponseStore } from './response-store.js';
 import { constants as fsConstants } from 'fs';
 import fs from 'fs/promises';
@@ -338,6 +347,11 @@ export class SessionManager {
       if (providerConfig) {
         providerId = providerConfig.id;
         command = providerConfig.command;
+      } else if (!isCommandShellSafe(request.command)) {
+        // Provider miss + the raw client string would otherwise flow to the
+        // shell in resolveCommand. Reject anything with shell metacharacters
+        // before it can spawn. (Bare tokens / absolute paths still pass.)
+        throw new Error(`Invalid command: ${request.command}`);
       }
     }
 
@@ -381,18 +395,19 @@ export class SessionManager {
         await this.stopSession(resolvedRunning);
         // Fall through to create new session
       } else {
-        // Reuse existing session — paste prompt into it using bracketed paste mode.
-        // Claude Code's TUI expects paste brackets for multi-line input; without them,
-        // \n characters in the prompt may not be handled correctly and \r may not submit.
-        // Markers are sent atomically; inner content uses writeChunkedToPty to avoid
-        // ConPTY truncation on Windows (>4KB payloads silently dropped).
+        // Reuse existing session — deliver the prompt through the verified
+        // submit primitive (feature 070 phase B): paste, confirm queued,
+        // Enter, verify the input cleared, Enter-only resend. This retired
+        // the last blind paste+600ms+Enter copy in the bridge. Callers using
+        // the verifyDelivery API flag get the typed result from the route;
+        // legacy callers still benefit from the verification — a failure is
+        // logged loudly instead of silently stranding the prompt.
         if (prompt && existing.pty) {
-          writeToPty(existing.pty, '\x1b[200~');
-          await writeChunkedToPty(existing.pty, prompt);
-          writeToPty(existing.pty, '\x1b[201~');
-          // Delay before Enter to let the provider process the paste
-          await new Promise(r => setTimeout(r, 600));
-          writeToPty(existing.pty, '\r');
+          const result = await this.submitVerified(name, { prompt, force: true });
+          const d = result.delivery;
+          if (d && d.outcome !== 'delivered') {
+            console.warn(`Reuse-path prompt delivery ${d.outcome} for ${name}${d.reason ? ` (${d.reason})` : ''}`);
+          }
         }
         // Reattach if was detached
         if (existing.status === 'detached' && existing.pty) {
@@ -722,36 +737,21 @@ export class SessionManager {
       session.pendingPromptTimer = undefined;
     }
 
-    const chunkCount = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
-    // Scale the settle with chunk count: Codex's TUI is still rendering long
-    // pastes when a fixed 600ms `\r` arrives, and the keystroke gets dropped.
-    // Short prompts unchanged at 600ms.
-    const settleMs = 600 + Math.max(0, chunkCount - 1) * 500;
-
     try {
-      // Use bracketed paste with chunked content via shared utility.
-      // Markers sent atomically; writeChunkedToPty handles ConPTY chunking on Windows,
-      // passes through directly on Linux/Mac.
-      if (session.pty) {
-        writeToPty(session.pty, '\x1b[200~');
-        await writeChunkedToPty(session.pty, prompt);
-        writeToPty(session.pty, '\x1b[201~');
+      // Verified delivery (feature 070 phase B): the deferred Windows path now
+      // uses the same self-verifying primitive — it already carried the
+      // chunk-scaled settle, and now also gets the pre-paste dialog check
+      // (resume-time update/trust prompts) plus post-Enter verification.
+      const result = await this.submitVerified(name, { prompt, force: true });
+      const d = result.delivery;
+      if (!result.success) {
+        console.error(`Deferred prompt delivery ${d?.outcome ?? 'failed'} for ${name}${d?.reason ? ` (${d.reason})` : ''}`);
+        return;
       }
-
-      // Wait for write to settle, then send Enter
-      await new Promise(r => setTimeout(r, settleMs));
-      if (session.pty) {
-        writeToPty(session.pty, '\r');
-      }
+      console.log(`Deferred prompt delivered to ${name} (${prompt.length} chars${d?.resends ? `, ${d.resends} Enter resend(s)` : ''})`);
     } catch (err) {
       console.error(`Failed to deliver prompt to ${name}:`, err);
-      return;
     }
-
-    if (chunkCount > 1 && os.platform() === 'win32') {
-      console.log(`Deferred prompt: chunked ${prompt.length} chars → ${chunkCount} × ${CHUNKED_WRITE_SIZE}, settle ${settleMs}ms`);
-    }
-    console.log(`Deferred prompt delivered to ${name} (${prompt.length} chars)`);
   }
 
   private async handlePtyExit(name: string, code: number, exitingCreatedAt?: string): Promise<void> {
@@ -1318,14 +1318,42 @@ export class SessionManager {
   }
 
   // PTY operations
+
+  // Per-session FIFO write queue. Each /input POST (and the legacy WS input
+  // path) runs in its own async handler; because chunked large-paste writes
+  // await between chunks, two concurrent writeToSession calls could interleave
+  // their bytes at the PTY even when requests arrive in order. Chaining every
+  // write onto a per-session tail makes writes atomic relative to each other.
+  // Mirrors the submitMutexes pattern (incl. tail cleanup).
+  private writeQueues = new Map<string, Promise<void>>();
+
   /**
    * Write data to a session's PTY.
+   * Serialized per session via writeQueues — concurrent callers can never
+   * interleave their bytes (see comment on writeQueues).
    * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
    * If data is wrapped in bracketed paste markers, sends markers atomically
    * and only chunks the inner content to avoid splitting escape sequences.
    */
   async writeToSession(name: string, data: string): Promise<boolean> {
-    const session = this.sessions.get(this.resolveSessionName(name));
+    const resolvedName = this.resolveSessionName(name);
+    const prior = this.writeQueues.get(resolvedName) ?? Promise.resolve();
+    const run = prior.then(() => this.writeToSessionUnqueued(resolvedName, data));
+    // The stored tail swallows rejections so one failed write never poisons
+    // the chain for later writes; each caller still sees its own rejection.
+    const tail = run.then(() => undefined, () => undefined);
+    this.writeQueues.set(resolvedName, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.writeQueues.get(resolvedName) === tail) {
+        this.writeQueues.delete(resolvedName);
+      }
+    }
+  }
+
+  private async writeToSessionUnqueued(resolvedName: string, data: string): Promise<boolean> {
+    const session = this.sessions.get(resolvedName);
     if (!session || !session.pty) return false;
 
     // Detect bracketed paste wrapping — send markers atomically, chunk inner content
@@ -1342,7 +1370,7 @@ export class SessionManager {
 
     // If this session doesn't have a GUID yet, try to detect it (any provider)
     if (!session.claudeSessionId) {
-      this.retryGuidDetection(name);
+      this.retryGuidDetection(resolvedName);
     }
 
     return true;
@@ -1512,6 +1540,17 @@ export class SessionManager {
   }
 
   /**
+   * Await any in-flight verified submit on this session (best-effort — a new
+   * submit starting afterwards is not blocked). Used by raw /input so
+   * interactive keystrokes can't inject into the middle of a semantic
+   * paste+Enter sequence.
+   */
+  async awaitSubmitIdle(name: string): Promise<void> {
+    const mutex = this.submitMutexes.get(this.resolveSessionName(name));
+    if (mutex) await mutex;
+  }
+
+  /**
    * Get the current prompt depth for a session by tracing the call chain.
    */
   private getPromptDepth(sessionName: string): number {
@@ -1593,8 +1632,8 @@ export class SessionManager {
     try {
       if (!request.force) {
         // Check call lock (inside mutex to prevent race)
-        if (this.responseStore?.isSessionLocked(resolvedName)) {
-          const lock = this.responseStore.getActiveLock(resolvedName);
+        if (this.responseStore?.isSessionLocked(resolvedName, request.responseId)) {
+          const lock = this.responseStore.getActiveLock(resolvedName, request.responseId);
           const lockAge = lock ? Math.round((Date.now() - lock.lockedAt) / 1000) : 0;
           return {
             success: false, sessionStatus: session.status, isActive: false, locked: true,
@@ -1618,33 +1657,32 @@ export class SessionManager {
         return { success: false, sessionStatus: session.status, isActive: false, error: 'Prompt cannot be empty.' };
       }
 
-      const useBracketedPaste = request.bracketedPaste !== false;
-
-      // Write prompt to PTY — markers atomic, inner content chunked for ConPTY safety
-      if (useBracketedPaste) {
-        writeToPty(session.pty, '\x1b[200~');
+      if (request.bracketedPaste === false) {
+        // Raw (non-bracketed) write — rare compat path. Without paste markers
+        // framing the content there is nothing to verify against; legacy
+        // fixed-delay behavior is preserved.
         await writeChunkedToPty(session.pty, prompt);
-        writeToPty(session.pty, '\x1b[201~');
-      } else {
-        await writeChunkedToPty(session.pty, prompt);
-      }
-
-      // Delay before first Enter
-      const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
-      await new Promise(r => setTimeout(r, submitDelay));
-
-      // First Enter
-      writeToPty(session.pty, '\r');
-
-      // Optional double-submit for reliability
-      if (process.env.PROMPT_DOUBLE_SUBMIT === 'true') {
-        const doubleDelay = parseInt(process.env.PROMPT_DOUBLE_SUBMIT_DELAY_MS || '300', 10);
-        await new Promise(r => setTimeout(r, doubleDelay));
+        const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
+        await new Promise(r => setTimeout(r, submitDelay));
         writeToPty(session.pty, '\r');
+        const isActive = this.isSessionActive(resolvedName) || false;
+        return { success: true, sessionStatus: session.status, isActive };
       }
 
+      // Verified delivery (feature 070 phase B): cross-card prompts use the
+      // same self-verifying primitive as automations and questionnaire
+      // submits — paste, confirm queued, Enter, verify the input cleared
+      // (Enter-only resend). The call-lock/busy/depth guards above are
+      // cross-card-specific and stay here, layered on top.
+      const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
       const isActive = this.isSessionActive(resolvedName) || false;
-      return { success: true, sessionStatus: session.status, isActive };
+      if (delivery.outcome !== 'delivered') {
+        return {
+          success: false, sessionStatus: session.status, isActive, delivery,
+          error: `Prompt delivery ${delivery.outcome}${delivery.reason ? ` (${delivery.reason})` : ''}.`,
+        };
+      }
+      return { success: true, sessionStatus: session.status, isActive, delivery };
     } finally {
       releaseMutex!();
       // Clean up mutex if it's still ours
@@ -1652,6 +1690,264 @@ export class SessionManager {
         this.submitMutexes.delete(resolvedName);
       }
     }
+  }
+
+  /** Post-Enter poll ladder (cumulative ~1s/3s/6s) — spike observed legitimate submits clearing as late as ~5s. */
+  private static readonly VERIFY_POLL_DELAYS_MS = [1000, 2000, 3000];
+  private static readonly VERIFY_MAX_RESENDS = 2;
+  /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
+  private static readonly VERIFY_SNAPSHOT_LINES = 60;
+
+  private verifySnapshotClassify(name: string, expected: string | null): InputRegionClassification | null {
+    const session = this.sessions.get(name);
+    const provider = session?.provider;
+    if (provider !== 'claude' && provider !== 'codex' && provider !== 'gemini') return null;
+    const snap = this.getSnapshot(name, SessionManager.VERIFY_SNAPSHOT_LINES);
+    if (!snap) return null;
+    return classifyInputRegion(provider as SubmitProvider, snap.content, expected);
+  }
+
+  /**
+   * Self-verifying prompt submit (feature 070).
+   *
+   * Physically observes the terminal's input region before and after Enter:
+   *  - pre-paste: a blocking dialog (no input region) aborts BEFORE pasting —
+   *    the spike proved a paste into a dialog renders nowhere and a blind
+   *    Enter can ACCEPT the dialog; non-empty input warns and proceeds
+   *    (user decision: visibility over suppression, never hard-block).
+   *  - post-paste: confirms our payload is queued (placeholder or normalized
+   *    prefix). A vanished paste over an empty box is re-pasted once.
+   *  - post-Enter: polls the input region (1s/3s/6s); success = our queued
+   *    content DISAPPEARED. If a full ladder still shows it queued, re-sends
+   *    Enter ONLY (never re-pastes — re-pasting is what caused the historical
+   *    duplicate-fire bug), capped at 2 resends, then fails loudly.
+   *
+   * Returns a four-state DeliveryResult: delivered | failed | ambiguous | blocked.
+   * All non-delivered outcomes are meant to be surfaced loudly by callers.
+   */
+  async submitVerified(name: string, request: SubmitRequest): Promise<VerifiedSubmitResult> {
+    const resolvedName = this.resolveSessionName(name);
+    const session = this.sessions.get(resolvedName);
+
+    if (!session) {
+      const persisted = this.persistedState.sessions[resolvedName];
+      const status = persisted ? 'stopped' : 'not_found';
+      return { success: false, sessionStatus: status as any, error: status === 'stopped' ? 'Session is stopped.' : 'Session not found.' };
+    }
+    if (session.status !== 'running' && session.status !== 'detached') {
+      return { success: false, sessionStatus: session.status, error: `Session is ${session.status}. Cannot submit prompt.` };
+    }
+    if (!session.pty) {
+      return { success: false, sessionStatus: session.status, error: 'Session has no active PTY.' };
+    }
+    const prompt = request.prompt;
+    if (!prompt || prompt.trim().length === 0) {
+      return { success: false, sessionStatus: session.status, error: 'Prompt cannot be empty.' };
+    }
+
+    // Per-session mutex — serializes the whole paste→confirm cycle so two
+    // near-simultaneous submits cannot interleave their verification windows.
+    const existingMutex = this.submitMutexes.get(resolvedName);
+    let releaseMutex: () => void;
+    const mutexPromise = new Promise<void>(resolve => { releaseMutex = resolve; });
+    this.submitMutexes.set(resolvedName, mutexPromise);
+    if (existingMutex) await existingMutex;
+
+    try {
+      if (!request.force) {
+        if (this.responseStore?.isSessionLocked(resolvedName, request.responseId)) {
+          const lock = this.responseStore.getActiveLock(resolvedName, request.responseId);
+          const lockAge = lock ? Math.round((Date.now() - lock.lockedAt) / 1000) : 0;
+          return {
+            success: false, sessionStatus: session.status, locked: true,
+            error: `Session is currently responding to a prompt from ${lock?.callingSession || 'another caller'} (locked ${lockAge}s ago). Try again later.`,
+          };
+        }
+        if (this.isSessionActive(resolvedName)) {
+          const outputAge = Date.now() - new Date(session.lastOutputAt).getTime();
+          return {
+            success: false, sessionStatus: session.status, busy: true,
+            error: `Session is currently active (output ${Math.round(outputAge / 1000)}s ago). The AI may be mid-response. Use force to send anyway.`,
+          };
+        }
+      }
+
+      const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
+      return { success: delivery.outcome === 'delivered', sessionStatus: session.status, delivery };
+    } finally {
+      releaseMutex!();
+      if (this.submitMutexes.get(resolvedName) === mutexPromise) {
+        this.submitMutexes.delete(resolvedName);
+      }
+    }
+  }
+
+  /**
+   * Core verified-delivery flow (feature 070). Caller MUST hold the session's
+   * submit mutex and have validated the session is running/detached with a
+   * live PTY. Performs: pre-paste classify → paste (balanced markers, chunked,
+   * chunk-scaled settle) → confirm queued → Enter → poll ladder → Enter-only
+   * resend (bounded) → typed DeliveryResult. Never re-pastes except over a
+   * provably empty input box.
+   */
+  private async performVerifiedDelivery(resolvedName: string, prompt: string): Promise<DeliveryResult> {
+    const session = this.sessions.get(resolvedName)!;
+    const startedAt = Date.now();
+    const warnings: string[] = [];
+    const pollsLog: string[] = [];
+
+    const mk = (outcome: DeliveryResult['outcome'], extra: Partial<DeliveryResult> & { verified?: boolean; mode?: DeliveryResult['mode'] } = {}, attempts = 0, resends = 0): DeliveryResult => ({
+      outcome,
+      verified: extra.verified ?? true,
+      mode: extra.mode ?? 'verified_paste',
+      attempts,
+      resends,
+      warnings,
+      reason: extra.reason,
+      polls: pollsLog.length ? pollsLog : undefined,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    {
+      const classifiable = session.provider === 'claude' || session.provider === 'codex' || session.provider === 'gemini';
+      const chunkCount = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
+      // Chunk-scaled settle (generalized from the Windows deferred path):
+      // Codex's TUI drops a fixed-600ms Enter on multi-chunk pastes.
+      const settleMs = 600 + Math.max(0, chunkCount - 1) * 500;
+
+      const paste = async () => {
+        writeToPty(session.pty!, '\x1b[200~');
+        await writeChunkedToPty(session.pty!, prompt);
+        writeToPty(session.pty!, '\x1b[201~');
+        await new Promise(r => setTimeout(r, settleMs));
+      };
+
+      if (!classifiable) {
+        // Provider TUI we cannot classify (e.g. bash): legacy unverified
+        // paste + single Enter — same behavior as before, flagged in result.
+        warnings.push('verification_unsupported_provider');
+        await paste();
+        writeToPty(session.pty!, '\r');
+        return mk('delivered', { verified: false, mode: 'unverified_paste' }, 1, 0);
+      }
+
+      // --- Pre-paste check ---
+      const pre = this.verifySnapshotClassify(resolvedName, prompt);
+      if (pre === 'no_input_region') {
+        // Blocking dialog (trust / update / auth). Pasting would vanish into
+        // it and Enter could ACCEPT it (observed live in the spike). Abort.
+        return mk('blocked', { reason: 'blocked_dialog_before_paste' });
+      }
+      if (pre === null) warnings.push('pre_paste_snapshot_unavailable');
+      if (pre === 'unrecognized') warnings.push('pre_paste_unrecognized');
+      if (pre === 'queued_ours' || pre === 'queued_other') {
+        const region = extractInputRegion(session.provider as SubmitProvider, this.getSnapshot(resolvedName, SessionManager.VERIFY_SNAPSHOT_LINES)?.content || '');
+        const snippet = region.text.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+        warnings.push(`non_empty_input_before_paste: "${snippet}"`);
+      }
+      const preWasEmptyish = pre === 'empty' || pre === null || pre === 'unrecognized';
+
+      // --- Paste + confirm queued ---
+      await paste();
+      let post = this.verifySnapshotClassify(resolvedName, prompt);
+      if (post === 'no_input_region') {
+        // A dialog swallowed the paste between the pre-check and now.
+        // Do NOT send Enter — it could accept the dialog.
+        return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
+      }
+      if (post === 'empty' && preWasEmptyish) {
+        // Paste provably absent over an empty box — the one case where a
+        // re-paste is safe (cannot duplicate or merge).
+        warnings.push('paste_retried');
+        await paste();
+        post = this.verifySnapshotClassify(resolvedName, prompt);
+      }
+      if (post === 'empty') {
+        return mk('failed', { reason: 'paste_lost' });
+      }
+      if (post === 'queued_other') {
+        // Box has content but ours is not findable in it. Enter here would
+        // submit content we cannot account for — refuse, loudly.
+        return mk('failed', { reason: 'paste_not_observed_over_existing_input' });
+      }
+      // post === 'queued_ours' | 'unrecognized' | null → proceed. For
+      // unrecognized/null we still send Enter: the paste DID land (or we
+      // can't tell), and stranding a landed paste recreates the exact
+      // merged-prompt bug this feature exists to kill. The ladder below
+      // surfaces lingering uncertainty as 'ambiguous'.
+
+      // --- Enter + verify ladder ---
+      let attempts = 0;
+      let resends = 0;
+      const dropFirstEnter = process.env.SLYCODE_TEST_DROP_ENTER === '1';
+      if (dropFirstEnter) {
+        warnings.push('test_drop_enter_active');
+        attempts++; // simulate an OS-dropped Enter: attempted, never written
+      } else {
+        writeToPty(session.pty!, '\r');
+        attempts++;
+      }
+
+      // Bounded outer loop: initial Enter + up to VERIFY_MAX_RESENDS resends.
+      for (;;) {
+        const ladder: InputRegionClassification[] = [];
+        let action: ReturnType<typeof decideNextAction> = 'wait';
+        for (const delay of SessionManager.VERIFY_POLL_DELAYS_MS) {
+          await new Promise(r => setTimeout(r, delay));
+          const live = this.sessions.get(resolvedName);
+          if (!live || live.status === 'stopped' || !live.pty) {
+            return mk('failed', { reason: 'session_stopped' }, attempts, resends);
+          }
+          let c = this.verifySnapshotClassify(resolvedName, prompt);
+          if (c === null) {
+            await new Promise(r => setTimeout(r, 1000));
+            c = this.verifySnapshotClassify(resolvedName, prompt);
+            if (c === null) {
+              return mk('ambiguous', { reason: 'snapshot_unavailable' }, attempts, resends);
+            }
+          }
+          ladder.push(c);
+          pollsLog.push(c);
+          action = decideNextAction({
+            polls: ladder,
+            maxPolls: SessionManager.VERIFY_POLL_DELAYS_MS.length,
+            resends,
+            maxResends: SessionManager.VERIFY_MAX_RESENDS,
+          });
+          if (action !== 'wait') break;
+        }
+
+        if (action === 'delivered') {
+          return mk('delivered', {}, attempts, resends);
+        }
+        if (action === 'ambiguous') {
+          return mk('ambiguous', { reason: 'input_region_unrecognized' }, attempts, resends);
+        }
+        if (action === 'resend_enter') {
+          const live = this.sessions.get(resolvedName);
+          if (!live?.pty) {
+            return mk('failed', { reason: 'session_stopped' }, attempts, resends);
+          }
+          writeToPty(live.pty, '\r');
+          attempts++;
+          resends++;
+          continue;
+        }
+        // 'failed' (or an unexpected residual 'wait' after a full ladder)
+        return mk('failed', { reason: 'enter_not_accepted' }, attempts, resends);
+      }
+    }
+  }
+
+  /**
+   * Current input-region classification for a session (no expected payload).
+   * Used by the scheduler's fresh-path startup-dialog check (feature 070
+   * phase B). Returns null when the session/provider cannot be classified.
+   */
+  getInputRegionState(name: string): InputRegionClassification | null {
+    const resolvedName = this.resolveSessionName(name);
+    if (!this.sessions.get(resolvedName)) return null;
+    return this.verifySnapshotClassify(resolvedName, null);
   }
 
   /**

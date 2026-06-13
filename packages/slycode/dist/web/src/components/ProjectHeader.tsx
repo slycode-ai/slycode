@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { SlyActionConfigModal } from './SlyActionConfigModal';
 import { ActionUpdatesModal } from './ActionUpdatesModal';
 import { ShortcutsConfigModal } from './ShortcutsConfigModal';
+import { DefaultProviderConfig } from './DefaultProviderConfig';
 import { HealthMonitor } from './HealthMonitor';
 import { SearchBar } from './SearchBar';
 import { ThemeToggle } from './ThemeToggle';
@@ -161,6 +162,9 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </button>
+
+              {/* Workspace default provider/model — ghost neon, sibling to Shortcuts (feature 073) */}
+              <DefaultProviderConfig />
 
               {/* Automations toggle button - ghost orange, pulses when automations are active */}
               <button

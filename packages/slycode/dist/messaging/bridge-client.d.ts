@@ -54,6 +54,15 @@ export declare class BridgeClient {
     sendMessage(sessionName: string, cwd: string, message: string, provider?: string, createInstructionFile?: boolean, model?: string, aliases?: string[]): Promise<{
         permissionMismatch?: boolean;
     }>;
+    /**
+     * Verified prompt delivery (feature 070 phase B): the bridge pastes,
+     * confirms the message is queued, sends Enter, and verifies the input
+     * region cleared (Enter-only resend on a provably-still-queued prompt).
+     * Replaces the blind paste + fixed delay + Enter (+PROMPT_DOUBLE_SUBMIT)
+     * sequence. Throws with a user-facing message on any non-delivered
+     * outcome — callers' channel error handlers surface it to the user.
+     */
+    submitVerified(sessionName: string, prompt: string): Promise<void>;
     restartSession(sessionName: string, cwd: string, provider: string, prompt?: string, model?: string, aliases?: string[]): Promise<BridgeSessionInfo>;
     /**
      * Poll bridge stats and send typing indicators while session is active.

@@ -137,6 +137,25 @@ export function buildPrompt(
 }
 
 /**
+ * Compact local-time prefix for Sly Actions fired from the web terminal.
+ * Format: `[DD-MM-YYYY HH:mm:ss] ` (trailing space) in the browser's local
+ * time — consistent with how the rest of the web UI renders timestamps.
+ */
+export function timestampPrefix(d: Date = new Date()): string {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `[${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}] `;
+}
+
+/**
+ * Prepend the timestamp to a Sly Action prompt — EXCEPT bare slash commands
+ * (e.g. `/clear`, `/checkpoint`), where a prefix would break TUI command
+ * recognition.
+ */
+export function withTimestamp(content: string): string {
+  return content.trimStart().startsWith('/') ? content : timestampPrefix() + content;
+}
+
+/**
  * Get terminal class from kanban stage
  */
 export function getTerminalClassFromStage(stage: string): TerminalClass {

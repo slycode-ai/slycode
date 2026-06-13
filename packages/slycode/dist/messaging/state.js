@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { computeSessionKey } from './session-keys.js';
+import { computeSessionKey, resolveCanonicalProjectId } from './session-keys.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function getWorkspaceRoot() {
     if (process.env.SLYCODE_HOME)
@@ -378,6 +378,67 @@ export class StateManager {
         if (!this.voiceId)
             return null;
         return { id: this.voiceId, name: this.voiceName || this.voiceId };
+    }
+    /**
+     * Resolve the project id encoded in a session name's first segment
+     * (e.g. "claude-master:claude:card:card-123" → "claude-master"). Returns
+     * null for the global session or when no project matches. Accepts session
+     * keys, aliases, or canonical ids via resolveCanonicalProjectId.
+     */
+    projectIdFromSession(session) {
+        if (!session)
+            return null;
+        const firstSegment = session.split(':')[0];
+        if (!firstSegment || firstSegment === 'global')
+            return null;
+        return resolveCanonicalProjectId(firstSegment, this.state.projects)?.id ?? null;
+    }
+    /**
+     * Voice resolved for a specific session/caller, independent of which target
+     * the Telegram UI is currently pointed at. This is what TTS render paths
+     * should use: a claude-master automation must render in claude-master's
+     * voice even if the user last navigated to a different project. Falls back
+     * to the ambient getVoice() when the session has no resolvable project.
+     */
+    getVoiceForSession(session) {
+        const projectId = this.projectIdFromSession(session);
+        if (projectId) {
+            const v = this.prefsFor(projectId)?.voice;
+            if (v)
+                return { id: v.id, name: v.name || v.id };
+            if (this.voiceId)
+                return { id: this.voiceId, name: this.voiceName || this.voiceId };
+            return null;
+        }
+        return this.getVoice();
+    }
+    /**
+     * Resolve a project's default voice for a programmatic caller (e.g. the
+     * /tts/generate endpoint). Prefers an explicit projectId, then the caller's
+     * session. Unlike getVoiceForSession, this does NOT fall back to the ambient
+     * Telegram target — when no project context resolves it returns null so the
+     * caller falls through to the env default. Both projectId and session may
+     * be a canonical id, sessionKey, or alias.
+     */
+    resolveContextVoice(opts) {
+        // Reload the registry so a project added/edited after service start
+        // (or a registry that was empty at boot) resolves correctly.
+        this.reloadProjects();
+        let pid = null;
+        if (opts.projectId) {
+            pid = resolveCanonicalProjectId(opts.projectId, this.state.projects)?.id ?? null;
+        }
+        if (!pid && opts.session) {
+            pid = this.projectIdFromSession(opts.session);
+        }
+        if (!pid)
+            return null;
+        const v = this.prefsFor(pid)?.voice;
+        if (v)
+            return { id: v.id, name: v.name || v.id };
+        if (this.voiceId)
+            return { id: this.voiceId, name: this.voiceName || this.voiceId };
+        return null;
     }
     setVoice(id, name) {
         const projectId = this.getCurrentProjectId();

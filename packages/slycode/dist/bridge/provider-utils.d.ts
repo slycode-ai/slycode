@@ -44,9 +44,7 @@ export interface ProviderDefault {
 export interface ProvidersData {
     providers: Record<string, ProviderConfig>;
     defaults: {
-        stages: Record<string, ProviderDefault>;
         global: ProviderDefault;
-        projects: Record<string, ProviderDefault>;
     };
 }
 /**

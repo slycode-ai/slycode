@@ -7,6 +7,7 @@ import {
 } from '@/lib/sly-actions';
 import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
 import { onTerminalPrompt } from '@/lib/terminal-events';
+import { submitVerified, notifyDeliveryFailure, type VerifiedDelivery } from '@/lib/submit-verified';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import { BranchTab } from './BranchTab';
 import { useVoice } from '@/contexts/VoiceContext';
@@ -171,28 +172,25 @@ export function GlobalClaudePanel({
     if (networkFailed) return;
 
     if (resolvedRunning && resolvedName) {
-      // Session is running — send input directly to the resolved name. Check
-      // /input response: if the session exited between probe and input (404),
-      // surface the failure rather than silently swallowing it.
       try {
-        const pasteRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(resolvedName)}/input`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: `\x1b[200~${event.prompt}\x1b[201~` }),
-        });
-        if (!pasteRes.ok) {
-          console.error(`[GlobalClaudePanel] Input paste failed (${pasteRes.status}) for session ${resolvedName}`);
-          return;
-        }
         if (event.autoSubmit !== false) {
-          await new Promise(r => setTimeout(r, 600));
-          const enterRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(resolvedName)}/input`, {
+          // Verified delivery (feature 070): paste, confirm queued, Enter,
+          // verify cleared. Non-delivered → in-panel toast via the
+          // delivery-failure event (the embedded terminal panel listens).
+          const delivery = await submitVerified(resolvedName, event.prompt);
+          if (delivery && delivery.outcome !== 'delivered') {
+            console.error(`[GlobalClaudePanel] Prompt delivery ${delivery.outcome} for session ${resolvedName}${delivery.reason ? ` (${delivery.reason})` : ''}`);
+            notifyDeliveryFailure(resolvedName, delivery);
+          }
+        } else {
+          // Insert-only (no auto-submit) — raw input stays raw.
+          const pasteRes = await fetch(`/api/bridge/sessions/${encodeURIComponent(resolvedName)}/input`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: '\r' }),
+            body: JSON.stringify({ data: `\x1b[200~${event.prompt}\x1b[201~` }),
           });
-          if (!enterRes.ok) {
-            console.error(`[GlobalClaudePanel] Enter submission failed (${enterRes.status}) for session ${resolvedName}`);
+          if (!pasteRes.ok) {
+            console.error(`[GlobalClaudePanel] Input paste failed (${pasteRes.status}) for session ${resolvedName}`);
           }
         }
       } catch (err) {
@@ -213,10 +211,15 @@ export function GlobalClaudePanel({
             cwd,
             fresh: !resolvedHasHistory,
             prompt: event.prompt,
+            verifyDelivery: true,
           }),
         });
         if (res.ok) {
           const data = await res.json();
+          const delivery = data.delivery as VerifiedDelivery | undefined;
+          if (delivery && delivery.outcome !== 'delivered') {
+            notifyDeliveryFailure(createName, delivery);
+          }
           setSessionInfo({ status: data.status, hasHistory: data.hasHistory });
         }
       } catch (err) {

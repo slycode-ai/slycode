@@ -126,7 +126,8 @@ export interface KanbanCard {
   design_ref?: string;  // Reference to design document
   feature_ref?: string; // Reference to feature spec
   test_ref?: string;    // Reference to test document
-  html_ref?: string;    // Reference to HTML attachment (rendered in sandboxed iframe)
+  html_ref?: string;    // LEGACY single HTML attachment — read-time fallback only; folded into html_refs on next CLI write (feature 072)
+  html_refs?: string[]; // List of HTML attachments (rendered in sandboxed iframes, multiple per card)
   questionnaire_refs?: string[]; // List of attached questionnaires (JSON, multiple per card)
   status?: {
     text: string;

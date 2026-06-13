@@ -145,8 +145,9 @@ export class ResponseStore {
   /**
    * Check if a session is locked by an active --wait call.
    */
-  isSessionLocked(sessionName: string): boolean {
+  isSessionLocked(sessionName: string, excludeResponseId?: string): boolean {
     for (const entry of this.responses.values()) {
+      if (entry.responseId === excludeResponseId) continue; // a submission never locks itself
       if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut) {
         return true;
       }
@@ -157,8 +158,9 @@ export class ResponseStore {
   /**
    * Get the active lock info for a session (for error messages).
    */
-  getActiveLock(sessionName: string): { callingSession: string; lockedAt: number } | null {
+  getActiveLock(sessionName: string, excludeResponseId?: string): { callingSession: string; lockedAt: number } | null {
     for (const entry of this.responses.values()) {
+      if (entry.responseId === excludeResponseId) continue;
       if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut) {
         return { callingSession: entry.callingSession, lockedAt: entry.createdAt };
       }

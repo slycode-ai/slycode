@@ -58,6 +58,39 @@ export declare class StateManager {
         id: string;
         name: string;
     } | null;
+    /**
+     * Resolve the project id encoded in a session name's first segment
+     * (e.g. "claude-master:claude:card:card-123" → "claude-master"). Returns
+     * null for the global session or when no project matches. Accepts session
+     * keys, aliases, or canonical ids via resolveCanonicalProjectId.
+     */
+    private projectIdFromSession;
+    /**
+     * Voice resolved for a specific session/caller, independent of which target
+     * the Telegram UI is currently pointed at. This is what TTS render paths
+     * should use: a claude-master automation must render in claude-master's
+     * voice even if the user last navigated to a different project. Falls back
+     * to the ambient getVoice() when the session has no resolvable project.
+     */
+    getVoiceForSession(session: string | undefined): {
+        id: string;
+        name: string;
+    } | null;
+    /**
+     * Resolve a project's default voice for a programmatic caller (e.g. the
+     * /tts/generate endpoint). Prefers an explicit projectId, then the caller's
+     * session. Unlike getVoiceForSession, this does NOT fall back to the ambient
+     * Telegram target — when no project context resolves it returns null so the
+     * caller falls through to the env default. Both projectId and session may
+     * be a canonical id, sessionKey, or alias.
+     */
+    resolveContextVoice(opts: {
+        projectId?: string;
+        session?: string;
+    }): {
+        id: string;
+        name: string;
+    } | null;
     setVoice(id: string, name: string): void;
     clearVoice(): void;
     getResponseMode(): ResponseMode;

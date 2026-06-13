@@ -40,8 +40,11 @@ export function projectKeyAlternation(project) {
  * sessionKey; buttons emitted before a dashboard path rename embed the
  * old sessionKey (now living in sessionKeyAliases).
  *
- * Match order is intentional: id → sessionKey → alias. Returns null when
- * nothing matches.
+ * Match order is intentional: id → sessionKey → alias → name. Display-name
+ * matching (case-insensitive exact) is last so it can never shadow a
+ * canonical key; it exists for human-facing callers like
+ * `messaging-cli generate --project SlyCode`. Returns null when nothing
+ * matches.
  */
 export function resolveCanonicalProjectId(key, projects) {
     const byId = projects.find(p => p.id === key);
@@ -60,6 +63,10 @@ export function resolveCanonicalProjectId(key, projects) {
     });
     if (byAlias)
         return { id: byAlias.id, via: 'alias' };
+    const lowered = key.toLowerCase();
+    const byName = projects.find(p => p.name?.toLowerCase() === lowered);
+    if (byName)
+        return { id: byName.id, via: 'name' };
     return null;
 }
 //# sourceMappingURL=session-keys.js.map

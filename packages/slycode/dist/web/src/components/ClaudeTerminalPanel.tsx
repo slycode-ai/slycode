@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { buildPrompt, renderTemplate, type SlyActionsConfig, type SlyActionItem } from '@/lib/sly-actions';
+import { buildPrompt, renderTemplate, withTimestamp, type SlyActionsConfig, type SlyActionItem } from '@/lib/sly-actions';
+import { submitVerified, deliveryFailureMessage, type VerifiedDelivery } from '@/lib/submit-verified';
 import { usePolling } from '@/hooks/usePolling';
 import { useActionOverflow } from '@/hooks/useActionOverflow';
 
@@ -26,10 +27,9 @@ interface ProviderDefault {
 
 interface ProvidersData {
   providers: Record<string, ProviderConfig>;
+  // Legacy files may still carry `stages`/`projects` keys — readers ignore them.
   defaults: {
-    stages: Record<string, ProviderDefault>;
     global: ProviderDefault;
-    projects: Record<string, ProviderDefault>;
   };
 }
 
@@ -95,8 +95,6 @@ interface ClaudeTerminalPanelProps {
   // For card-specific command modifications
   cardId?: string;
   cardAreas?: string[];
-  // Stage for provider defaults (e.g. "design", "implementation")
-  stage?: string;
   // Override initial provider (e.g. from detected existing session)
   initialProvider?: string;
   // When true, provider is controlled by parent (pills in CardModal); hide built-in selector
@@ -126,7 +124,6 @@ export function ClaudeTerminalPanel({
   className = '',
   cardId,
   cardAreas = [],
-  stage,
   initialProvider,
   parentControlsProvider,
   footerClassName,
@@ -165,10 +162,12 @@ export function ClaudeTerminalPanel({
   // Spawn error toast — shown when session creation fails (e.g. posix_spawnp failed)
   const [spawnError, setSpawnError] = useState<string | null>(null);
 
-  // Model selection state
-  const [selectedModel, setSelectedModel] = useState(''); // '' = Default (no flag)
-  const prevProviderRef = useRef(selectedProvider);
-  const userSelectedModelRef = useRef(false);
+  // Delivery failure toast (feature 070) — shown when a verified prompt
+  // submit reports blocked/failed/ambiguous. Also fed by the global
+  // 'sly-delivery-failure' event so CardModal/GlobalClaudePanel submit paths
+  // surface into the panel (terminal notifications live inside the panel).
+  const [deliveryToast, setDeliveryToast] = useState<string | null>(null);
+
   const sessionInfoRef = useRef(sessionInfo);
   sessionInfoRef.current = sessionInfo;
 
@@ -202,6 +201,19 @@ export function ClaudeTerminalPanel({
   // Effective name for operations: resolved if known, else primary.
   const activeSessionName = resolvedSessionName ?? sessionName;
 
+  // Surface delivery failures broadcast by other submit paths (CardModal
+  // quick-launch, GlobalClaudePanel) for THIS session as an in-panel toast.
+  useEffect(() => {
+    const onDeliveryFailure = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { sessionName: string; message: string } | undefined;
+      if (detail && detail.sessionName === activeSessionName) {
+        setDeliveryToast(detail.message);
+      }
+    };
+    window.addEventListener('sly-delivery-failure', onDeliveryFailure);
+    return () => window.removeEventListener('sly-delivery-failure', onDeliveryFailure);
+  }, [activeSessionName]);
+
   // Use ref for callback to avoid re-creating fetchSessionInfo on every render
   const onSessionChangeRef = useRef(onSessionChange);
   onSessionChangeRef.current = onSessionChange;
@@ -216,23 +228,23 @@ export function ClaudeTerminalPanel({
       .then((data: ProvidersData | null) => {
         if (data) {
           setProvidersData(data);
-          // Load saved defaults for provider and permissions
-          const stageDefault = stage ? data.defaults.stages[stage] : null;
-          const def = stageDefault || data.defaults.global;
+          // Seed from the single global default. Provider/permission changes
+          // made in this panel are ephemeral — nothing is persisted back.
+          const def = data.defaults?.global;
           if (def) {
-            // Only override provider selection if no existing session was detected
-            if (!initialProvider) {
+            // Only override provider selection if no existing session was
+            // detected — the session name is keyed on provider, so rewriting
+            // the provider under a live session would unlink it.
+            if (!initialProvider && !sessionInfoRef.current) {
               setSelectedProvider(def.provider);
             }
             setSkipPermissions(def.skipPermissions);
-            if (def.model) {
-              setSelectedModel(def.model);
-            }
           }
         }
       })
       .catch(() => { /* providers.json not available, use defaults */ });
-  }, [stage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync provider from parent when parent controls provider selection (pills in CardModal)
   useEffect(() => {
@@ -241,53 +253,14 @@ export function ClaudeTerminalPanel({
     }
   }, [parentControlsProvider, initialProvider]);
 
-  // Pre-fill model when provider changes
-  useEffect(() => {
-    if (!providersData) return;
-    const providerChanged = prevProviderRef.current !== selectedProvider;
-    prevProviderRef.current = selectedProvider;
-    if (!providerChanged && userSelectedModelRef.current) return;
-    userSelectedModelRef.current = false;
-    // Priority: last-used from session > stage default > Default
-    const si = sessionInfoRef.current;
-    if (si?.model && si.provider === selectedProvider) {
-      const available = providersData.providers[selectedProvider]?.model?.available;
-      if (available?.some(m => m.id === si.model)) {
-        setSelectedModel(si.model);
-        return;
-      }
-    }
-    const stageDefault = stage ? providersData.defaults.stages[stage] : null;
-    const def = stageDefault || providersData.defaults.global;
-    if (def?.model && def.provider === selectedProvider) {
-      const available = providersData.providers[selectedProvider]?.model?.available;
-      if (available?.some(m => m.id === def.model)) {
-        setSelectedModel(def.model);
-        return;
-      }
-    }
-    setSelectedModel('');
-  }, [selectedProvider, providersData, stage]);
-
-  // Persist provider default to /api/providers (fire-and-forget)
-  const saveProviderDefault = useCallback((provider: string, skip: boolean) => {
-    // Preserve any existing model field in the stage default (stage model defaults are intentional config)
-    const existingDefault = stage
-      ? providersData?.defaults.stages[stage]
-      : providersData?.defaults.global;
-    const defaultVal: Record<string, unknown> = { provider, skipPermissions: skip };
-    if (existingDefault?.model && existingDefault.provider === provider) {
-      defaultVal.model = existingDefault.model;
-    }
-    const defaults = stage
-      ? { stages: { [stage]: defaultVal } }
-      : { global: defaultVal };
-    fetch('/api/providers', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ defaults }),
-    }).catch(() => { /* preference save — ignore errors */ });
-  }, [stage, providersData]);
+  // Model to pass on fresh session create: the global default model, and ONLY
+  // when the chosen provider is the default provider. A manually-switched
+  // provider starts on its own CLI default (no model flag).
+  const modelForCreate = (): string | undefined => {
+    const def = providersData?.defaults?.global;
+    if (def?.model && def.provider === selectedProvider) return def.model;
+    return undefined;
+  };
 
   const isRunning = sessionInfo?.status === 'running' || sessionInfo?.status === 'detached';
   const hasHistory = sessionInfo?.hasHistory;
@@ -402,19 +375,12 @@ export function ClaudeTerminalPanel({
     </div>
   ) : null;
 
-  // Helper to render model label from provider config
-  const getModelLabel = (providerId: string, modelId?: string) => {
-    if (!modelId || !providersData) return null;
-    return providersData.providers[providerId]?.model?.available?.find(m => m.id === modelId)?.label || modelId;
-  };
-
-  // Shared provider selector (eliminates duplication between resume and fresh-start screens)
-  const renderProviderSelector = (options?: { showModel?: boolean }) => {
+  // Shared provider selector (eliminates duplication between resume and fresh-start screens).
+  // Selections here are ephemeral — the saved default only changes via the
+  // top-bar default config (DefaultProviderConfig).
+  const renderProviderSelector = () => {
     if (parentControlsProvider) return null;
     if (!providersData || Object.keys(providersData.providers).length <= 1) return null;
-    const currentProvider = providersData.providers[selectedProvider];
-    const models = currentProvider?.model?.available;
-    const showModel = options?.showModel !== false;
     return (
       <div className="flex flex-col items-center gap-2 mt-3 pt-3 border-t border-void-700/50">
         <div className="flex gap-1">
@@ -423,7 +389,6 @@ export function ClaudeTerminalPanel({
               key={p.id}
               onClick={() => {
                 setSelectedProvider(p.id);
-                saveProviderDefault(p.id, skipPermissions);
                 onProviderChange?.(p.id);
               }}
               className={`rounded-md px-3 py-1 text-xs font-medium transition-all ${
@@ -437,30 +402,11 @@ export function ClaudeTerminalPanel({
           ))}
         </div>
         <div className="flex items-center gap-3">
-          {showModel && models && models.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-void-500">Model</span>
-              <select
-                value={selectedModel}
-                onChange={(e) => { setSelectedModel(e.target.value); userSelectedModelRef.current = true; }}
-                className={`max-w-[140px] truncate rounded border px-2 py-1 text-xs font-medium transition-all ${
-                  selectedModel
-                    ? 'border-neon-blue-400/40 bg-neon-blue-400/10 text-neon-blue-400'
-                    : 'border-void-600 bg-void-800 text-void-400'
-                }`}
-              >
-                <option value="">Default</option>
-                {models.map(m => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
           <label className="flex items-center gap-1.5 text-xs text-void-500 cursor-pointer">
             <input
               type="checkbox"
               checked={skipPermissions}
-              onChange={(e) => { setSkipPermissions(e.target.checked); saveProviderDefault(selectedProvider, e.target.checked); }}
+              onChange={(e) => setSkipPermissions(e.target.checked)}
               className="rounded border-void-600"
             />
             {providersData.providers[selectedProvider]?.permissions.label || 'Skip permissions'}
@@ -485,9 +431,11 @@ export function ClaudeTerminalPanel({
       let prompt: string | undefined;
       const contextObj = context as Record<string, unknown>;
       if (customPromptText) {
+        // Free-typed prompt — left unstamped, same as plain Telegram text.
         prompt = buildPrompt(customPromptText, contextObj);
       } else if (command?.prompt) {
-        prompt = buildPrompt(command.prompt, contextObj);
+        // Sly Action button — prepend the timestamp (slash commands skipped).
+        prompt = withTimestamp(buildPrompt(command.prompt, contextObj));
       }
 
       // For RESUME: use the resolved alias name so the bridge re-attaches to
@@ -504,13 +452,18 @@ export function ClaudeTerminalPanel({
           cwd,
           fresh: !hasHistory,
           prompt,
-          model: selectedModel || undefined,
+          model: modelForCreate(),
           createInstructionFile: instructionFileCheck?.needed ? createInstructionFile : undefined,
+          verifyDelivery: prompt ? true : undefined,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
+        const delivery = data.delivery as VerifiedDelivery | undefined;
+        if (delivery && delivery.outcome !== 'delivered') {
+          setDeliveryToast(deliveryFailureMessage(delivery));
+        }
         setSessionInfo(data);
         onSessionChange?.(data);
         setShowTerminal(true);
@@ -624,12 +577,19 @@ export function ClaudeTerminalPanel({
 
       const { filename } = await res.json();
 
-      // Inject bracketed reference into PTY (insert only, no submit)
-      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: `[Screenshot: screenshots/${filename}]` }),
-      });
+      // Inject bracketed reference into PTY (insert only, no submit).
+      // Prefer the terminal handle so the insert rides the in-order input
+      // queue (feature 071) and can't race concurrent keystrokes.
+      const reference = `[Screenshot: screenshots/${filename}]`;
+      if (terminalHandleRef.current) {
+        terminalHandleRef.current.sendInput(reference);
+      } else {
+        await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: reference }),
+        });
+      }
 
       // Show success toast
       setScreenshotToast({ filename, previewUrl, status: 'done' });
@@ -668,23 +628,24 @@ export function ClaudeTerminalPanel({
       if (action.id === 'show-card' && cardId) {
         command = `${action.command} ${cardId}`;
       }
+      // Prepend the timestamp (computed at click time, not render); bare slash
+      // commands like /clear and /checkpoint are skipped by withTimestamp.
+      command = withTimestamp(command);
       setShowActionsMenu(false);
-      // Send command text wrapped in bracketed paste markers.
-      // Without markers, the TUI processes each chunk as it arrives (on Windows,
-      // writeChunkedToPty sends 1KB chunks with 200ms delays). Bracketed paste
-      // tells the TUI to buffer the entire input as a single paste operation.
-      await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: `\x1b[200~${command}\x1b[201~` }),
-      });
-      // Then send Enter separately if submitting
       if (submit) {
-        await new Promise(r => setTimeout(r, 600));
+        // Verified delivery (feature 070): the bridge pastes, confirms the
+        // command is queued, sends Enter, and verifies the input cleared.
+        const delivery = await submitVerified(activeSessionName, command, bridgeUrl);
+        if (delivery && delivery.outcome !== 'delivered') {
+          setDeliveryToast(deliveryFailureMessage(delivery));
+        }
+      } else {
+        // Insert-only (no submit) — raw input stays raw. Bracketed paste
+        // markers keep the TUI buffering the chunked content as one paste.
         await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(activeSessionName)}/input`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: '\r' }),
+          body: JSON.stringify({ data: `\x1b[200~${command}\x1b[201~` }),
         });
       }
       terminalHandleRef.current?.focus();
@@ -818,7 +779,7 @@ export function ClaudeTerminalPanel({
                     Custom...
                   </button>
                 </div>
-                {renderProviderSelector({ showModel: false })}
+                {renderProviderSelector()}
               </>
             ) : (
               <>
@@ -942,6 +903,29 @@ export function ClaudeTerminalPanel({
             </button>
           </div>
           <pre className="max-h-32 overflow-auto px-3 pb-2 text-xs text-void-300 font-mono whitespace-pre-wrap">{spawnError}</pre>
+        </div>
+      )}
+
+      {/* Delivery failure toast (feature 070) — verified submit reported blocked/failed/ambiguous */}
+      {deliveryToast && (
+        <div className="absolute bottom-3 right-3 left-3 z-50 rounded-lg border border-amber-500/30 bg-void-800/95 shadow-(--shadow-overlay) backdrop-blur-sm">
+          <div className="flex items-start justify-between gap-2 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              Prompt not confirmed submitted
+            </div>
+            <button
+              onClick={() => setDeliveryToast(null)}
+              className="text-void-500 hover:text-void-300 flex-shrink-0"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <pre className="max-h-32 overflow-auto px-3 pb-2 text-xs text-void-300 font-mono whitespace-pre-wrap">{deliveryToast}</pre>
         </div>
       )}
 

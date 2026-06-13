@@ -14,6 +14,7 @@ import { SearchBar } from './SearchBar';
 import { CliAssetsTab } from './CliAssetsTab';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
+import { LogoutButton } from './LogoutButton';
 import { VersionUpdateToast } from './VersionUpdateToast';
 import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
@@ -311,8 +312,9 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       {/* Connection status + theme toggle + version update toast */}
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
-      <div className="absolute right-4 top-4 z-10">
+      <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
         <ThemeToggle />
+        <LogoutButton />
       </div>
 
       {/* Hero Section */}

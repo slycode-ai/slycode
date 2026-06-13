@@ -20,7 +20,7 @@
     "croner": "^10.0.1",
     "diff": "^8.0.3",
     "ebml": "^3.0.0",
-    "next": "16.1.6",
+    "next": "16.2.6",
     "openai": "^6.23.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -36,5 +36,12 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "fast-xml-builder": "1.1.9",
+    "flatted": "3.4.2",
+    "minimatch": "9.0.9",
+    "picomatch@2": "2.3.2",
+    "picomatch@4": "4.0.4"
   }
 }

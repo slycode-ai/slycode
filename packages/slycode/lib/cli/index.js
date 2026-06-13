@@ -74,6 +74,7 @@ Configuration:
   config               View all config settings
   config <key>         View a specific setting
   config <key> <value> Change a setting (e.g. config host 0.0.0.0)
+  reset-password       Clear the web dashboard password (forces re-login)
 
 Maintenance:
   update               Update SlyCode to latest and restart services
@@ -134,6 +135,11 @@ async function main(args) {
         case 'config': {
             const { config } = await Promise.resolve().then(() => __importStar(require('./config')));
             await config(subArgs);
+            break;
+        }
+        case 'reset-password': {
+            const { resetPassword } = await Promise.resolve().then(() => __importStar(require('./reset-password')));
+            await resetPassword(subArgs);
             break;
         }
         case 'sync': {

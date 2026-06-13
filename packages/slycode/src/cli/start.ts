@@ -71,6 +71,10 @@ function startService(
 
 export async function start(_args: string[]): Promise<void> {
   const workspace = resolveWorkspaceOrExit();
+  // Feature 068: pin keyless legacy configs to their prior bind before the new
+  // 127.0.0.1 default would otherwise apply — keeps existing users unaffected.
+  const { migrateLegacyHost } = await import('./config');
+  migrateLegacyHost(workspace);
   const config = resolveConfig(workspace);
   const stateDir = ensureStateDir();
   const logsDir = path.join(stateDir, 'logs');

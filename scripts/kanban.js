@@ -362,7 +362,9 @@ Options:
   --design-ref <path>    Set design document reference (pass "" to clear)
   --feature-ref <path>   Set feature spec reference (pass "" to clear)
   --test-ref <path>      Set test document reference (pass "" to clear)
-  --html-ref <path>      Set HTML attachment reference (pass "" to clear)
+  --html-ref <path>      Append an HTML attachment ref (.html/.htm). Cards can
+                         hold multiple; duplicates are ignored. Pass "" to
+                         clear ALL HTML attachments from the card.
   --questionnaire-ref <path>
                          Append a questionnaire JSON ref. Path must be under
                          documentation/questionnaires/ and end in .json.
@@ -372,8 +374,8 @@ Options:
 Examples:
   kanban update card-123 --title "New title" --priority high
   kanban update card-123 --areas "web-frontend,terminal-bridge"
-  kanban update card-123 --html-ref "documentation/designs/foo.html"
-  kanban update card-123 --html-ref ""    # clear an existing HTML ref
+  kanban update card-123 --html-ref "documentation/designs/foo.html"   # append
+  kanban update card-123 --html-ref ""    # clear ALL HTML attachments
   kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
   kanban update card-123 --questionnaire-ref ""   # clear all questionnaires
   kanban update card-123 --status "Refactoring auth path"
@@ -563,7 +565,7 @@ Send a prompt to another card's session (cross-card execution).
 If no running session exists, one is created automatically.
 
 Options:
-  --provider <id>     Target provider (claude|codex|gemini). Default: stage default
+  --provider <id>     Target provider (claude|codex|gemini). Default: global default
   --model <id>        Model for new sessions (e.g. opus, o3)
   --wait              Wait for a response (sync mode with callback)
   --timeout <secs>    Timeout for --wait mode (default: 120 seconds)
@@ -876,8 +878,15 @@ Priority: ${card.priority}
     if (card.test_ref) {
       output += `Test Doc: ${card.test_ref}\n`;
     }
-    if (card.html_ref) {
-      output += `HTML: ${card.html_ref}\n`;
+    {
+      // Legacy html_ref + html_refs list, normalized (legacy first, deduped)
+      const htmlRefs = Array.isArray(card.html_refs) ? card.html_refs : [];
+      const allHtmlRefs = card.html_ref && !htmlRefs.includes(card.html_ref)
+        ? [card.html_ref, ...htmlRefs]
+        : htmlRefs;
+      for (const ref of allHtmlRefs) {
+        output += `HTML: ${ref}\n`;
+      }
     }
     {
       const statusObj = readStatus(card.status);
@@ -1235,7 +1244,22 @@ function cmdUpdate(args) {
   applyRefFlag('design-ref', 'design_ref', '--design-ref', null, 'design');
   applyRefFlag('feature-ref', 'feature_ref', '--feature-ref', null, 'feature');
   applyRefFlag('test-ref', 'test_ref', '--test-ref', null, 'test');
-  applyRefFlag('html-ref', 'html_ref', '--html-ref', (v) => /\.(html|htm)$/i.test(v), 'html');
+
+  // HTML refs are a list (feature 072 — mirrors questionnaire_refs). Legacy
+  // single `html_ref` migrates on write: fold it into the list before the
+  // flag applies, so append preserves it and "" clears BOTH fields. Cards
+  // never touched by --html-ref keep their legacy field (read-time fallback).
+  if ('html-ref' in opts && card.html_ref) {
+    const existing = Array.isArray(card.html_refs) ? card.html_refs : [];
+    if (!existing.includes(card.html_ref)) {
+      card.html_refs = [card.html_ref, ...existing];
+    }
+    delete card.html_ref;
+    // Recorded as an update so the migration persists even when the flag
+    // itself ends up a no-op (e.g. appending the same path as the legacy ref).
+    updates.push('html_refs: migrated legacy html_ref');
+  }
+  applyRefFlag('html-ref', 'html_refs', '--html-ref', (v) => /\.(html|htm)$/i.test(v), 'html', { list: true });
   applyRefFlag(
     'questionnaire-ref',
     'questionnaire_refs',
@@ -2363,7 +2387,7 @@ function cmdAutomation(args) {
       const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
       const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
       const provider = auto.provider || 'claude';
-      const sessionName = `${PROJECT_NAME}:${provider}:card:${card.id}`;
+      const sessionName = `${PROJECT_NAME}:${provider}:card:${result.card.id}`;
 
       console.log(`Triggering automation: ${cardId}`);
       console.log(`  Session: ${sessionName}`);
@@ -2391,6 +2415,7 @@ function cmdAutomation(args) {
               cwd,
               prompt: fullPrompt,
               fresh: auto.freshSession || false,
+              verifyDelivery: true,
             }),
           });
 
@@ -2414,7 +2439,28 @@ function cmdAutomation(args) {
               process.exit(1);
             }
           } else {
-            console.log('  Session created and prompt sent.');
+            // Feature 070: the bridge attaches a typed delivery result when
+            // verifyDelivery is set. Surface it — a non-delivered outcome
+            // means the prompt did NOT land (blocked dialog, lost Enter).
+            let delivery = null;
+            try {
+              const created = await createRes.json();
+              delivery = created.delivery || null;
+            } catch { /* older bridge — no delivery info */ }
+            if (delivery) {
+              console.log(`  Delivery: ${delivery.outcome} (mode: ${delivery.mode}, attempts: ${delivery.attempts}${delivery.warnings?.length ? `, warnings: ${delivery.warnings.join('; ')}` : ''})`);
+              if (delivery.outcome !== 'delivered') {
+                console.error(`  WARNING: prompt delivery ${delivery.outcome}${delivery.reason ? ` — ${delivery.reason}` : ''}. The automation did NOT start.`);
+                result.card.automation.lastRun = new Date().toISOString();
+                result.card.automation.lastResult = 'error';
+                result.card.updated_at = new Date().toISOString();
+                result.card.last_modified_by = 'cli';
+                writeKanban(kanban);
+                process.exit(1);
+              }
+            } else {
+              console.log('  Session created and prompt sent.');
+            }
           }
 
           // Update lastRun
@@ -3073,7 +3119,7 @@ function cmdPrompt(args) {
   const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
   const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
 
-  // Load providers.json for stage defaults
+  // Load providers.json for the global default (feature 073)
   let providers = null;
   try {
     const providersPath = path.join(PROJECT_ROOT, 'data', 'providers.json');
@@ -3082,10 +3128,11 @@ function cmdPrompt(args) {
 
   const doPrompt = async () => {
     try {
-      // Resolve provider: flag > stage default > 'claude'
+      // Resolve provider: flag > global default > 'claude' (feature 073 —
+      // stage defaults removed; legacy stages keys in old files are ignored)
       let provider = providerFlag;
-      if (!provider && providers?.defaults?.stages?.[stage]) {
-        provider = providers.defaults.stages[stage].provider;
+      if (!provider && providers?.defaults?.global?.provider) {
+        provider = providers.defaults.global.provider;
       }
       if (!provider) provider = 'claude';
 
@@ -3312,7 +3359,11 @@ Either way, the CLI will print a success line with the byte count and a preview 
         const submitRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/submit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: fullPrompt, force, callingSession }),
+          // responseId: this submission's own --wait registration — the bridge
+          // excludes it from the call-lock guard (it was registered BEFORE the
+          // submit so the callback id could be embedded in the prompt; without
+          // the exclusion we'd self-reject on every prompt to a live session).
+          body: JSON.stringify({ prompt: fullPrompt, force, callingSession, responseId }),
         });
 
         const submitResult = await submitRes.json();

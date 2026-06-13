@@ -5,6 +5,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { connectionManager } from '@/lib/connection-manager';
+import { InputQueue } from '@/lib/input-queue';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalHandle {
@@ -48,6 +49,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [prevSession, setPrevSession] = useState(sessionName);
   // Track if we've ever connected
   const hasConnectedRef = useRef(false);
+  // In-order, single-flight, coalescing sender for ALL raw input (feature 071).
+  // Independent per-keystroke POSTs race on slow connections — both in the
+  // network and in the bridge's concurrent handlers — scrambling input.
+  // Created in the main effect (lifecycle tied to fetchAbort), held in a ref
+  // so the imperative handle can reach it.
+  const inputQueueRef = useRef<InputQueue | null>(null);
 
   // Reset restoring state when session changes (during render, not in effect)
   if (prevSession !== sessionName) {
@@ -74,6 +81,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       terminalRef.current?.focus();
     },
     sendInput: (data: string) => {
+      if (inputQueueRef.current) {
+        inputQueueRef.current.enqueue(data);
+        return;
+      }
+      // Queue not mounted (terminal effect hasn't run) — degenerate window;
+      // preserve the old direct-POST behavior.
       fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,6 +102,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // AbortController for fire-and-forget fetch calls (input, resize)
     const fetchAbort = new AbortController();
+
+    // Single in-order send queue for ALL raw input from this terminal
+    // (keystrokes, pastes, programmatic inserts). One POST in flight at a
+    // time; bursts coalesce; bracketed-paste payloads stay standalone.
+    const inputQueue = new InputQueue({
+      send: (data: string) =>
+        fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data }),
+          signal: fetchAbort.signal,
+        }).then((res) => {
+          // Reject on HTTP failure so the queue's bounded retry can recover
+          // transient proxy blips; after retries the item drops silently
+          // (matches the old fire-and-forget behavior).
+          if (!res.ok) throw new Error(`input POST failed: ${res.status}`);
+        }),
+      signal: fetchAbort.signal,
+    });
+    inputQueueRef.current = inputQueue;
 
     // Detect theme for terminal background
     const isDark = document.documentElement.classList.contains('dark');
@@ -131,24 +164,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // bracketed paste treat the inner bytes as literal text and will not
     // interpret escape sequences. Use sendKey() for raw keystrokes instead.
     const pasteText = (text: string) => {
-      const wrapped = `\x1b[200~${text}\x1b[201~`;
-      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: wrapped }),
-        signal: fetchAbort.signal,
-      }).catch(() => {});
+      // 'paste' kind: never coalesced with neighbouring keystrokes — the
+      // bridge detects bracketed-paste payloads by their wrapping markers.
+      inputQueue.enqueue(`\x1b[200~${text}\x1b[201~`, 'paste');
     };
 
     // sendKey: raw keystroke/escape sequence path. POSTs bytes unwrapped so
     // the target CLI interprets them as a key press, not as pasted content.
     const sendKey = (bytes: string) => {
-      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: bytes }),
-        signal: fetchAbort.signal,
-      }).catch(() => {});
+      inputQueue.enqueue(bytes);
     };
 
     terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
@@ -265,28 +289,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const handle: TerminalHandle = {
       focus: () => terminal.focus(),
       sendInput: (data: string) => {
-        fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data }),
-          signal: fetchAbort.signal,
-        }).catch(() => {
-          // Silently ignore — aborted or network error
-        });
+        inputQueue.enqueue(data);
       },
     };
     onReadyRef.current?.(handle);
 
-    // Handle user input - send via POST
+    // Handle user input — through the in-order send queue
     terminal.onData((data) => {
-      fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data }),
-        signal: fetchAbort.signal,
-      }).catch(() => {
-        // Silently ignore — aborted or network error
-      });
+      inputQueue.enqueue(data);
     });
 
     // Handle resize — guarded by visibility to prevent background tabs from
@@ -443,7 +453,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     connectionIdRef.current = connectionId;
 
     return () => {
-      fetchAbort.abort();
+      fetchAbort.abort(); // also disposes inputQueue via its signal
+      if (inputQueueRef.current === inputQueue) {
+        inputQueueRef.current = null;
+      }
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);

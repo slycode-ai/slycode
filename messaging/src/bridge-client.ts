@@ -5,10 +5,20 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEBUG_LOG = path.join(__dirname, '..', '..', 'messaging-debug.log');
+const DEBUG_LOG_MAX_BYTES = 1_000_000; // 1MB cap — drop oldest half when exceeded (mirrors automation.log)
 
 function debugLog(msg: string): void {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
-  fs.appendFileSync(DEBUG_LOG, line);
+  try {
+    fs.appendFileSync(DEBUG_LOG, line);
+    const stat = fs.statSync(DEBUG_LOG);
+    if (stat.size > DEBUG_LOG_MAX_BYTES) {
+      const content = fs.readFileSync(DEBUG_LOG, 'utf-8');
+      const lines = content.trim().split('\n');
+      const keep = lines.slice(Math.floor(lines.length / 2));
+      fs.writeFileSync(DEBUG_LOG, keep.join('\n') + '\n');
+    }
+  } catch { /* logging is best-effort — never let it break delivery */ }
   console.log(msg);
 }
 
@@ -344,28 +354,43 @@ export class BridgeClient {
 
     const liveName = resolved!.name;
     debugLog(`[sendMessage] Sending to ${liveName} (status: ${resolved!.info.status}, clients: ${resolved!.info.connectedClients})`);
-    const textSent = await this.sendInput(liveName, `\x1b[200~${message}\x1b[201~`);
-    if (!textSent) {
-      throw new Error(`Failed to send input to session ${liveName}`);
-    }
-
-    const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
-    await new Promise(resolve => setTimeout(resolve, submitDelay));
-    const crSent = await this.sendInput(liveName, '\r');
-    if (!crSent) {
-      debugLog(`[sendMessage] FAILED to send CR to ${liveName} — message typed but not submitted`);
-    }
-
-    // Double-submit: send a second Enter to catch swallowed keystrokes
-    if (process.env.PROMPT_DOUBLE_SUBMIT === 'true') {
-      const doubleDelay = parseInt(process.env.PROMPT_DOUBLE_SUBMIT_DELAY_MS || '300', 10);
-      await new Promise(resolve => setTimeout(resolve, doubleDelay));
-      const cr2Sent = await this.sendInput(liveName, '\r');
-      debugLog(`[sendMessage] Double-submit: cr2=${cr2Sent}`);
-    }
-
-    debugLog(`[sendMessage] Done: text=${textSent}, cr=${crSent}`);
+    await this.submitVerified(liveName, message);
     return {};
+  }
+
+  /**
+   * Verified prompt delivery (feature 070 phase B): the bridge pastes,
+   * confirms the message is queued, sends Enter, and verifies the input
+   * region cleared (Enter-only resend on a provably-still-queued prompt).
+   * Replaces the blind paste + fixed delay + Enter (+PROMPT_DOUBLE_SUBMIT)
+   * sequence. Throws with a user-facing message on any non-delivered
+   * outcome — callers' channel error handlers surface it to the user.
+   */
+  async submitVerified(sessionName: string, prompt: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionName)}/submit-verified`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, force: true }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to send input to session ${sessionName} (${res.status}): ${text}`);
+    }
+    const result = await res.json();
+    const delivery = result.delivery as
+      | { outcome: string; reason?: string; warnings?: string[]; attempts?: number; resends?: number }
+      | undefined;
+    debugLog(`[submitVerified] outcome=${delivery?.outcome ?? 'unknown'}${delivery?.reason ? `, reason=${delivery.reason}` : ''}, attempts=${delivery?.attempts ?? '?'}, resends=${delivery?.resends ?? '?'}${delivery?.warnings?.length ? `, warnings=${delivery.warnings.join('; ')}` : ''}`);
+
+    if (delivery && delivery.outcome !== 'delivered') {
+      // Surface to the caller so the channel adapter can tell the user —
+      // a silent drop here is exactly the failure mode feature 070 kills.
+      const detail = delivery.reason ? ` (${delivery.reason})` : '';
+      if (delivery.outcome === 'blocked') {
+        throw new Error(`The session is blocked by an update/dialog — open its terminal and clear it, then resend${detail}`);
+      }
+      throw new Error(`Message delivery ${delivery.outcome}${detail} — it may not have been submitted. Check the session terminal.`);
+    }
   }
 
   async restartSession(

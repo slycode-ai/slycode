@@ -24,14 +24,13 @@ const PROVIDER_LABELS = {
     gemini: 'Gemini CLI',
 };
 const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS);
-function getProviderDefault(stage) {
+// Single global default (feature 073). Legacy files may still carry
+// stages/projects keys — ignored here.
+function getProviderDefault() {
     try {
         const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
         const data = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
         const defaults = data.defaults;
-        if (stage && defaults.stages[stage]?.provider) {
-            return { provider: defaults.stages[stage].provider, model: defaults.stages[stage].model };
-        }
         return { provider: defaults.global?.provider || 'claude', model: defaults.global?.model };
     }
     catch {
@@ -49,18 +48,6 @@ async function getProviderModels(providerId) {
     }
     catch {
         return [];
-    }
-}
-function updateGlobalProviderDefault(provider) {
-    try {
-        const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
-        const filePath = path.join(root, 'data', 'providers.json');
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        data.defaults.global.provider = provider;
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
-    }
-    catch {
-        // Best-effort — don't break on failure
     }
 }
 /**
@@ -481,7 +468,7 @@ async function executeQuickCommand(commandKey, channel, state, bridge, kanban, a
         projectPath: project?.path,
     });
     // Wrap with channel header so the terminal session knows to reply via messaging
-    const formatted = `[${channel.name}] ${resolved} (${buildFooter(state)})`;
+    const formatted = `[${channel.name}] ${withTimestamp(resolved)} (${buildFooter(state)})`;
     try {
         await channel.sendTyping();
         // Resolve via alias-aware lookup so we deliver to an existing alias-form
@@ -499,12 +486,10 @@ async function executeQuickCommand(commandKey, channel, state, bridge, kanban, a
                     ]]);
                 return;
             }
-            // Active session — inject via sendInput with bracketed paste markers
-            // (ConPTY on Windows needs markers to buffer chunked input as a single paste).
-            // Use the resolved live name so input lands on the actual session.
-            await bridge.sendInput(liveName, `\x1b[200~${formatted}\x1b[201~`);
-            await new Promise(resolve => setTimeout(resolve, 600));
-            await bridge.sendInput(liveName, '\r');
+            // Active session — verified delivery (feature 070 phase B). Throws a
+            // user-facing error on blocked/failed/ambiguous, caught below and
+            // replied to the channel.
+            await bridge.submitVerified(liveName, formatted);
         }
         else {
             // Pre-flight: check instruction file before creating a new session
@@ -535,6 +520,38 @@ function buildFooter(state) {
         parts.push(`Tone: ${tone}`);
     }
     return parts.join(' | ');
+}
+// --- Timestamp Prefix ---
+/**
+ * Compact local-time prefix for forwarded voice messages and Sly Actions.
+ * Format: `[DD-MM-YYYY HH:mm:ss] ` (trailing space). Rendered in the configured
+ * server timezone (`process.env.TZ`, matching the dashboard scheduler); falls
+ * back to UTC. Processing-time is intentional — see the design doc.
+ */
+function timestampPrefix() {
+    const tz = process.env.TZ || 'UTC';
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const get = (t) => parts.find((p) => p.type === t)?.value ?? '';
+    return `[${get('day')}-${get('month')}-${get('year')} ${get('hour')}:${get('minute')}:${get('second')}] `;
+}
+/**
+ * Prepend the timestamp to forwarded content — EXCEPT bare slash commands
+ * (e.g. `/clear`, `/checkpoint`), where a prefix would stop the TUI from
+ * recognising the command.
+ */
+function withTimestamp(content) {
+    if (content.trimStart().startsWith('/'))
+        return content;
+    return timestampPrefix() + content;
 }
 /**
  * Pre-flight check: if a new session would be created and the provider's
@@ -640,7 +657,7 @@ async function handleQuickLaunch(token, channel, state, bridge, kanban) {
     const sessionName = state.getSessionName();
     const cwd = state.getSessionCwd();
     const provider = state.getSelectedProvider();
-    const formatted = `[${channel.name}] ${resolved.prompt} (${buildFooter(state)})`;
+    const formatted = `[${channel.name}] ${withTimestamp(resolved.prompt)} (${buildFooter(state)})`;
     try {
         await channel.sendTyping();
         const aliases = state.getSessionNameAliases();
@@ -860,17 +877,17 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     });
     // --- /provider ---
     channel.onCommand('provider', async () => {
+        // Card/terminal-scoped only (feature 073): sets the sticky per-target
+        // override. The global default is changed in the web UI, not here.
         const current = state.getSelectedProvider();
         const currentLabel = PROVIDER_LABELS[current] || current;
-        const defaultProvider = getProviderDefault().provider;
-        const defaultLabel = PROVIDER_LABELS[defaultProvider] || defaultProvider;
         const target = state.getTarget();
         const contextLabel = target.type === 'card' ? 'card' : 'terminal';
-        const buttons = [
-            [{ label: `Change ${contextLabel} provider`, callbackData: 'prov_scope_current' }],
-            [{ label: 'Change default provider', callbackData: 'prov_scope_default' }],
-        ];
-        await channel.sendInlineKeyboard(`Provider: *${currentLabel}*\nDefault: *${defaultLabel}*`, buttons);
+        const buttons = ALL_PROVIDERS.map(p => [{
+                label: (p === current ? '● ' : '') + PROVIDER_LABELS[p],
+                callbackData: `prov_cur_${p}`,
+            }]);
+        await channel.sendInlineKeyboard(`Provider: *${currentLabel}*\nChange ${contextLabel} provider:`, buttons);
     });
     // --- /model ---
     channel.onCommand('model', async () => {
@@ -1108,30 +1125,19 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         state.setVoiceTone(tone);
         await channel.sendText(`Voice tone set to: ${tone}`);
     });
-    // --- Provider Scope Selection (prov_scope_ prefix) ---
-    channel.onCallback('prov_scope_', async (data) => {
-        const scope = data.replace('prov_scope_', ''); // 'current' or 'default'
-        const prefix = scope === 'default' ? 'prov_def_' : 'prov_cur_';
-        const selected = scope === 'default' ? getProviderDefault().provider : state.getSelectedProvider();
-        const buttons = ALL_PROVIDERS.map(p => [{
-                label: (p === selected ? '● ' : '') + PROVIDER_LABELS[p],
-                callbackData: `${prefix}${p}`,
-            }]);
-        const heading = scope === 'default' ? 'Change default provider:' : 'Change current provider:';
-        await channel.sendInlineKeyboard(heading, buttons);
-    });
     // --- Change Current Provider (prov_cur_ prefix) ---
+    // Sets the sticky per-target override. The global default is web-UI-only
+    // (feature 073) — there is deliberately no default-changing path here.
     channel.onCallback('prov_cur_', async (data) => {
         const provider = data.replace('prov_cur_', '');
         if (!ALL_PROVIDERS.includes(provider))
             return;
         state.setProviderOverride(provider);
         state.setSelectedProvider(provider);
-        // Pre-fill model from stage default if applicable
-        const target = state.getTarget();
-        const stageDefault = getProviderDefault(target.stage);
-        if (stageDefault.model && stageDefault.provider === provider) {
-            state.setSelectedModel(stageDefault.model);
+        // Pre-fill model from the global default when it targets this provider
+        const globalDefault = getProviderDefault();
+        if (globalDefault.model && globalDefault.provider === provider) {
+            state.setSelectedModel(globalDefault.model);
         }
         // Show model options if available
         const models = await getProviderModels(provider);
@@ -1145,17 +1151,6 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         else {
             await channel.sendText(`Provider set to: ${PROVIDER_LABELS[provider]}`);
         }
-    });
-    // --- Change Default Provider (prov_def_ prefix) ---
-    channel.onCallback('prov_def_', async (data) => {
-        const provider = data.replace('prov_def_', '');
-        if (!ALL_PROVIDERS.includes(provider))
-            return;
-        updateGlobalProviderDefault(provider);
-        // Don't change the current session — default only affects future navigations
-        const currentProvider = state.getSelectedProvider();
-        const currentLabel = PROVIDER_LABELS[currentProvider] || currentProvider;
-        await channel.sendText(`Default provider set to: ${PROVIDER_LABELS[provider]}\nCurrent session: ${currentLabel} (unchanged)`);
     });
     // --- Model Selection Callbacks (mdl_ prefix) ---
     channel.onCallback('mdl_', async (data) => {
@@ -1322,30 +1317,30 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
             }
             const cardStage = cardInfo.stage;
             state.selectCard(projectId, cardId, cardStage);
-            // Resolve provider: sticky override > earliest bridge session > stage default > global default
+            // Resolve provider: sticky override > earliest bridge session > global default
             const override = state.getProviderOverride();
-            const stageDefault = getProviderDefault(cardStage);
+            const globalDefault = getProviderDefault();
             if (override) {
                 state.setSelectedProvider(override);
             }
             else {
                 const bridgeProvider = await resolveProviderFromBridge(bridge, projectId, cardId, state);
-                state.setSelectedProvider(bridgeProvider || stageDefault.provider);
+                state.setSelectedProvider(bridgeProvider || globalDefault.provider);
             }
-            // Resolve model: bridge session > stage default > Default
+            // Resolve model: bridge session > global default > Default
             const sessionName = state.getSessionName();
             try {
                 const session = await bridge.getSession(sessionName);
                 if (session?.model) {
                     state.setSelectedModel(session.model);
                 }
-                else if (stageDefault.model && (stageDefault.provider === state.getSelectedProvider())) {
-                    state.setSelectedModel(stageDefault.model);
+                else if (globalDefault.model && (globalDefault.provider === state.getSelectedProvider())) {
+                    state.setSelectedModel(globalDefault.model);
                 }
             }
             catch {
-                if (stageDefault.model && (stageDefault.provider === state.getSelectedProvider())) {
-                    state.setSelectedModel(stageDefault.model);
+                if (globalDefault.model && (globalDefault.provider === state.getSelectedProvider())) {
+                    state.setSelectedModel(globalDefault.model);
                 }
             }
             currentDrilldownStage = null;
@@ -1441,7 +1436,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         try {
             await channel.sendChatAction('record_voice');
             const transcription = await transcribeAudio(filePath, sttConfig);
-            const formatted = `[${channel.name}/Voice] ${transcription} (${buildFooter(state)})`;
+            const formatted = `[${channel.name}/Voice] ${withTimestamp(transcription)} (${buildFooter(state)})`;
             // Pre-flight: check instruction file before creating a new session
             const proceed = await checkInstructionFilePreFlight(channel, state, bridge, sessionName, cwd, provider, formatted);
             if (!proceed)
@@ -1648,7 +1643,11 @@ async function main() {
                 }
             }
             await channel.sendChatAction('upload_voice');
-            const runtimeVoice = state.getVoice();
+            // Resolve voice from the CALLER's session/project, not the ambient
+            // Telegram target. An automation for project X must render in X's voice
+            // even if the user last navigated the messaging UI to a different
+            // project. Falls back to the ambient voice when no session is supplied.
+            const runtimeVoice = state.getVoiceForSession(session || state.getSessionName());
             // Render MP3 once, then transcode to OGG separately so the fallback
             // path can reuse the MP3 buffer without re-hitting ElevenLabs.
             const mp3Render = await renderTtsAudio(message, voiceConfig, {
@@ -1745,7 +1744,7 @@ async function main() {
     // `channel` anywhere.
     app.post('/tts/generate', async (req, res) => {
         try {
-            const { text, voiceId, format, outDir, filename } = req.body ?? {};
+            const { text, voiceId, format, outDir, filename, projectId, session } = req.body ?? {};
             if (typeof text !== 'string' || text.length === 0) {
                 return res.status(400).json({ ok: false, error: 'bad_request', message: 'text must be a non-empty string' });
             }
@@ -1766,14 +1765,37 @@ async function main() {
             if (filename !== undefined && (typeof filename !== 'string' || filename.length === 0)) {
                 return res.status(400).json({ ok: false, error: 'bad_request', message: 'filename must be a non-empty string when provided' });
             }
+            if (projectId !== undefined && (typeof projectId !== 'string' || projectId.length === 0)) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'projectId must be a non-empty string when provided' });
+            }
+            if (session !== undefined && (typeof session !== 'string' || session.length === 0)) {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'session must be a non-empty string when provided' });
+            }
             if (!voiceConfig.elevenlabsApiKey) {
                 return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
             }
+            // An explicit projectId that matches no registry project is a caller
+            // error — fail loudly instead of silently rendering the default voice.
+            // Don't enumerate the registry in the error — defense-in-depth against a
+            // future scenario where this endpoint is reachable beyond localhost.
+            if (projectId !== undefined && !resolveCanonicalProjectId(projectId, state.getProjects())) {
+                return res.status(404).json({
+                    ok: false,
+                    error: 'unknown_project',
+                    message: `Unknown project: '${projectId}'. Pass a project id, name, or session key.`,
+                });
+            }
+            // Resolve the effective voice. Explicit voiceId always wins. Otherwise
+            // fall back to the per-project default for the given projectId/session
+            // (used for determining the default voice when none is supplied), and
+            // finally to the env default (handled inside renderTtsAudio when the
+            // override is undefined).
+            const effectiveVoiceId = voiceId ?? state.resolveContextVoice({ projectId, session })?.id;
             const workspaceRoot = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
             const defaultDirRel = process.env.TTS_GENERATE_DEFAULT_DIR || path.join('data', 'generated-audio');
             const dirInput = outDir ?? path.join(defaultDirRel, todayDateString());
             const dirAbsolute = path.isAbsolute(dirInput) ? dirInput : path.resolve(workspaceRoot, dirInput);
-            const effectiveFilename = filename ?? buildGeneratedFilename({ text, voiceId: voiceId ?? null, format: fmt });
+            const effectiveFilename = filename ?? buildGeneratedFilename({ text, voiceId: effectiveVoiceId ?? null, format: fmt });
             const finalAbsolutePath = path.join(dirAbsolute, effectiveFilename);
             // Sensitive-path guard runs before TTS to save ElevenLabs cost on a
             // request that's going to be refused anyway.
@@ -1788,7 +1810,7 @@ async function main() {
             }
             let buffer;
             try {
-                const result = await renderTtsAudio(text, voiceConfig, { format: fmt, voiceIdOverride: voiceId });
+                const result = await renderTtsAudio(text, voiceConfig, { format: fmt, voiceIdOverride: effectiveVoiceId });
                 buffer = result.buffer;
             }
             catch (err) {
@@ -1822,7 +1844,28 @@ async function main() {
                 format: fmt,
                 bytes: buffer.length,
                 durationMs: null,
+                voiceId: effectiveVoiceId ?? voiceConfig.elevenlabsVoiceId ?? null,
             });
+        }
+        catch (err) {
+            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
+        }
+    });
+    // GET /voices/search — search ElevenLabs voices by name (personal + shared
+    // library) and return matches with their voice IDs. Never emits to any
+    // channel; exists so other services can resolve voice IDs without their own
+    // ElevenLabs integration.
+    app.get('/voices/search', async (req, res) => {
+        try {
+            const q = req.query.q;
+            if (q !== undefined && typeof q !== 'string') {
+                return res.status(400).json({ ok: false, error: 'bad_request', message: 'q must be a single string when provided' });
+            }
+            if (!voiceConfig.elevenlabsApiKey) {
+                return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
+            }
+            const voices = await searchVoices(voiceConfig.elevenlabsApiKey, q || undefined);
+            res.json({ ok: true, query: q || null, voices });
         }
         catch (err) {
             res.status(500).json({ ok: false, error: 'internal_error', message: err.message });

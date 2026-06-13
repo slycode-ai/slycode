@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-13
+
+### Added
+- Web UI auth layer (feature 068) — single-password gate for the SlyCode dashboard with first-run setup, session cookies signed with HMAC-SHA256, and credential stored in `~/.slycode/auth.json` (mode 600). Bridge and messaging remain localhost-only and untouched
+- `slycode reset-password` CLI (feature 068) — clears the web dashboard password and bumps the cookie secret so old sessions are invalidated
+- Cleartext warning banner — persistent banner when the dashboard is served over plain HTTP to a non-loopback host; silent on loopback and HTTPS
+- Self-verifying prompt submit (feature 070) — bridge classifies the terminal snapshot to confirm the pasted prompt actually went into the input box before sending Enter; retries with bracketed-paste fallback if it sees the prompt stranded outside the input region
+- In-order single-flight terminal input queue (feature 071) — fixes terminal input getting reordered on slow connections; coalesces consecutive raw keystrokes so latency stays bounded at ~2×RTT regardless of typing speed
+- Multi HTML attachments on cards (feature 072) — cards can hold multiple HTML attachments instead of one; new HTML Attachments tab shows an index list with auto-select-when-one and back-to-list affordance
+- HTML attachment Print view (feature 072) — open any attachment via `?print=1` in a dedicated tab for clean printing without app chrome
+- Global provider/model default (feature 073) — set a workspace-wide default provider and per-provider model from the dashboard; new sessions inherit unless explicitly overridden
+- Per-project TTS voice — voice selection persists per project alongside the existing voice/mode/tone overrides
+- Messaging voice search endpoint — `sly-messaging voice search <query>` proxies ElevenLabs voice search for picking voices from the CLI
+- Timestamp prefix on forwarded voice messages and Sly Actions — surfaces when a forwarded item was originally sent
+
+### Fixed
+- Card modal no longer loses its terminal session link when an external action renames or moves the open card — session pill stays attached to the right card
+- Light-mode design for card status boxes — no more washed-out unreadable text in light theme
+- Closed two command-injection sinks and cleared all dependency high-severity advisories (feature 069 — security remediation)
+- Hardened send-file path resolution against directory traversal
+- Diagnose and fix automation silent non-submit — duplicate-fire follow-up to the earlier scheduler isDue work; merged-prompt firings no longer get dropped
+
+### Changed
+- Secure-by-default bind hardening — bridge and messaging bind to 127.0.0.1 by default; web binds to 0.0.0.0 only when explicitly configured (no longer the default)
+- Kanban skill v1.12.0 — covers global provider default, multi HTML attachments, and the self-verifying submit semantics
+- Deployed-install model data fix — installed packages now pick up the latest provider model lists instead of shipping a stale snapshot
+
 ## [0.2.40] - 2026-05-23
 
 ### Added

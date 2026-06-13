@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
-import type { SessionInfo, CreateSessionRequest, BridgeConfig, BridgeRuntimeConfig, BridgeStats, ActivityTransition, SubmitRequest, SubmitResult, SnapshotResult } from './types.js';
+import type { SessionInfo, CreateSessionRequest, BridgeConfig, BridgeRuntimeConfig, BridgeStats, ActivityTransition, SubmitRequest, SubmitResult, SnapshotResult, VerifiedSubmitResult } from './types.js';
+import { type InputRegionClassification } from './submit-verify.js';
 import type { ResponseStore } from './response-store.js';
 export declare class SessionManager {
     private sessions;
@@ -105,13 +106,17 @@ export declare class SessionManager {
     addSSEClient(name: string, res: Response): boolean;
     removeSSEClient(name: string, res: Response): void;
     private updateClientCount;
+    private writeQueues;
     /**
      * Write data to a session's PTY.
+     * Serialized per session via writeQueues — concurrent callers can never
+     * interleave their bytes (see comment on writeQueues).
      * Uses writeChunkedToPty for ConPTY-safe chunked writes on Windows.
      * If data is wrapped in bracketed paste markers, sends markers atomically
      * and only chunks the inner content to avoid splitting escape sequences.
      */
     writeToSession(name: string, data: string): Promise<boolean>;
+    private writeToSessionUnqueued;
     /**
      * Watch for a new unclaimed session file.
      * Uses live getClaimedGuids() checks on each poll iteration to prevent
@@ -136,6 +141,13 @@ export declare class SessionManager {
     private promptChains;
     setResponseStore(store: ResponseStore): void;
     /**
+     * Await any in-flight verified submit on this session (best-effort — a new
+     * submit starting afterwards is not blocked). Used by raw /input so
+     * interactive keystrokes can't inject into the middle of a semantic
+     * paste+Enter sequence.
+     */
+    awaitSubmitIdle(name: string): Promise<void>;
+    /**
      * Get the current prompt depth for a session by tracing the call chain.
      */
     private getPromptDepth;
@@ -156,6 +168,46 @@ export declare class SessionManager {
      * Depth tracking prevents runaway cross-card call chains (max 4 levels).
      */
     submitPrompt(name: string, request: SubmitRequest): Promise<SubmitResult>;
+    /** Post-Enter poll ladder (cumulative ~1s/3s/6s) — spike observed legitimate submits clearing as late as ~5s. */
+    private static readonly VERIFY_POLL_DELAYS_MS;
+    private static readonly VERIFY_MAX_RESENDS;
+    /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
+    private static readonly VERIFY_SNAPSHOT_LINES;
+    private verifySnapshotClassify;
+    /**
+     * Self-verifying prompt submit (feature 070).
+     *
+     * Physically observes the terminal's input region before and after Enter:
+     *  - pre-paste: a blocking dialog (no input region) aborts BEFORE pasting —
+     *    the spike proved a paste into a dialog renders nowhere and a blind
+     *    Enter can ACCEPT the dialog; non-empty input warns and proceeds
+     *    (user decision: visibility over suppression, never hard-block).
+     *  - post-paste: confirms our payload is queued (placeholder or normalized
+     *    prefix). A vanished paste over an empty box is re-pasted once.
+     *  - post-Enter: polls the input region (1s/3s/6s); success = our queued
+     *    content DISAPPEARED. If a full ladder still shows it queued, re-sends
+     *    Enter ONLY (never re-pastes — re-pasting is what caused the historical
+     *    duplicate-fire bug), capped at 2 resends, then fails loudly.
+     *
+     * Returns a four-state DeliveryResult: delivered | failed | ambiguous | blocked.
+     * All non-delivered outcomes are meant to be surfaced loudly by callers.
+     */
+    submitVerified(name: string, request: SubmitRequest): Promise<VerifiedSubmitResult>;
+    /**
+     * Core verified-delivery flow (feature 070). Caller MUST hold the session's
+     * submit mutex and have validated the session is running/detached with a
+     * live PTY. Performs: pre-paste classify → paste (balanced markers, chunked,
+     * chunk-scaled settle) → confirm queued → Enter → poll ladder → Enter-only
+     * resend (bounded) → typed DeliveryResult. Never re-pastes except over a
+     * provably empty input box.
+     */
+    private performVerifiedDelivery;
+    /**
+     * Current input-region classification for a session (no expected payload).
+     * Used by the scheduler's fresh-path startup-dialog check (feature 070
+     * phase B). Returns null when the session/provider cannot be classified.
+     */
+    getInputRegionState(name: string): InputRegionClassification | null;
     /**
      * Get a terminal content snapshot for diagnostics.
      * Uses serializeAddon to dump last N lines, strips ANSI codes.

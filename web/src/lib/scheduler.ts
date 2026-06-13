@@ -65,17 +65,34 @@ const AUTOMATION_LOG_MAX_BYTES = 1_000_000; // 1MB cap
 // Fresh session path: simple liveness check after startup
 const LIVENESS_CHECK_MS = 20_000; // Wait 20s then check if session is alive
 
-// Resume session path: differential activity detection + retry
-const STARTUP_WAIT_MS = 10_000;   // Wait 10s for Claude to start up (resume path)
-const ACTIVITY_CHECK_MS = 5_000;  // Wait 5s between activity checks (resume path)
-const RETRY_DELAY_MS = 3_000;     // Delay before retry (resume path only)
+// Resume session path: delivery confirmation is now BRIDGE-SIDE (feature 070).
+//
+// HISTORY: six iterations of scheduler-side timestamp heuristics
+// (lastOutputAt deltas, prePasteAt baselines) failed in both directions —
+// false negatives re-pasted the prompt (duplicate fire), false positives let
+// a dropped Enter go undetected (silent queue → merged-prompt fire days
+// later). The signal class was unfixable from this process: cross-process
+// timestamps are skew-fragile and a timestamp cannot distinguish "model is
+// responding" from "TUI repainted a spinner".
+//
+// CURRENT: the bridge physically verifies the submit against its own
+// terminal state (input-region classification before/after Enter, Enter-only
+// resend, never re-paste) and returns a typed four-state delivery result:
+// delivered | failed | ambiguous | blocked. We pass `verifyDelivery: true`
+// on POST /sessions and trust the returned `delivery` object. See
+// bridge/src/submit-verify.ts and documentation/features/
+// 070_self_verifying_prompt_submit.md.
+//
+// The verified flow can take ~25s worst case (paste settle + poll ladders +
+// resends), so those calls use a longer fetch timeout.
+const VERIFIED_SUBMIT_TIMEOUT_MS = 60_000;
 
 /**
  * Fetch with timeout to prevent hung bridge from blocking indefinitely.
  */
-async function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, opts?: RequestInit, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...opts, signal: controller.signal });
   } finally {
@@ -86,6 +103,19 @@ async function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Respon
 /**
  * Automation run log entry — one per automation execution.
  */
+/** Mirror of the bridge's DeliveryResult (feature 070) — kept loose so an older/newer bridge can't break logging. */
+interface DeliveryInfo {
+  outcome: 'delivered' | 'failed' | 'ambiguous' | 'blocked';
+  verified: boolean;
+  mode: string;
+  attempts: number;
+  resends: number;
+  warnings: string[];
+  reason?: string;
+  polls?: string[];
+  elapsedMs?: number;
+}
+
 interface AutomationLogEntry {
   timestamp: string;
   cardId: string;
@@ -97,6 +127,7 @@ interface AutomationLogEntry {
   fresh: boolean;
   bridgeRequest: { status: number; resumed?: boolean; pid?: number; error?: string } | null;
   livenessCheck: { type: string; result: string; delayMs?: number; exitCode?: number; exitedAt?: string } | null;
+  delivery?: DeliveryInfo | null;
   outcome: 'success' | 'error';
   error: string | null;
   elapsedMs: number;
@@ -126,7 +157,7 @@ async function writeAutomationLog(entry: AutomationLogEntry): Promise<void> {
       }
     } catch { /* rotation is best-effort */ }
   } catch (err) {
-    console.error('[scheduler] Failed to write automation log:', err);
+    serr('Failed to write automation log:', err);
   }
 }
 
@@ -158,6 +189,23 @@ async function checkSessionAlive(sessionName: string): Promise<LivenessResult> {
 }
 
 /**
+ * Check whether a freshly-spawned session is sitting behind a startup
+ * update/trust dialog (feature 070 phase B). On argv-delivery paths the
+ * prompt is not lost — it was passed at spawn — but the CLI won't process it
+ * until the dialog is cleared, and a bare liveness check reports success.
+ */
+async function checkStartupBlocked(sessionName: string): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input-region`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.classification === 'no_input_region';
+  } catch {
+    return false; // best-effort — never fail a kickoff on a probe error
+  }
+}
+
+/**
  * Get the configured timezone (IANA string) and its abbreviation.
  */
 export function getConfiguredTimezone(): { timezone: string; abbreviation: string } {
@@ -183,6 +231,10 @@ export interface KickoffResult {
   success: boolean;
   error?: string;
   sessionName?: string;
+  /** Structured notification trigger (feature 070) — replaces error-string matching. */
+  failureKind?: 'hard' | 'soft';
+  /** Bridge delivery outcome when the verified submit ran. */
+  deliveryOutcome?: DeliveryInfo['outcome'];
 }
 
 interface SchedulerState {
@@ -196,10 +248,12 @@ interface SchedulerState {
 // causing multiple schedulers to fight over kanban.json writes.
 const GLOBAL_KEY = '__scheduler_state__';
 const TIMER_KEY = '__scheduler_timer__';
+const INSTANCE_KEY = '__scheduler_instance__';
 
 interface GlobalScheduler {
   [GLOBAL_KEY]?: SchedulerState;
   [TIMER_KEY]?: ReturnType<typeof setInterval> | null;
+  [INSTANCE_KEY]?: string;
 }
 
 const g = globalThis as unknown as GlobalScheduler;
@@ -214,11 +268,35 @@ if (!g[GLOBAL_KEY]) {
 if (g[TIMER_KEY] === undefined) {
   g[TIMER_KEY] = null;
 }
+// Stable per-process instance ID. Survives HMR (we read through globalThis).
+// Logged on every scheduler line so we can detect the multi-process case
+// (e.g. dev :3003 AND prod :7591 sharing kanban.json) — two distinct instance
+// IDs firing the same card within seconds is proof.
+if (!g[INSTANCE_KEY]) {
+  g[INSTANCE_KEY] = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 const state: SchedulerState = g[GLOBAL_KEY];
+const INSTANCE_ID: string = g[INSTANCE_KEY]!;
 
 function getCheckTimer() { return g[TIMER_KEY] ?? null; }
 function setCheckTimer(t: ReturnType<typeof setInterval> | null) { g[TIMER_KEY] = t; }
+
+// Tagged logger so every scheduler line includes the instance ID. Use slog()
+// in place of `slog('...')` going forward.
+function slog(msg: string): void {
+  console.log(`[scheduler ${INSTANCE_ID}] ${msg}`);
+}
+function swarn(msg: string): void {
+  console.warn(`[scheduler ${INSTANCE_ID}] ${msg}`);
+}
+function serr(msg: string, err?: unknown): void {
+  if (err !== undefined) {
+    console.error(`[scheduler ${INSTANCE_ID}] ${msg}`, err);
+  } else {
+    console.error(`[scheduler ${INSTANCE_ID}] ${msg}`);
+  }
+}
 
 /**
  * Calculate next run time for a cron schedule
@@ -304,47 +382,6 @@ export function isDue(config: AutomationConfig): boolean {
 }
 
 /**
- * Wait for activity on a resumed session by checking for sustained output.
- *
- * Used only for resume sessions where prompt is pasted into an existing terminal.
- * Takes two readings separated by a delay. If new output appeared between
- * readings, Claude is actively processing.
- *
- * NOT used for fresh sessions — those use checkSessionAlive() instead,
- * because fresh sessions deliver the prompt via CLI args (guaranteed delivery).
- */
-async function waitForActivity(sessionName: string): Promise<boolean> {
-  // Wait for Claude to process the pasted prompt
-  await new Promise(r => setTimeout(r, STARTUP_WAIT_MS));
-
-  // Take baseline reading
-  let baseline = 0;
-  try {
-    const res = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (data.status === 'stopped') return false;
-    baseline = data.lastOutputAt ? new Date(data.lastOutputAt).getTime() : 0;
-  } catch {
-    return false;
-  }
-
-  // Wait and check for new output since baseline
-  await new Promise(r => setTimeout(r, ACTIVITY_CHECK_MS));
-
-  try {
-    const res = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (data.status === 'stopped') return false;
-    const current = data.lastOutputAt ? new Date(data.lastOutputAt).getTime() : 0;
-    return current > baseline;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Format a human-friendly datetime with timezone indicator.
  * Uses the configured timezone explicitly rather than server locale.
  * e.g. "Friday, 28 Feb 2026, 14:30 AEST"
@@ -391,6 +428,9 @@ function buildRunHeader(
 
   lines.push(`Time: ${formatDateTime(now)}`);
   lines.push(`Card: ${card.title} (${card.id})`);
+  // Per-fire nonce — forensic aid only (ties a terminal scrollback block to a
+  // specific automation.log entry). NOT used by delivery verification.
+  lines.push(`Delivery-ID: ${Math.random().toString(16).slice(2, 8)}`);
 
   if (trigger === 'manual') {
     lines.push('Trigger: manual');
@@ -481,9 +521,9 @@ export async function triggerAutomation(
     const aStatus = (aliasInfo as { status?: string } | null)?.status ?? 'missing';
     if (aRank > cRank) {
       sessionName = aliasName;
-      console.log(`[scheduler] Re-attaching to alias ${aliasName} (alias=${aStatus} > canonical=${cStatus})`);
+      slog(`Re-attaching to alias ${aliasName} (alias=${aStatus} > canonical=${cStatus})`);
     } else if (cRank > 0 && aRank > 0) {
-      console.log(`[scheduler] Both canonical and alias exist for ${card.id}; preferring canonical (canonical=${cStatus}, alias=${aStatus})`);
+      slog(`Both canonical and alias exist for ${card.id}; preferring canonical (canonical=${cStatus}, alias=${aStatus})`);
     }
   }
 
@@ -517,6 +557,7 @@ export async function triggerAutomation(
   // Tracking for automation log
   let bridgeRequestInfo: AutomationLogEntry['bridgeRequest'] = null;
   let livenessInfo: AutomationLogEntry['livenessCheck'] = null;
+  let deliveryInfo: AutomationLogEntry['delivery'] = null;
 
   const logAndReturn = async (result: KickoffResult): Promise<KickoffResult> => {
     await writeAutomationLog({
@@ -530,6 +571,7 @@ export async function triggerAutomation(
       fresh: isFresh,
       bridgeRequest: bridgeRequestInfo,
       livenessCheck: livenessInfo,
+      delivery: deliveryInfo,
       outcome: result.success ? 'success' : 'error',
       error: result.error || null,
       elapsedMs: Date.now() - startTime,
@@ -538,11 +580,16 @@ export async function triggerAutomation(
   };
 
   try {
-    console.log(`[scheduler] Creating session: ${sessionName} (fresh: ${isFresh}, provider: ${provider})`);
+    slog(`Creating session: ${sessionName} (fresh: ${isFresh}, provider: ${provider})`);
 
-    // Create session — bridge handles prompt delivery differently based on fresh:
-    // - fresh=true: prompt passed as CLI arg (OS-level delivery guarantee)
-    // - fresh=false: bridge pastes prompt into existing session via bracketed paste
+    // Create session — delivery semantics by path (feature 070):
+    // - fresh=true: prompt passed as CLI arg (argv delivery guarantee)
+    // - fresh=false + session live: the bridge runs the SELF-VERIFYING submit
+    //   (verifyDelivery flag) — input-region classification before/after
+    //   Enter, Enter-only resend — and returns a typed `delivery` result.
+    // - fresh=false + session stopped: bridge resumes; the prompt rides as a
+    //   CLI arg on POSIX (delivery.mode 'cli_arg') or a deferred paste on
+    //   Windows ('deferred_paste').
     const createRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -553,31 +600,27 @@ export async function triggerAutomation(
         cwd,
         prompt: fullPrompt,
         fresh: isFresh,
+        verifyDelivery: true,
       }),
-    });
+    }, VERIFIED_SUBMIT_TIMEOUT_MS);
 
     if (!createRes.ok && createRes.status === 409 && !isFresh) {
-      // Session exists and not fresh — try sending input directly (resume fallback)
+      // Legacy safety net (the current bridge returns 200 on live-session
+      // reuse). Route through the verified submit endpoint — the scheduler
+      // never hand-rolls paste+Enter anymore.
       bridgeRequestInfo = { status: 409 };
-      console.log(`[scheduler] Session ${sessionName} returned 409, sending prompt via input endpoint`);
-      const inputRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
+      slog(`Session ${sessionName} returned 409, submitting via verified endpoint`);
+      const subRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/submit-verified`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: `\x1b[200~${fullPrompt}\x1b[201~` }),
-      });
-      if (inputRes.ok) {
-        // Delay before Enter to let PTY process the text
-        await new Promise(r => setTimeout(r, 600));
-        await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: '\r' }),
-        });
+        body: JSON.stringify({ prompt: fullPrompt, force: true }),
+      }, VERIFIED_SUBMIT_TIMEOUT_MS);
+      if (!subRes.ok) {
+        const body = await subRes.text();
+        return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: `Input failed (${subRes.status}): ${body}`, failureKind: 'hard' });
       }
-      if (!inputRes.ok) {
-        const body = await inputRes.text();
-        return logAndReturn({ cardId: card.id, projectId, success: false, error: `Input failed (${inputRes.status}): ${body}` });
-      }
+      const sub = await subRes.json();
+      deliveryInfo = sub.delivery ?? null;
     } else if (!createRes.ok) {
       let errorDetail: string;
       try {
@@ -587,11 +630,12 @@ export async function triggerAutomation(
         errorDetail = await createRes.text();
       }
       bridgeRequestInfo = { status: createRes.status, error: errorDetail };
-      return logAndReturn({ cardId: card.id, projectId, success: false, error: `Session create failed (${createRes.status}): ${errorDetail}` });
+      return logAndReturn({ cardId: card.id, projectId, success: false, error: `Session create failed (${createRes.status}): ${errorDetail}`, failureKind: 'hard' });
     } else {
       const createData = await createRes.json();
       bridgeRequestInfo = { status: createRes.status, resumed: createData.resumed, pid: createData.pid };
-      console.log(`[scheduler] Session created: ${sessionName} (status: ${createData.status}, resumed: ${createData.resumed}, pid: ${createData.pid})`);
+      deliveryInfo = createData.delivery ?? null;
+      slog(`Session created: ${sessionName} (status: ${createData.status}, resumed: ${createData.resumed}, pid: ${createData.pid}, delivery: ${deliveryInfo ? `${deliveryInfo.outcome}/${deliveryInfo.mode}` : 'none'})`);
     }
 
     // --- Fresh session path ---
@@ -608,51 +652,83 @@ export async function triggerAutomation(
         }
         const exitDetail = liveness.exitCode !== undefined ? ` (exit code ${liveness.exitCode})` : '';
         const aliveDetail = liveness.exitedAt ? `, alive ${((new Date(liveness.exitedAt).getTime() - startTime) / 1000).toFixed(1)}s` : '';
-        return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: `Session stopped during startup${exitDetail}${aliveDetail}` });
+        return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: `Session stopped during startup${exitDetail}${aliveDetail}`, failureKind: 'hard' });
       }
-      // 'running' or 'unknown' — session is alive (or bridge is slow). Either way, prompt was delivered.
+      // 'running' or 'unknown' — session is alive (or bridge is slow).
+      // Startup-dialog check (phase B): alive ≠ processing — an update/trust
+      // dialog can hold the argv prompt hostage while the process sits there.
+      if (liveness.status === 'running' && await checkStartupBlocked(sessionName)) {
+        return logAndReturn({
+          cardId: card.id, projectId, success: false, sessionName, deliveryOutcome: 'blocked', failureKind: 'hard',
+          error: 'Session started but is blocked by an update/trust dialog — clear it in the terminal; the prompt was passed at startup and should run once cleared',
+        });
+      }
       return logAndReturn({ cardId: card.id, projectId, success: true, sessionName });
     }
 
-    // --- Resume session path ---
-    // Prompt was pasted into the terminal. Paste delivery is unreliable,
-    // so we check for activity and retry if needed.
-    const active = await waitForActivity(sessionName);
-    if (active) {
-      livenessInfo = { type: 'waitForActivity', result: 'active' };
-      return logAndReturn({ cardId: card.id, projectId, success: true, sessionName });
-    }
+    // --- Resume paths (feature 070) ---
+    // The bridge reported HOW the prompt was delivered via the typed
+    // `delivery` result. No scheduler-side activity polling remains.
 
-    // No activity detected — retry by re-sending prompt via bracketed paste
-    console.log(`[scheduler] No activity for ${card.id} (resume path), retrying via input...`);
-    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-
-    const pastedPrompt = `\x1b[200~${fullPrompt}\x1b[201~`;
-    const retryRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: pastedPrompt }),
-    });
-
-    if (retryRes.ok) {
-      await new Promise(r => setTimeout(r, 600));
-      await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: '\r' }),
+    if (!deliveryInfo) {
+      // verifyDelivery was requested but the bridge returned no delivery
+      // result — it is running a pre-070 build. Fail LOUDLY rather than
+      // silently regressing to unverified delivery (the restart-gotcha that
+      // plagued every previous fix in this saga).
+      return logAndReturn({
+        cardId: card.id, projectId, success: false, sessionName, failureKind: 'hard',
+        error: 'Bridge returned no delivery result — the bridge service is running an old build; restart it (feature 070)',
       });
-
-      const retryActive = await waitForActivity(sessionName);
-      if (retryActive) {
-        livenessInfo = { type: 'waitForActivity', result: 'active (retry)' };
-        return logAndReturn({ cardId: card.id, projectId, success: true, sessionName });
-      }
     }
 
-    livenessInfo = { type: 'waitForActivity', result: 'inactive after retry' };
-    return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: 'No activity detected after retry' });
+    if (deliveryInfo.mode === 'cli_arg' || deliveryInfo.mode === 'deferred_paste') {
+      // Resume-from-stopped: the prompt rode the spawn (argv on POSIX,
+      // deferred paste on Windows). Same liveness semantics as fresh.
+      const liveness = await checkSessionAlive(sessionName);
+      livenessInfo = { type: 'checkSessionAlive', result: liveness.status, delayMs: LIVENESS_CHECK_MS, exitCode: liveness.exitCode, exitedAt: liveness.exitedAt };
+      if (liveness.status === 'stopped' && liveness.exitCode !== 0) {
+        const exitDetail = liveness.exitCode !== undefined ? ` (exit code ${liveness.exitCode})` : '';
+        return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: `Session stopped during startup${exitDetail}`, failureKind: 'hard' });
+      }
+      // Startup-dialog check (phase B): same gap as the fresh path — a
+      // resumed-from-stopped session can surface an update/trust dialog that
+      // blocks the argv-delivered prompt while liveness reads 'running'.
+      if (liveness.status === 'running' && await checkStartupBlocked(sessionName)) {
+        return logAndReturn({
+          cardId: card.id, projectId, success: false, sessionName, deliveryOutcome: 'blocked', failureKind: 'hard',
+          error: 'Session started but is blocked by an update/trust dialog — clear it in the terminal; the prompt was passed at startup and should run once cleared',
+        });
+      }
+      return logAndReturn({ cardId: card.id, projectId, success: true, sessionName, deliveryOutcome: deliveryInfo.outcome });
+    }
+
+    // Verified paste path (live session) — the bridge's verdict is final.
+    livenessInfo = { type: 'verifiedSubmit', result: deliveryInfo.outcome };
+    if (deliveryInfo.warnings?.length) {
+      slog(`Delivery warnings for ${card.id}: ${deliveryInfo.warnings.join('; ')}`);
+    }
+
+    if (deliveryInfo.outcome === 'delivered') {
+      if (deliveryInfo.resends > 0) {
+        slog(`Delivery recovered via Enter resend for ${card.id} (attempts=${deliveryInfo.attempts}, resends=${deliveryInfo.resends})`);
+      }
+      return logAndReturn({ cardId: card.id, projectId, success: true, sessionName, deliveryOutcome: 'delivered' });
+    }
+
+    if (deliveryInfo.outcome === 'blocked') {
+      return logAndReturn({
+        cardId: card.id, projectId, success: false, sessionName, deliveryOutcome: 'blocked', failureKind: 'hard',
+        error: `Session blocked by an update/dialog — clear it in the terminal to continue (${deliveryInfo.reason || 'blocked'})`,
+      });
+    }
+
+    // 'failed' | 'ambiguous' — both are loud; neither leaves a silent queue.
+    return logAndReturn({
+      cardId: card.id, projectId, success: false, sessionName, deliveryOutcome: deliveryInfo.outcome, failureKind: 'hard',
+      error: `Prompt delivery ${deliveryInfo.outcome}: ${deliveryInfo.reason || 'unknown'} (attempts=${deliveryInfo.attempts}, resends=${deliveryInfo.resends}, polls=${deliveryInfo.polls?.join(',') || 'n/a'})`,
+    });
   } catch (err) {
-    return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: (err as Error).message });
+    return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, error: (err as Error).message, failureKind: 'hard' });
   }
 }
 
@@ -683,28 +759,45 @@ export async function updateCardAutomation(
 
     await fs.writeFile(kanbanPath, JSON.stringify(board, null, 2) + '\n');
   } catch (err) {
-    console.error(`[scheduler] Failed to update card ${cardId}:`, err);
+    serr(`Failed to update card ${cardId}:`, err);
   }
 }
 
 /**
  * Send error notification via messaging with actionable detail.
  */
+/**
+ * Build the `sly-messaging` invocation for an automation-failure notification.
+ * Returns a command + argv array — the message is a single literal argv element,
+ * never concatenated into a shell string (cardTitle/error may carry $(), `, etc.).
+ * Exported so the no-shell-interpolation property can be regression-tested.
+ */
+export function buildErrorNotificationArgs(
+  cardTitle: string,
+  error: string,
+  sessionName?: string,
+): { command: string; args: string[] } {
+  const lines = [`Automation failed: ${cardTitle}`];
+  if (sessionName) lines.push(`Session: ${sessionName}`);
+  lines.push(`Error: ${error}`);
+  lines.push(`Log: ~/.slycode/logs/automation.log`);
+  const msg = lines.join('\n');
+  return { command: 'sly-messaging', args: ['send', msg] };
+}
+
 async function sendErrorNotification(cardTitle: string, error: string, sessionName?: string): Promise<void> {
   try {
-    const { execSync } = await import('child_process');
-    const lines = [`Automation failed: ${cardTitle}`];
-    if (sessionName) lines.push(`Session: ${sessionName}`);
-    lines.push(`Error: ${error}`);
-    lines.push(`Log: ~/.slycode/logs/automation.log`);
-    const msg = lines.join('\n').replace(/"/g, '\\"');
-    execSync(`sly-messaging send "${msg}"`, {
+    const { execFileSync } = await import('child_process');
+    const { command, args } = buildErrorNotificationArgs(cardTitle, error, sessionName);
+    // Pass the message as a literal argv element — never build a shell string.
+    // `error`/`cardTitle` can carry $(), backticks, etc.; argv avoids /bin/sh.
+    execFileSync(command, args, {
       timeout: 10_000,
       stdio: 'pipe',
       windowsHide: true,
     });
   } catch {
-    console.error(`[scheduler] Failed to send error notification for "${cardTitle}"`);
+    serr(`Failed to send error notification for "${cardTitle}"`);
   }
 }
 
@@ -764,6 +857,23 @@ async function checkAutomations(): Promise<void> {
             kickoffsThisTick++;
             state.activeKickoffs.add(card.id);
 
+            // Firing-decision log — captures the entire reasoning behind THIS
+            // kickoff in one line. If two scheduler instances both fire the
+            // same card, both will print this with their own instance ID and
+            // we'll see two distinct lines in the journal/web log.
+            const auto = card.automation!;
+            const nowMs = Date.now();
+            slog(
+              `Firing decision for ${card.id} (${card.title}) | ` +
+              `project=${project.id} | schedule=${auto.schedule} | ` +
+              `scheduleType=${auto.scheduleType ?? 'recurring'} | ` +
+              `lastRun=${auto.lastRun ?? '(none)'} | ` +
+              `nextRun=${auto.nextRun ?? '(none)'} | ` +
+              `nowVsNextRun=${auto.nextRun ? `${((nowMs - new Date(auto.nextRun).getTime()) / 1000).toFixed(1)}s past` : 'n/a'} | ` +
+              `kickoffsThisTick=${kickoffsThisTick} | ` +
+              `activeKickoffsInThisProcess=${state.activeKickoffs.size}`
+            );
+
             // Write lastRun BEFORE kickoff so it survives server restarts.
             // Without this, an HMR restart during the ~14s kickoff window
             // loses the in-memory activeKickoffs guard and re-fires the card.
@@ -774,7 +884,7 @@ async function checkAutomations(): Promise<void> {
             // Fire and forget — don't block the check loop
             (async () => {
               try {
-                console.log(`[scheduler] Firing automation: ${card.title} (${card.id})`);
+                slog(`Firing automation: ${card.title} (${card.id})`);
                 const result = await triggerAutomation(card, project.id, project.path);
 
                 const configUpdates: Partial<AutomationConfig> = {
@@ -793,24 +903,27 @@ async function checkAutomations(): Promise<void> {
                 await updateCardAutomation(project.path, card.id, configUpdates);
 
                 if (!result.success) {
-                  console.error(`[scheduler] Kickoff failed for ${card.id}: ${result.error}`);
-                  // Only send Telegram notification on hard failures — not detection uncertainty.
-                  // Hard failures: session crashed (stopped), bridge HTTP error, input failed.
-                  const isHardFailure = result.error && (
-                    result.error.includes('Session create failed') ||
-                    result.error.includes('Session stopped') ||
-                    result.error.includes('Input failed') ||
-                    result.error.includes('No automation config') ||
-                    result.error.includes('No activity detected')
-                  );
+                  serr(`Kickoff failed for ${card.id}: ${result.error}`);
+                  // Notification gate is the structured failureKind (feature
+                  // 070) — string matching silently dropped alerts whenever
+                  // error wording changed. Legacy string fallback covers only
+                  // results from paths that predate failureKind.
+                  const isHardFailure = result.failureKind
+                    ? result.failureKind === 'hard'
+                    : Boolean(result.error && (
+                        result.error.includes('Session create failed') ||
+                        result.error.includes('Session stopped') ||
+                        result.error.includes('Input failed') ||
+                        result.error.includes('No automation config')
+                      ));
                   if (isHardFailure) {
                     await sendErrorNotification(card.title, result.error || 'Unknown error', result.sessionName);
                   } else {
-                    console.log(`[scheduler] Soft failure for ${card.id}, skipping notification: ${result.error}`);
+                    slog(`Soft failure for ${card.id}, skipping notification: ${result.error}`);
                   }
                 }
               } catch (err) {
-                console.error(`[scheduler] Error processing ${card.id}:`, err);
+                serr(`Error processing ${card.id}:`, err);
               } finally {
                 state.activeKickoffs.delete(card.id);
               }
@@ -820,7 +933,7 @@ async function checkAutomations(): Promise<void> {
       }
     }
   } catch (err) {
-    console.error('[scheduler] Check loop error:', err);
+    serr('Check loop error:', err);
   }
 }
 
@@ -836,7 +949,11 @@ export function startScheduler(): void {
   }
   if (state.running) return;
   state.running = true;
-  console.log('[scheduler] Started. Checking every 30s.');
+  // Startup banner — includes PID, bridge URL, port, and slycode root so we
+  // can spot the multi-process scenario (e.g. dev + prod schedulers running
+  // against the same kanban.json). If two distinct instance IDs ever appear
+  // in the logs around the same time, that's the cause of duplicate fires.
+  slog(`Started — pid=${process.pid}, port=${process.env.PORT || 'unknown'}, bridge=${BRIDGE_URL}, slycodeRoot=${getSlycodeRoot()}, tz=${CONFIGURED_TIMEZONE}, checkEvery=${CHECK_INTERVAL_MS / 1000}s`);
 
   // Initial check
   checkAutomations();
@@ -856,7 +973,7 @@ export function stopScheduler(): void {
     clearInterval(timer);
     setCheckTimer(null);
   }
-  console.log('[scheduler] Stopped.');
+  slog('Stopped.');
 }
 
 /**
@@ -870,7 +987,7 @@ export function getSchedulerStatus(): {
   activeKickoffs: string[];
 } {
   if (!state.running) {
-    console.log('[scheduler] Auto-starting on status check');
+    slog('Auto-starting on status check');
     startScheduler();
   }
   return {

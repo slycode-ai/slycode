@@ -94,7 +94,7 @@ async function send(message: string, tts: boolean, port: number): Promise<void> 
 
 async function generate(
   text: string,
-  opts: { voiceId?: string; outDir?: string; filename?: string; format?: 'ogg' | 'mp3' },
+  opts: { voiceId?: string; outDir?: string; filename?: string; format?: 'ogg' | 'mp3'; projectId?: string },
   port: number,
 ): Promise<void> {
   const url = `http://localhost:${port}/tts/generate`;
@@ -108,6 +108,10 @@ async function generate(
         ...(opts.outDir !== undefined && { outDir: opts.outDir }),
         ...(opts.filename !== undefined && { filename: opts.filename }),
         ...(opts.format !== undefined && { format: opts.format }),
+        ...(opts.projectId !== undefined && { projectId: opts.projectId }),
+        // Forward the caller's session so the endpoint can pick the project's
+        // default voice when no --voice-id is given (same as send/--tts).
+        ...(process.env.SLYCODE_SESSION && { session: process.env.SLYCODE_SESSION }),
       }),
     });
     const data = await res.json() as { ok?: boolean; absolutePath?: string; path?: string; format?: string; bytes?: number; error?: string; message?: string };
@@ -157,6 +161,43 @@ async function sendFile(filePath: string, caption: string | undefined, asOverrid
   }
 }
 
+interface VoiceResult {
+  voice_id: string;
+  name: string;
+  category: string;
+  description: string;
+}
+
+async function searchVoicesCmd(query: string | undefined, port: number): Promise<void> {
+  const params = query ? `?q=${encodeURIComponent(query)}` : '';
+  const url = `http://localhost:${port}/voices/search${params}`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json() as { ok?: boolean; voices?: VoiceResult[]; error?: string; message?: string };
+    if (!res.ok || !data.ok) {
+      console.error(`Error: ${data.error || 'unknown'}: ${data.message || 'no message'}`);
+      process.exit(1);
+    }
+    writeCachedPort(port);
+    const voices = data.voices || [];
+    if (voices.length === 0) {
+      console.log(query ? `No voices found for "${query}".` : 'No voices found.');
+      return;
+    }
+    for (const v of voices) {
+      const desc = v.description ? ` — ${v.description}` : '';
+      console.log(`${v.voice_id}  ${v.name} (${v.category})${desc}`);
+    }
+  } catch (err) {
+    if ((err as Error).message.includes('ECONNREFUSED') || (err as Error).message === 'fetch failed') {
+      console.error('Error: Messaging service is not running. Start it with sly-start.sh or sly-dev.sh.');
+    } else {
+      console.error(`Error: ${(err as Error).message}`);
+    }
+    process.exit(1);
+  }
+}
+
 function printUsage(): void {
   console.log(`Usage: messaging-cli <command> [args]
 
@@ -170,6 +211,15 @@ Commands:
                   [--out-dir <path>]   Default: data/generated-audio/<date>/.
                   [--filename <name>]  Default format: ogg. Prints absolute
                   [--format ogg|mp3]   path on success.
+                  [--project <id|name>] Project whose voice to use when no
+                                       --voice-id is given (optional). Accepts
+                                       the project id, display name (case-
+                                       insensitive), or session key. Falls
+                                       back to the caller's session, then the
+                                       global default voice. Unknown projects
+                                       are rejected with an error.
+  voices [query]                       Search TTS voices by name (personal +
+                                       shared library). Prints voice IDs.
 
 Examples:
   messaging-cli send "The build is complete"
@@ -177,7 +227,9 @@ Examples:
   messaging-cli send-file ./tmp/preview.mp4 --caption "Confirm before posting?"
   messaging-cli send-file ./logs/run.txt --as document
   messaging-cli generate "intro for the new feature"
-  messaging-cli generate "[whispers] secret stuff" --format mp3 --out-dir /tmp`);
+  messaging-cli generate "[whispers] secret stuff" --format mp3 --out-dir /tmp
+  messaging-cli generate "ship note" --project SlyCode
+  messaging-cli voices "Rachel"`);
 }
 
 // Parse arguments
@@ -262,19 +314,26 @@ if (command === 'send') {
   const port = await detectPort();
   sendFile(filePath, caption, asOverride, port);
 } else if (command === 'generate') {
-  // Parse: generate <text> [--voice-id <id>] [--out-dir <path>] [--filename <name>] [--format ogg|mp3]
+  // Parse: generate <text> [--voice-id <id>] [--out-dir <path>] [--filename <name>] [--format ogg|mp3] [--project <id>]
   const rest = args.slice(1);
   let text: string | undefined;
   let voiceId: string | undefined;
   let outDir: string | undefined;
   let filename: string | undefined;
   let format: 'ogg' | 'mp3' | undefined;
+  let projectId: string | undefined;
   let i = 0;
   while (i < rest.length) {
     const arg = rest[i];
     if (arg === '--voice-id') {
       voiceId = rest[i + 1];
       if (voiceId === undefined) { console.error('Error: --voice-id requires a value'); process.exit(1); }
+      i += 2;
+      continue;
+    }
+    if (arg === '--project') {
+      projectId = rest[i + 1];
+      if (projectId === undefined) { console.error('Error: --project requires a value'); process.exit(1); }
       i += 2;
       continue;
     }
@@ -317,7 +376,11 @@ if (command === 'send') {
   }
 
   const port = await detectPort();
-  await generate(text, { voiceId, outDir, filename, format }, port);
+  await generate(text, { voiceId, outDir, filename, format, projectId }, port);
+} else if (command === 'voices') {
+  const query = args.slice(1).join(' ') || undefined;
+  const port = await detectPort();
+  await searchVoicesCmd(query, port);
 } else {
   console.error(`Unknown command: ${command}`);
   printUsage();

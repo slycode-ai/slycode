@@ -607,8 +607,11 @@ body {
   --csl-color: #ffffff;
   --csl-hum:   rgba(255, 255, 255, 0.10);
   --csl-border:#15171a;
+  --csl-bg:    #050505;
+  --csl-scan:  rgba(0, 0, 0, 0.20);
+  --csl-glow:  0 0 1px var(--csl-color), 0 0 2.5px color-mix(in srgb, var(--csl-color) 50%, transparent);
 
-  background: #050505;
+  background: var(--csl-bg);
   border: 1px solid var(--csl-border);
   border-radius: 6px;
   padding: 0 8px;
@@ -627,7 +630,7 @@ body {
   color: var(--csl-color);
   /* Glow tuned tight — at 7px Press Start, larger blur radii blur the glyphs
      themselves and hurt readability (especially on dimmer stage colors). */
-  text-shadow: 0 0 1px var(--csl-color), 0 0 2.5px color-mix(in srgb, var(--csl-color) 50%, transparent);
+  text-shadow: var(--csl-glow);
   letter-spacing: 0.06em;
   /* line-height 1 packs the text into the panel without extra leading.
      Press Start 2P sits low in its em-box; translate the glyph up by ~10%
@@ -666,8 +669,8 @@ body {
     to bottom,
     rgba(0, 0, 0, 0) 0px,
     rgba(0, 0, 0, 0) 1px,
-    rgba(0, 0, 0, 0.20) 1px,
-    rgba(0, 0, 0, 0.20) 2px
+    var(--csl-scan) 1px,
+    var(--csl-scan) 2px
   );
   pointer-events: none;
   mix-blend-mode: multiply;
@@ -743,6 +746,23 @@ body {
 .card-status.stage-implementation { --csl-color: #5cc8ff; --csl-hum: rgba(140, 220, 255, 0.10); --csl-border: #08141c; }
 .card-status.stage-testing        { --csl-color: #ff7261; --csl-hum: rgba(255, 130, 110, 0.09); --csl-border: #1a0d0a; }
 .card-status.stage-done           { --csl-color: #5fc18d; --csl-hum: rgba(110, 220, 165, 0.09); --csl-border: #0c1a13; }
+
+/* Light mode — "Backlit" LCD (documentation/designs/light_mode_status_boxes.md).
+   Colour tokens only; panel metrics, font, scanlines, hum, and marquee are
+   shared with dark mode. Pale radial backlight bloom, dark stage-keyed glyphs
+   with a soft same-hue bleed, hum bar reads as a white backlight sweep. */
+:root:not(.dark) .card-status {
+  --csl-bg: radial-gradient(ellipse 90% 160% at 50% 35%, #edf6fe 0%, #cfe0f0 100%);
+  --csl-border: #a9c2d8;
+  --csl-hum: rgba(255, 255, 255, 0.55);
+  --csl-scan: rgba(20, 45, 70, 0.065);
+  --csl-glow: 0 0 3px var(--csl-bleed, transparent);
+}
+:root:not(.dark) .card-status.stage-backlog        { --csl-color: #3a5675; --csl-bleed: rgba(58, 86, 117, 0.30); }
+:root:not(.dark) .card-status.stage-design         { --csl-color: #20617c; --csl-bleed: rgba(32, 97, 124, 0.30); }
+:root:not(.dark) .card-status.stage-implementation { --csl-color: #075d8d; --csl-bleed: rgba(7, 93, 141, 0.32); }
+:root:not(.dark) .card-status.stage-testing        { --csl-color: #a83823; --csl-bleed: rgba(168, 56, 35, 0.30); }
+:root:not(.dark) .card-status.stage-done           { --csl-color: #1e6b46; --csl-bleed: rgba(30, 107, 70, 0.30); }
 
 /* Honor prefers-reduced-motion: hum bar + marquee both disabled,
    static panel + truncated text remain. */

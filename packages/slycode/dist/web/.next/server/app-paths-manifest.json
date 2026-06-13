@@ -2,6 +2,10 @@
   "/_global-error/page": "app/_global-error/page.js",
   "/_not-found/page": "app/_not-found/page.js",
   "/api/areas/route": "app/api/areas/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/auth/logout/route": "app/api/auth/logout/route.js",
+  "/api/auth/setup/route": "app/api/auth/setup/route.js",
+  "/api/auth/status/route": "app/api/auth/status/route.js",
   "/api/bridge/[...path]/route": "app/api/bridge/[...path]/route.js",
   "/api/changelog/route": "app/api/changelog/route.js",
   "/api/cli-assets/assistant/route": "app/api/cli-assets/assistant/route.js",
@@ -44,7 +48,9 @@
   "/api/version-check/route": "app/api/version-check/route.js",
   "/global/page": "app/global/page.js",
   "/html-viewer/[...path]/page": "app/html-viewer/[...path]/page.js",
+  "/login/page": "app/login/page.js",
   "/page": "app/page.js",
   "/project/[id]/[token]/page": "app/project/[id]/[token]/page.js",
-  "/project/[id]/page": "app/project/[id]/page.js"
+  "/project/[id]/page": "app/project/[id]/page.js",
+  "/setup/page": "app/setup/page.js"
 }

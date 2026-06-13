@@ -7,11 +7,15 @@ import { MarkdownContent } from './MarkdownContent';
 import {
   getTerminalClassFromStage,
   getActionsForClass,
+  withTimestamp,
 } from '@/lib/sly-actions';
 import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
+import { submitVerified, notifyDeliveryFailure, type VerifiedDelivery } from '@/lib/submit-verified';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import { AutomationConfig } from './AutomationConfig';
 import { QuestionnaireTab } from './QuestionnaireTab';
+import { HtmlAttachmentsTab } from './HtmlAttachmentsTab';
+import { getHtmlRefs } from '@/lib/html-refs';
 import { ConfirmDialog } from './ConfirmDialog';
 import { getProviderColor } from '@/lib/provider-colors';
 import { VoiceControlBar } from './VoiceControlBar';
@@ -659,7 +663,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   if (card.areas.length > 0) ctxLines.push(`Areas: ${card.areas.join(', ')}`);
   if (card.design_ref) ctxLines.push(`Design Doc: ${card.design_ref}`);
   if (card.feature_ref) ctxLines.push(`Feature Spec: ${card.feature_ref}`);
-  if (card.html_ref) ctxLines.push(`HTML: ${card.html_ref}`);
+  for (const htmlRef of getHtmlRefs(card)) ctxLines.push(`HTML: ${htmlRef}`);
   if (card.questionnaire_refs && card.questionnaire_refs.length > 0) {
     ctxLines.push(`Questionnaires: ${card.questionnaire_refs.join(', ')}`);
   }
@@ -725,21 +729,22 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       });
   }, []);
 
-  // Provider config for "+" button (need to know available providers + models)
+  // Provider config for "+" button (need to know available providers + the global default)
   interface ProviderInfo { id: string; displayName: string; model?: { available?: { id: string; label: string }[] }; permissions: { label: string; default: boolean } }
   const [availableProviders, setAvailableProviders] = useState<ProviderInfo[]>([]);
+  const [globalDefault, setGlobalDefault] = useState<{ provider: string; model?: string } | null>(null);
   const [newSessionDropdown, setNewSessionDropdown] = useState(false);
   const [newSessionProvider, setNewSessionProvider] = useState<string | null>(null);
-  const [newSessionModel, setNewSessionModel] = useState('');
   const [newSessionSkipPerms, setNewSessionSkipPerms] = useState(true);
   const newSessionRef = useRef<HTMLDivElement>(null);
   const newSessionPortalRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     fetch('/api/providers')
       .then(res => res.ok ? res.json() : null)
-      .then((data: { providers: Record<string, ProviderInfo> } | null) => {
+      .then((data: { providers: Record<string, ProviderInfo>; defaults?: { global?: { provider: string; model?: string } } } | null) => {
         if (!data?.providers) return;
         setAvailableProviders(Object.values(data.providers));
+        if (data.defaults?.global) setGlobalDefault(data.defaults.global);
       })
       .catch(() => {});
   }, []);
@@ -819,6 +824,18 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     refreshCardSessions();
   }, [refreshCardSessions]);
 
+  // Re-run discovery when the stage changes externally while the modal is
+  // open (e.g. an action moved the card). The session is keyed on card id and
+  // unaffected by the move, but stage-keyed state churns — re-resolving
+  // against the live bridge keeps the terminal link and pill state honest.
+  const prevStageRef = useRef(stage);
+  useEffect(() => {
+    if (prevStageRef.current === stage) return;
+    prevStageRef.current = stage;
+    if (isCreateMode) return;
+    refreshCardSessions();
+  }, [stage, isCreateMode, refreshCardSessions]);
+
   // Auto-switch to terminal tab if any session is running on initial load
   const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
   useEffect(() => {
@@ -894,24 +911,20 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       setActiveTab('terminal');
 
       const sessionName = `${sessionKey}:${chosenProvider}:card:${card.id}`;
-      const wrapped = `\x1b[200~${pendingShortcut.prompt}\x1b[201~`;
+      // Prepend the timestamp prefix (slash commands like /clear are skipped).
+      const stampedPrompt = withTimestamp(pendingShortcut.prompt);
       try {
         if (liveSession) {
-          // Inject directly into the live session.
-          await fetch(`/api/bridge/sessions/${encodeURIComponent(liveSession.name)}/input`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: wrapped }),
-          });
-          await new Promise((r) => setTimeout(r, 600));
-          await fetch(`/api/bridge/sessions/${encodeURIComponent(liveSession.name)}/input`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: '\r' }),
-          });
+          // Verified delivery into the live session (feature 070): paste,
+          // confirm queued, Enter, verify cleared. Non-delivered outcomes
+          // surface as the in-panel toast via the delivery-failure event.
+          const delivery = await submitVerified(liveSession.name, stampedPrompt);
+          if (delivery && delivery.outcome !== 'delivered') {
+            notifyDeliveryFailure(liveSession.name, delivery);
+          }
         } else {
           // No live session — create one with the prompt embedded.
-          await fetch('/api/bridge/sessions', {
+          const createRes = await fetch('/api/bridge/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -919,9 +932,15 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
               provider: chosenProvider,
               cwd,
               skipPermissions: true,
-              prompt: pendingShortcut.prompt,
+              prompt: stampedPrompt,
+              verifyDelivery: true,
             }),
           });
+          const created = await createRes.json().catch(() => null);
+          const delivery = created?.delivery as VerifiedDelivery | undefined;
+          if (delivery && delivery.outcome !== 'delivered') {
+            notifyDeliveryFailure(sessionName, delivery);
+          }
           // Refresh so the new session appears as a per-provider tab.
           setTimeout(() => { if (!cancelled) refreshCardSessions(); }, 1200);
         }
@@ -940,17 +959,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const hasDesign = !!card.design_ref;
   const hasFeature = !!card.feature_ref;
   const hasTest = !!card.test_ref;
-  const hasHtml = !!card.html_ref;
+  // HTML attachments: list + legacy single-ref fallback (feature 072)
+  const htmlRefs = getHtmlRefs(card);
+  const hasHtml = htmlRefs.length > 0;
   const hasQuestionnaires = (card.questionnaire_refs?.length ?? 0) > 0;
   const hasChecklist = localChecklist.length > 0;
-
-  // HTML attachment URLs (sandboxed iframe + viewer route)
-  const htmlAttachmentSrc = card.html_ref
-    ? `/api/html-attachment?path=${encodeURIComponent(card.html_ref)}&projectId=${encodeURIComponent(projectId)}`
-    : null;
-  const htmlViewerHref = card.html_ref
-    ? `/html-viewer/${card.html_ref.split('/').map(encodeURIComponent).join('/')}?projectId=${encodeURIComponent(projectId)}`
-    : null;
 
   // Automation mode — compute effective styles (orange overrides stage colors)
   const isAutomation = !!card.automation;
@@ -1931,7 +1944,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </div>
 
                 {/* References (icons only) */}
-                {(card.design_ref || card.feature_ref || card.test_ref || card.html_ref) && (
+                {(card.design_ref || card.feature_ref || card.test_ref || hasHtml) && (
                   <>
                     <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
                     <div className="flex items-center gap-1">
@@ -1960,16 +1973,21 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                           </svg>
                         </button>
                       )}
-                      {card.html_ref && (
+                      {hasHtml && (
                         <button
                           onClick={() => setActiveTab('html')}
-                          className="rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
-                          title={card.html_ref}
+                          className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
+                          title={htmlRefs.join('\n')}
                         >
                           {/* Code-brackets icon for HTML */}
                           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                           </svg>
+                          {htmlRefs.length > 1 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff6a33] px-1 font-mono text-[10px] font-bold leading-none text-white">
+                              {htmlRefs.length}
+                            </span>
+                          )}
                         </button>
                       )}
                       {card.test_ref && (
@@ -2120,53 +2138,10 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 onSubmitSuccess={() => setActiveTab('terminal')}
               />
             </div>
-          ) : activeTab === 'html' && card.html_ref && htmlAttachmentSrc && htmlViewerHref ? (
-            /* HTML Attachment View — sandboxed iframe + open-in-new-tab */
+          ) : activeTab === 'html' && hasHtml ? (
+            /* HTML Attachments View — index list + sandboxed iframe viewer (feature 072) */
             <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between gap-2 border-b border-void-200 px-4 py-2 text-xs dark:border-void-700">
-                <div className="flex min-w-0 items-center gap-2">
-                  <button
-                    onClick={() => handleCopyPath(card.html_ref!)}
-                    className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
-                    title={copiedPath ? 'Copied!' : `Copy path: ${card.html_ref}`}
-                  >
-                    {copiedPath ? (
-                      <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                      </svg>
-                    )}
-                  </button>
-                  <span className="truncate font-mono text-void-700 dark:text-void-300" title={card.html_ref}>
-                    {card.html_ref}
-                  </span>
-                  <span className="hidden text-void-400 dark:text-void-500 sm:inline">·</span>
-                  <span className="hidden text-void-400 dark:text-void-500 sm:inline">sandboxed (no fetch, no remote images)</span>
-                </div>
-                <a
-                  href={htmlViewerHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex shrink-0 items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
-                  title="Open in new tab"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                  Open in new tab
-                </a>
-              </div>
-              <div className="flex-1 min-h-0 bg-white dark:bg-[#1a1a1a]">
-                <iframe
-                  src={htmlAttachmentSrc}
-                  sandbox="allow-scripts"
-                  className="h-full w-full border-0"
-                  title={`HTML attachment: ${card.html_ref}`}
-                />
-              </div>
+              <HtmlAttachmentsTab refs={htmlRefs} projectId={projectId} cardId={card.id} />
             </div>
           ) : activeTab === 'design' || activeTab === 'feature' || activeTab === 'test' ? (
             /* Document View - Design, Feature, or Test */
@@ -2403,13 +2378,21 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 context={terminalContext}
                 cardId={card.id}
                 cardAreas={card.areas}
-                stage={isAutomation ? 'automation' : stage}
                 initialProvider={selectedProvider ?? undefined}
                 parentControlsProvider={hasMultipleSessions}
                 footerClassName={terminalColor}
                 tintColor={terminalTint}
                 onSessionChange={(info) => {
-                  if (!selectedProvider) return;
+                  if (!selectedProvider) {
+                    // No pill state yet — the card had no sessions when the
+                    // modal opened and one just appeared (e.g. started from
+                    // the panel). Discover it so selectedProvider/cardSessions
+                    // populate; without this the panel's provider has no
+                    // anchor and an external stage move can rewrite it,
+                    // unlinking the running session.
+                    if (info) refreshCardSessions();
+                    return;
+                  }
                   // Update the current provider's status in place
                   setCardSessions(prev => {
                     if (!info) return prev.filter(s => s.provider !== selectedProvider);
@@ -2475,7 +2458,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                     return (
                       <button
                         key={p.id}
-                        onClick={() => { setNewSessionProvider(p.id); setNewSessionModel(''); setNewSessionSkipPerms(p.permissions.default); }}
+                        onClick={() => { setNewSessionProvider(p.id); setNewSessionSkipPerms(p.permissions.default); }}
                         className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors hover:bg-void-700"
                         style={{ color: colors.color }}
                       >
@@ -2491,23 +2474,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                     const p = availableProviders.find(pr => pr.id === newSessionProvider);
                     if (!p) return null;
                     const colors = getProviderColor(p.id);
-                    const models = p.model?.available;
                     return (
                       <>
                         <div className="flex items-center gap-2 text-xs font-medium" style={{ color: colors.color }}>
                           <div className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.dot }} />
                           {p.displayName}
                         </div>
-                        {models && models.length > 0 && (
-                          <select
-                            value={newSessionModel}
-                            onChange={e => setNewSessionModel(e.target.value)}
-                            className="rounded border border-void-600 bg-void-900 px-2 py-1 text-xs text-void-300"
-                          >
-                            <option value="">Default model</option>
-                            {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                          </select>
-                        )}
                         <label className="flex items-center gap-1.5 text-[11px] text-void-500 cursor-pointer">
                           <input type="checkbox" checked={newSessionSkipPerms} onChange={e => setNewSessionSkipPerms(e.target.checked)} className="rounded border-void-600" />
                           {p.permissions.label}
@@ -2519,7 +2491,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                               await fetch('/api/bridge/sessions', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ name, provider: newSessionProvider, cwd, skipPermissions: newSessionSkipPerms, ...(newSessionModel ? { model: newSessionModel } : {}) }),
+                                body: JSON.stringify({
+                                  name, provider: newSessionProvider, cwd, skipPermissions: newSessionSkipPerms,
+                                  // Model rides only with the default provider; other providers use their own CLI default.
+                                  ...(globalDefault?.model && globalDefault.provider === newSessionProvider ? { model: globalDefault.model } : {}),
+                                }),
                               });
                               setSelectedProvider(newSessionProvider);
                               setNewSessionDropdown(false);

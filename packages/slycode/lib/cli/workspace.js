@@ -44,10 +44,17 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const DEFAULTS = {
-    host: '0.0.0.0',
+    // Secure-by-default (Feature 068). New installs bind the web UI to localhost;
+    // `0.0.0.0` is an explicit opt-in (set in the wizard or via `slycode config host`).
+    // Existing configs with an explicit `host:` are unaffected (resolveConfig below
+    // prefers userConfig.host), and keyless legacy configs are pinned to their prior
+    // bind by migrateLegacyHost() so nobody is silently switched.
+    host: '127.0.0.1',
     ports: { web: 7591, bridge: 7592, messaging: 7593 },
     services: { web: true, bridge: true, messaging: true },
 };
+/** The bind that was the default before Feature 068 flipped it. */
+const LEGACY_DEFAULT_HOST = '0.0.0.0';
 const SLYCODE_DIR = path.join(os.homedir(), '.slycode');
 const CONFIG_FILE = path.join(SLYCODE_DIR, 'config.json');
 /**

@@ -41,6 +41,36 @@ export function createApiRouter(sessionManager, responseStore) {
             if (!/^[a-zA-Z0-9:_-]+$/.test(request.name)) {
                 return res.status(400).json({ error: 'Invalid session name. Use alphanumeric, colons, hyphens only.' });
             }
+            // Feature 070: verified delivery for live-session prompt submission.
+            // When the target session is already running/detached, route the prompt
+            // through the self-verifying submit instead of createSession's blind
+            // inline paste, and attach the typed delivery result to the response.
+            if (request.verifyDelivery && request.prompt && !request.fresh) {
+                const existing = sessionManager.getSessionInfo(request.name);
+                if (existing && (existing.status === 'running' || existing.status === 'detached')) {
+                    const result = await sessionManager.submitVerified(request.name, {
+                        prompt: request.prompt,
+                        force: true, // session-starter semantics: automations bypass busy/lock guards (as the legacy inline paste did)
+                    });
+                    const info = sessionManager.getSessionInfo(request.name);
+                    return res.json({ ...(info ?? existing), delivery: result.delivery });
+                }
+                // Not live: fall through to createSession. On POSIX the prompt rides
+                // as a CLI arg (argv-guaranteed); on Windows it is a deferred paste.
+                const session = await sessionManager.createSession({ ...request, prompt: request.prompt });
+                const statusCode = session.status === 'creating' ? 202 : 200;
+                return res.status(statusCode).json({
+                    ...session,
+                    delivery: {
+                        outcome: 'delivered',
+                        verified: false,
+                        mode: process.platform === 'win32' ? 'deferred_paste' : 'cli_arg',
+                        attempts: 0,
+                        resends: 0,
+                        warnings: [],
+                    },
+                });
+            }
             const session = await sessionManager.createSession(request);
             // Return 202 for sessions still being created (idempotent duplicate request)
             const statusCode = session.status === 'creating' ? 202 : 200;
@@ -129,6 +159,9 @@ export function createApiRouter(sessionManager, responseStore) {
         if (typeof data !== 'string') {
             return res.status(400).json({ error: 'data must be a string' });
         }
+        // Wait out any in-flight verified submit so raw keystrokes can't land
+        // mid paste+Enter sequence (writeToSession then serializes raw-vs-raw).
+        await sessionManager.awaitSubmitIdle(name);
         const success = await sessionManager.writeToSession(name, data);
         if (!success) {
             return res.status(404).json({ error: 'Session not found or not running' });
@@ -310,6 +343,38 @@ export function createApiRouter(sessionManager, responseStore) {
             console.error('Error submitting prompt:', err);
             res.status(500).json({ error: 'Failed to submit prompt' });
         }
+    });
+    // Self-verifying prompt submit (feature 070): paste → confirm queued →
+    // Enter → verify the input region cleared, resending Enter (never the
+    // paste) when provably still queued. Returns a four-state delivery result.
+    router.post('/sessions/:name/submit-verified', async (req, res) => {
+        const name = decodeURIComponent(req.params.name);
+        const request = req.body;
+        if (!request.prompt || typeof request.prompt !== 'string') {
+            return res.status(400).json({ error: 'prompt is required and must be a string' });
+        }
+        try {
+            const result = await sessionManager.submitVerified(name, request);
+            if (!result.success && !result.delivery) {
+                // Guard rejections (missing session, busy, locked) — mirror /submit codes.
+                const status = result.locked || result.busy ? 409 : 404;
+                return res.status(status).json(result);
+            }
+            // Verified flow ran: 200 regardless of outcome — the delivery object is the verdict.
+            res.json(result);
+        }
+        catch (err) {
+            console.error('Error in verified submit:', err);
+            res.status(500).json({ error: 'Failed to submit prompt (verified)' });
+        }
+    });
+    // Current input-region classification (feature 070 phase B) — lets the
+    // scheduler detect a spawned session blocked by a startup update/trust
+    // dialog (argv-delivered prompt sits unprocessed while the process is alive).
+    router.get('/sessions/:name/input-region', (req, res) => {
+        const name = decodeURIComponent(req.params.name);
+        const classification = sessionManager.getInputRegionState(name);
+        res.json({ classification });
     });
     // Terminal snapshot for diagnostics
     router.get('/sessions/:name/snapshot', (req, res) => {

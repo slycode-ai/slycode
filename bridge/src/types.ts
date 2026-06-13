@@ -84,6 +84,7 @@ export interface CreateSessionRequest {
   idleTimeout?: number;
   prompt?: string; // Initial prompt passed as positional argument to CLI
   createInstructionFile?: boolean; // Whether to create missing instruction file before spawn
+  verifyDelivery?: boolean; // Feature 070: use the self-verifying submit for live-session prompt delivery
 }
 
 export interface SessionInfo {
@@ -199,6 +200,11 @@ export interface SubmitRequest {
   bracketedPaste?: boolean;  // default: true
   force?: boolean;           // bypass lock + busy checks
   callingSession?: string;   // session making this call (for depth tracking)
+  /** The --wait response registered for THIS submission. The call-lock guard
+   *  excludes it — the CLI registers the response channel before submitting
+   *  (the id is embedded in the prompt), so without the exclusion every
+   *  --wait prompt to a running session would self-reject. */
+  responseId?: string;
 }
 
 export interface SubmitResult {
@@ -208,6 +214,37 @@ export interface SubmitResult {
   error?: string;
   locked?: boolean;
   busy?: boolean;
+  /** Typed delivery result when the verified flow ran (feature 070, phase B). */
+  delivery?: DeliveryResult;
+}
+
+// Self-verifying prompt submit (feature 070)
+
+export type DeliveryOutcome = 'delivered' | 'failed' | 'ambiguous' | 'blocked';
+
+export interface DeliveryResult {
+  outcome: DeliveryOutcome;
+  /** true when the input-region verify loop actually ran (false for CLI-arg spawn delivery or unclassifiable providers). */
+  verified: boolean;
+  mode: 'verified_paste' | 'unverified_paste' | 'cli_arg' | 'deferred_paste';
+  /** Enter attempts, including a test-dropped first Enter. */
+  attempts: number;
+  /** Enter resends beyond the first attempt. */
+  resends: number;
+  warnings: string[];
+  reason?: string;
+  /** Post-Enter classifications observed, for diagnostics/logging. */
+  polls?: string[];
+  elapsedMs?: number;
+}
+
+export interface VerifiedSubmitResult {
+  success: boolean;            // true iff delivery.outcome === 'delivered'
+  sessionStatus: SessionStatus;
+  error?: string;
+  locked?: boolean;
+  busy?: boolean;
+  delivery?: DeliveryResult;
 }
 
 export interface SnapshotResult {
