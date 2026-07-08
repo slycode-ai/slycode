@@ -117,6 +117,8 @@ export interface PersistedSession {
   exitCode?: number;         // Last exit code (set by handlePtyExit)
   exitedAt?: string;         // When session last exited (ISO timestamp)
   exitOutput?: string;       // Last ~20 lines of terminal output (ANSI-stripped, for snapshot diagnostics)
+  pid?: number | null;       // PTY pid while (presumed) running; nulled on observed exit. A non-null
+                             // pid from a previous bridge incarnation marks a potential orphan (feature 078)
 }
 
 export interface PersistedState {
@@ -136,6 +138,13 @@ export interface BridgeRuntimeConfig {
   allowedCommands: string[];
   cors: {
     origins: string[];
+  };
+  // Orphan provider reaper (feature 078). All fields optional; defaults in reaper.ts.
+  reaper?: {
+    enabled?: boolean;        // default true
+    intervalMinutes?: number; // default 10
+    idleHours?: number;       // default 24
+    dryRun?: boolean;         // default false
   };
 }
 

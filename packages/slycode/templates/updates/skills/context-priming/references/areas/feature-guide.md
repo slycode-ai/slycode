@@ -1091,7 +1091,7 @@ AutomationConfig {
 
 ### Terminal Actions (Markdown Format, 26 Commands)
 - **Migration from JSON to markdown**: `data/sly-actions.json` archived to `data/archive/sly-actions.json.archived`; conversion script `scripts/convert-actions-to-md.js` (one-time)
-- **Format**: individual `store/actions/<name>.md` files with YAML frontmatter + prompt body (see action-assistant-context.md for full spec)
+- **Format**: individual `store/actions/<name>.md` files with YAML frontmatter + prompt body (full spec inlined in store/actions/configure-commands.md, the action-assistant briefing)
 - **Frontmatter fields**: name, version, label, description, group, placement, scope (global or specific), projects, cardTypes, classes (map of terminal-class -> sort priority)
 - **Scanning**: both web (`action-scanner.ts`) and messaging (`sly-action-filter.ts`) scan `store/actions/*.md` independently; both parse YAML frontmatter with lightweight parsers (no YAML lib); both use 30s in-memory cache
 - **Class assignments**: derived from per-action `classes` map (reverse of old top-level `classAssignments` array); priority numbers with gaps of 10 for insertion; ties broken alphabetically
@@ -1102,7 +1102,7 @@ AutomationConfig {
 - Context injection is opt-in: actions must include `{{cardContext}}` etc. in prompt body
 - MAX_VISIBLE_ACTIONS=6; Shift+click inserts without submit
 - All command prompts use `sly-kanban` CLI (not `node scripts/kanban.js`)
-- `data/action-assistant-context.md`: comprehensive reference for the action assistant (format spec, template variables, workflow diagram, common mistakes, learned patterns)
+- Action-assistant reference: inlined in `store/actions/configure-commands.md` v2.0.0 (format spec, template variables, workflow diagram, common mistakes; standalone data/action-assistant-context.md DELETED 2026-07-07, self-improvement dropped)
 - **convert-asset**: scope changed from `specific` (claude-master only) to `global` — available in all workspaces
 
 ### Terminal Action Commands
@@ -1155,7 +1155,7 @@ provider (claude|codex|gemini), name, version (semver), updated (YYYY-MM-DD), de
 | store/skills/claude-code-docs-maintainer/SKILL.md | Claude Code docs skill (SlyCode refs, relative paths) |
 | store/skills/context-priming/references/ | Store copy of context-priming area refs (SlyCode-renamed) |
 | store/actions/*.md | Individual action files (26), YAML frontmatter + prompt body |
-| data/action-assistant-context.md | Action assistant reference (format spec, template variables, workflow, learned patterns) |
+| store/actions/configure-commands.md | Action assistant self-contained briefing v2.0.0 (was data/action-assistant-context.md, deleted 2026-07-07) |
 | data/archive/sly-actions.json.archived | Archived legacy JSON format (migrated to store/actions/*.md) |
 | scripts/convert-actions-to-md.js | One-time JSON-to-markdown migration script |
 | web/src/lib/action-scanner.ts | Web-side action scanning, frontmatter parsing, update detection, content hashing |
@@ -1279,7 +1279,7 @@ These scripts remain in `scripts/` for the claude_master dev environment but are
 | documentation/terminal-classes.json | 9 classes (8 in classAssignments + automation) |
 | documentation/events.json | Audit log (rolling, periodically purged; ~200 oldest entries trimmed per purge) |
 | projects/registry.json | Projects (v2.0.0); workspace project ID derived dynamically via `path.basename(getRepoRoot())` (no longer hardcoded as `claude-master`) |
-| data/action-assistant-context.md | Context for action-assistant AI; documents MD file format (frontmatter fields, classes map, template variables, placement, groups); includes learned patterns, common mistakes, workflow diagrams; self-improving (AI appends patterns during sessions) |
+| store/actions/configure-commands.md | Action-assistant briefing INLINED in the action body v2.0.0 (frontmatter fields, classes map, template variables, placement, groups, common mistakes, workflow); standalone context file deleted 2026-07-07, self-improvement protocol dropped |
 | data/archive/sly-actions.json.archived | Archived monolithic JSON format (pre-migration) |
 | data/archive/sly-actions-scaffold-template.json.archived | Archived scaffold JSON template (pre-migration) |
 

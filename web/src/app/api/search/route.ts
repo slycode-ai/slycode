@@ -14,6 +14,7 @@ import path from 'path';
 import { loadRegistry } from '@/lib/registry';
 import { getBridgeUrl } from '@/lib/paths';
 import type { KanbanBoard, KanbanCard, KanbanStage, SearchResult } from '@/lib/types';
+import { readColdBoard, unionStages } from '@/lib/kanban-cold';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,13 @@ async function loadKanbanBoard(projectPath: string): Promise<KanbanBoard | null>
   try {
     const kanbanPath = path.join(projectPath, 'documentation', 'kanban.json');
     const content = await fs.readFile(kanbanPath, 'utf-8');
-    return JSON.parse(content) as KanbanBoard;
+    const board = JSON.parse(content) as KanbanBoard;
+    // Union cold storage (kanban-archive.json — feature 077): search covers
+    // archived cards, which live in the cold file after migration. Dedupe by
+    // id with live winning; missing/corrupt cold file = no cold cards.
+    const { board: cold } = await readColdBoard(kanbanPath, board.stages);
+    board.stages = unionStages(board.stages, cold.stages);
+    return board;
   } catch {
     return null;
   }

@@ -802,3 +802,126 @@ body {
     animation: none;
   }
 }
+
+/* ===========================================================================
+   Code Mode (feature 076) — token system ported from the approved mockup v2
+   (documentation/designs/code_mode_mockup_v1.html). Light values on
+   .code-mode, dark overrides under .dark — same class strategy as the app.
+   Components use Tailwind v4 var shorthand: bg-(--cm-panel) etc.
+   =========================================================================== */
+.code-mode {
+  /* Light = paper-on-desk: WHITE cards with soft shadows sitting on a cooler,
+     deeper canvas. The original three near-identical near-whites gave zero
+     layer separation (2026-07-07 light-mode pass). Dark values untouched. */
+  --cm-bg: #e7ebf1;
+  --cm-bg2: #dbe1e9;
+  --cm-panel: #f3f5f9;
+  --cm-panel2: #ffffff;
+  --cm-panel3: #e7ecf2;
+  --cm-line: rgba(100, 116, 139, 0.20);
+  --cm-line2: rgba(71, 85, 105, 0.32);
+  --cm-text: #1c2430;
+  --cm-muted: #55627a;
+  --cm-faint: #76829a;
+  --cm-atlas: #0c7f73;
+  --cm-atlas-dim: rgba(13, 148, 136, 0.12);
+  --cm-stale: #b8770f;
+  --cm-fresh: #1f9d5f;
+  --cm-code-bg: #fdfdfe;
+  /* Grid gets its own alpha — at --cm-line strength it competes with the
+     cards on a bright canvas. Texture, not lines. */
+  --cm-grid: rgba(100, 116, 139, 0.09);
+  /* Topbar sits BETWEEN the app header (white) and the panels — without its
+     own tone the top of the screen is one undifferentiated white band. */
+  --cm-topbar: #e0e5ed;
+  /* Drift borders: light mode needs a quieter amber — full amber-500/60
+     reads as an alert, not "drifted since analysis". */
+  --cm-changed: rgba(180, 118, 10, 0.45);
+}
+.dark .code-mode {
+  --cm-bg: #0a0d13;
+  --cm-bg2: #0d1119;
+  --cm-panel: #12161f;
+  --cm-panel2: #171c27;
+  --cm-panel3: #1c2230;
+  --cm-line: rgba(148, 163, 184, 0.14);
+  --cm-line2: rgba(148, 163, 184, 0.24);
+  --cm-text: #d7dee8;
+  --cm-muted: #8b96a5;
+  --cm-faint: #5c6675;
+  --cm-atlas: #46d7c2;
+  --cm-atlas-dim: rgba(70, 215, 194, 0.14);
+  --cm-stale: #e8a13d;
+  --cm-fresh: #52c98b;
+  --cm-code-bg: #0c0f16;
+  --cm-grid: rgba(148, 163, 184, 0.14);
+  --cm-topbar: #12161f;
+  --cm-changed: rgba(245, 158, 11, 0.60);
+}
+/* Faint alignment grid on the canvas — the mockup's map backdrop. */
+.code-mode .cm-grid-bg {
+  background-image:
+    linear-gradient(var(--cm-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--cm-grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+  background-position: center;
+  background-color: var(--cm-bg);
+}
+/* Card materiality — soft drop-shadow in LIGHT mode only (drop-shadow, not
+   box-shadow, so it composes with the cards' inset hue-spine/amber utilities).
+   Dark mode keeps its flat, line-separated look. */
+.code-mode .cm-card {
+  filter: drop-shadow(0 1px 2px rgba(28, 36, 48, 0.07)) drop-shadow(0 5px 12px rgba(28, 36, 48, 0.06));
+}
+.dark .code-mode .cm-card {
+  filter: none;
+}
+/* Area-hue TEXT ink: the palette is dark-canvas brights — raw on white they
+   wash out (key flows were unreadable). Light mode densifies them; dark mode
+   renders them untouched. */
+.code-mode .cm-hue-ink {
+  filter: saturate(1.4) brightness(0.62);
+}
+.dark .code-mode .cm-hue-ink {
+  filter: none;
+}
+
+/* Code Mode — AI highlight decorations (fog-of-war replaced by amber stale
+   borders, Greg's call 2026-07-07 — same treatment as L1 changed cards) */
+.code-mode .cm-ai-highlight {
+  background: var(--cm-atlas-dim);
+}
+.code-mode .cm-ai-highlight-gutter {
+  border-left: 3px solid var(--cm-atlas);
+}
+
+/* Code Mode — Board toggle glow while board-side sessions are busy (feature 076) */
+.active-glow-board-btn {
+  animation: neon-pulse-board-btn 2s ease-in-out infinite;
+}
+:root:not(.dark) .active-glow-board-btn {
+  animation: neon-pulse-board-btn-light 2s ease-in-out infinite;
+}
+@keyframes neon-pulse-board-btn {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(56, 189, 248, 0.4), 0 0 16px 4px rgba(56, 189, 248, 0.15);
+    filter: brightness(1.05);
+  }
+  50% {
+    box-shadow: 0 0 14px 4px rgba(56, 189, 248, 0.6), 0 0 28px 8px rgba(56, 189, 248, 0.3);
+    filter: brightness(1.15);
+  }
+}
+@keyframes neon-pulse-board-btn-light {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(2, 132, 199, 0.45), 0 0 16px 4px rgba(2, 132, 199, 0.18);
+    filter: brightness(1.02);
+  }
+  50% {
+    box-shadow: 0 0 14px 4px rgba(2, 132, 199, 0.65), 0 0 28px 8px rgba(2, 132, 199, 0.32);
+    filter: brightness(1.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .active-glow-board-btn { animation: none; box-shadow: 0 0 10px 3px rgba(56, 189, 248, 0.45); }
+}

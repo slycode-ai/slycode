@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-09
+
+### Added
+- Code Mode — a new dashboard mode alongside Kanban for exploring, editing, and understanding your codebase. Includes an integrated code editor, symbol-aware search, git tools, a diff viewer, and an embedded terminal so you can hand off to an AI without leaving the panel.
+- Codebase Atlas — an AI-maintained map of your project (areas, key files, connections) that powers Code Mode navigation. Refreshes on a schedule so the map stays current as the code evolves.
+- `sly-atlas` CLI — companion command that lets an AI session propose, validate, and apply Atlas updates without hand-editing JSON.
+- Multiple design, feature, and test refs per card — attach as many documents as you need per category, with an index list and one-click Unlink.
+- Store-import diff viewer — see per-file diffs of every skill and reference file before importing changes into your store, so nothing is applied blind.
+- Orphan process reaper — the bridge now sweeps up AI provider processes that were spawned by SlyCode but got orphaned by a dead session, keeping memory and swap use in check on long-running installs.
+- Board cold storage — archived cards are moved to a separate file so the live Kanban stays fast and small. Existing archives are migrated automatically on first open.
+- `sly-dev.sh --fresh` and repo-anchored stale-instance sweep — cleaner developer workflow when jumping between branches or workspaces.
+- Voice/photo downloads over Telegram now retry with a timeout on transient network errors, so intermittent CDN blips no longer drop your message.
+- Terminal hyperlinks now prompt for confirmation before opening — guards against spoofed OSC-8 links pasted into the terminal.
+- Atlas skill (v1.3.0) — the new AI-driven Atlas maintenance skill, shipped in the store manifest.
+- Kanban skill v1.13.1 — updated coverage for cold storage and multi-ref cards.
+- Messaging skill v2.5.0 — updated coverage for the newer voice and file-send workflows.
+
+### Changed
+- Kanban and provider config writes now use an atomic write-then-rename pattern across the CLI, web, and messaging services so a crash mid-write can no longer leave a truncated file.
+- Cross-writer advisory lock on the Kanban file means the CLI and web UI can never step on each other's writes.
+- Per-project provider defaults are back in Providers config — set a workspace-wide default and per-project overrides side by side.
+- `configure-commands` action v2.0.0 — a self-contained briefing on how command visibility, groups, and prompts work in SlyCode.
+
+### Fixed
+- Refreshed all third-party dependencies to clear high-severity advisories carried through the previous release.
+
 ## [0.3.1] - 2026-06-13
 
 ### Fixed

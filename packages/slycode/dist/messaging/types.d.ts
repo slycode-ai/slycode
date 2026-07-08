@@ -133,6 +133,9 @@ export interface KanbanCard {
     }>;
     design_ref?: string;
     feature_ref?: string;
+    design_refs?: string[];
+    feature_refs?: string[];
+    test_refs?: string[];
     status?: {
         text: string;
         setAt: string;

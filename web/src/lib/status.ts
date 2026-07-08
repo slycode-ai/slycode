@@ -18,7 +18,7 @@ export interface CardStatus {
 // V2 overwrite levels (lower = higher priority).
 //   -1 = manual (sacred — auto never overwrites)
 //    0 = high-tier auto      (problem add)
-//    1 = medium-tier auto    (ref attached, problem resolve)
+//    1 = medium-tier auto    (ref attached, problem resolve).
 //    2 = low-tier auto       (notes, checklist, cross-card prompt)
 //    3 = malformed/unknown   (anything overwrites)
 export function getStatusLevel(status: CardStatus | null | undefined): number {

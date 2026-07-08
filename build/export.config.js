@@ -55,6 +55,7 @@ module.exports = {
     // Source directory build artifacts (not needed in public repo source)
     'web/node_modules/**',
     'web/.next/**',
+    'web/.next-build-check/**',
     'web/dist/**',
     'bridge/node_modules/**',
     'bridge/dist/**',

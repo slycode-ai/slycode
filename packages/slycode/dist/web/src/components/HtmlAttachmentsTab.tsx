@@ -20,6 +20,8 @@ interface HtmlAttachmentsTabProps {
   refs: string[];
   projectId: string;
   cardId: string;
+  /** Unlink a single attachment ref (feature 074). Removes the ref only — never deletes the file. */
+  onUnlink?: (ref: string) => void;
 }
 
 function fileName(ref: string): string {
@@ -44,7 +46,7 @@ function extractTitle(html: string): string | null {
   return text || null;
 }
 
-export function HtmlAttachmentsTab({ refs, projectId, cardId }: HtmlAttachmentsTabProps) {
+export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAttachmentsTabProps) {
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [titles, setTitles] = useState<Record<string, string | null>>({});
   const [copiedPath, setCopiedPath] = useState(false);
@@ -127,12 +129,11 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId }: HtmlAttachmentsT
     return (
       <div className="space-y-3 overflow-y-auto p-4">
         {refs.map(ref => (
-          <button
+          <div
             key={ref}
-            onClick={() => setSelectedRef(ref)}
-            className="block w-full rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 dark:border-void-700/50 dark:bg-void-900/40"
+            className="group flex items-center gap-3 rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 dark:border-void-700/50 dark:bg-void-900/40"
           >
-            <div className="flex items-center gap-3">
+            <button onClick={() => setSelectedRef(ref)} className="flex min-w-0 flex-1 items-center gap-3">
               <span
                 aria-hidden
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-neon-blue-400/30 bg-neon-blue-400/10 text-neon-blue-500 dark:text-neon-blue-300"
@@ -150,6 +151,18 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId }: HtmlAttachmentsT
                   {ref}
                 </div>
               </div>
+            </button>
+            {onUnlink ? (
+              <button
+                onClick={() => onUnlink(ref)}
+                className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                title={`Unlink ${fileName(ref)} (removes the reference; file is not deleted)`}
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </button>
+            ) : (
               <svg
                 className="h-4 w-4 shrink-0 text-void-300 dark:text-void-600"
                 fill="none"
@@ -158,8 +171,8 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId }: HtmlAttachmentsT
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-            </div>
-          </button>
+            )}
+          </div>
         ))}
       </div>
     );
@@ -224,6 +237,18 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId }: HtmlAttachmentsT
             </svg>
             <span className="hidden sm:inline">Open in new tab</span>
           </a>
+          {onUnlink && (
+            <button
+              onClick={() => onUnlink(effectiveRef)}
+              className="flex items-center gap-1 rounded border border-red-300/40 px-2 py-1 text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-500/30 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+              title="Unlink this attachment (removes the reference; file is not deleted)"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <span className="hidden sm:inline">Unlink</span>
+            </button>
+          )}
         </div>
       </div>
       <div className="min-h-0 flex-1 bg-white dark:bg-[#1a1a1a]">

@@ -693,6 +693,165 @@ export function importAssetToStore(
 }
 
 // ============================================================================
+// Store Import Preview — per-file manifest comparing a project skill against
+// the canonical store copy, for the project→store diff review UI.
+// ============================================================================
+
+export type StoreImportFileStatus = 'identical' | 'changed' | 'added' | 'removed';
+
+export interface StoreImportFile {
+  /** Path relative to the skill root, e.g. "SKILL.md" or "references/area-index.md". */
+  path: string;
+  status: StoreImportFileStatus;
+  /** True when a line diff can be shown. False for binary or over-cap files. */
+  previewable: boolean;
+  /** Why not previewable, when applicable. */
+  reason: 'binary' | 'too-large' | null;
+  projectHash?: string;
+  storeHash?: string;
+  /** Present only for previewable, non-identical files (added/changed). */
+  projectContent?: string;
+  /** Present only for previewable changed files (both sides exist). */
+  storeContent?: string;
+}
+
+export interface StoreImportManifest {
+  isDirectory: boolean;
+  /** False when the skill is not yet in the store — everything shows as "added". */
+  skillExistsInStore: boolean;
+  files: StoreImportFile[];
+}
+
+// Caps — keep the manifest payload and the client-side diff render bounded.
+const STORE_PREVIEW_MAX_BYTES = 256 * 1024;
+const STORE_PREVIEW_MAX_LINES = 5000;
+
+function listSkillFilesRecursive(dir: string, base = ''): string[] {
+  const files: string[] = [];
+  if (!fs.existsSync(dir)) return files;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...listSkillFilesRecursive(path.join(dir, entry.name), rel));
+    } else {
+      files.push(rel);
+    }
+  }
+  return files;
+}
+
+function readForPreview(filePath: string): {
+  hash: string;
+  content: string | null;
+  reason: 'binary' | 'too-large' | null;
+} {
+  const buf = fs.readFileSync(filePath);
+  const hash = crypto.createHash('sha1').update(buf).digest('hex');
+  // Binary sniff — a NUL byte in the first 8KB means "don't try to diff this".
+  if (buf.subarray(0, 8192).includes(0)) {
+    return { hash, content: null, reason: 'binary' };
+  }
+  if (buf.length > STORE_PREVIEW_MAX_BYTES) {
+    return { hash, content: null, reason: 'too-large' };
+  }
+  const content = buf.toString('utf-8');
+  let lines = 1;
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10) lines++;
+  }
+  if (lines > STORE_PREVIEW_MAX_LINES) {
+    return { hash, content: null, reason: 'too-large' };
+  }
+  return { hash, content, reason: null };
+}
+
+/**
+ * Build a per-file diff manifest for importing a project skill into the store.
+ * Project side = incoming/"new", store side = current. Content is included only
+ * for previewable, non-identical files (added → project only; changed → both);
+ * identical and removed files carry hashes but no body to keep the payload small.
+ */
+export function buildStoreImportManifest(
+  projectPath: string,
+  provider: ProviderId,
+  assetName: string,
+): StoreImportManifest {
+  const projectDir = getProviderAssetFilePath(projectPath, provider, 'skill', assetName);
+  if (!projectDir) {
+    throw new Error(`Provider '${provider}' does not support skills`);
+  }
+  const storeDir = path.join(getSlycodeRoot(), 'store', 'skills', assetName);
+  const skillExistsInStore = fs.existsSync(storeDir);
+
+  const projectFiles = new Set(listSkillFilesRecursive(projectDir));
+  const storeFiles = new Set(skillExistsInStore ? listSkillFilesRecursive(storeDir) : []);
+
+  const allPaths = Array.from(new Set([...projectFiles, ...storeFiles])).sort((a, b) => {
+    // SKILL.md always first, then alphabetical.
+    if (a === 'SKILL.md') return -1;
+    if (b === 'SKILL.md') return 1;
+    return a.localeCompare(b);
+  });
+
+  const files: StoreImportFile[] = allPaths.map((rel) => {
+    const inProject = projectFiles.has(rel);
+    const inStore = storeFiles.has(rel);
+
+    if (inProject && !inStore) {
+      const p = readForPreview(path.join(projectDir, rel));
+      return {
+        path: rel,
+        status: 'added',
+        previewable: p.reason === null,
+        reason: p.reason,
+        projectHash: p.hash,
+        ...(p.content !== null ? { projectContent: p.content } : {}),
+      };
+    }
+
+    if (!inProject && inStore) {
+      // Store-only file. The import never deletes it — informational only.
+      const s = readForPreview(path.join(storeDir, rel));
+      return {
+        path: rel,
+        status: 'removed',
+        previewable: false,
+        reason: null,
+        storeHash: s.hash,
+      };
+    }
+
+    // Exists on both sides.
+    const p = readForPreview(path.join(projectDir, rel));
+    const s = readForPreview(path.join(storeDir, rel));
+    if (p.hash === s.hash) {
+      return {
+        path: rel,
+        status: 'identical',
+        previewable: false,
+        reason: null,
+        projectHash: p.hash,
+        storeHash: s.hash,
+      };
+    }
+    const previewable = p.reason === null && s.reason === null;
+    return {
+      path: rel,
+      status: 'changed',
+      previewable,
+      reason: p.reason ?? s.reason,
+      projectHash: p.hash,
+      storeHash: s.hash,
+      ...(previewable
+        ? { projectContent: p.content as string, storeContent: s.content as string }
+        : {}),
+    };
+  });
+
+  return { isDirectory: true, skillExistsInStore, files };
+}
+
+// ============================================================================
 // Update Delivery — updates/ vs store/ comparison and accept flow
 // ============================================================================
 

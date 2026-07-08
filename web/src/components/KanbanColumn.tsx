@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import type { KanbanCard, KanbanStage } from '@/lib/types';
 import { KanbanCardItem } from './KanbanCardItem';
 
@@ -65,13 +65,54 @@ const colorClasses: Record<string, { header: string; headerText: string; count: 
 const SCROLL_THRESHOLD = 60; // pixels from edge to trigger scroll
 const SCROLL_SPEED = 8; // pixels per frame
 
+// Done-lane tag toggle: global preference, persisted across boards/sessions.
+const DONE_TAGS_KEY = 'slycode-done-tags';
+const DONE_TAGS_EVENT = 'slycode-done-tags-change';
+
+function subscribeDoneTags(callback: () => void): () => void {
+  window.addEventListener('storage', callback);
+  window.addEventListener(DONE_TAGS_EVENT, callback);
+  return () => {
+    window.removeEventListener('storage', callback);
+    window.removeEventListener(DONE_TAGS_EVENT, callback);
+  };
+}
+
+function getDoneTagsSnapshot(): boolean {
+  try {
+    return localStorage.getItem(DONE_TAGS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+// Server render (and pre-hydration) defaults to OFF — matches the historical
+// "tags hidden in Done" behavior, so there's no hydration mismatch.
+function getDoneTagsServerSnapshot(): boolean {
+  return false;
+}
+
 export function KanbanColumn({ stage, cards, cardSessions, activeCards, onCardClick, onCardContextMenu, onMoveCard, onAddCardClick }: KanbanColumnProps) {
   const colors = colorClasses[stage.color] || colorClasses.zinc;
+  const isDone = stage.id === 'done';
+  const showDoneTags = useSyncExternalStore(subscribeDoneTags, getDoneTagsSnapshot, getDoneTagsServerSnapshot);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollAnimationRef = useRef<number | null>(null);
   const lastMouseYRef = useRef<number>(0);
   const isScrollingRef = useRef<boolean>(false);
+
+  // Done-lane tag toggle: flip the persisted global preference and notify all
+  // subscribers (this tab via the custom event, other tabs via 'storage').
+  const toggleDoneTags = useCallback(() => {
+    const next = getDoneTagsSnapshot() ? '0' : '1';
+    try {
+      localStorage.setItem(DONE_TAGS_KEY, next);
+    } catch {
+      /* ignore persistence failure */
+    }
+    window.dispatchEvent(new Event(DONE_TAGS_EVENT));
+  }, []);
 
   // Use effect to set up the animation loop
   useEffect(() => {
@@ -213,9 +254,26 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, onCardCl
         <h3 className={`font-semibold drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] dark:drop-shadow-[0_2px_3px_rgba(0,0,0,0.7)] ${colors.headerText}`}>
           {stage.label}
         </h3>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${colors.count}`}>
-          {cards.length}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {isDone && (
+            <button
+              type="button"
+              onClick={toggleDoneTags}
+              aria-pressed={showDoneTags}
+              title={showDoneTags ? 'Hide tags on Done cards' : 'Show tags on Done cards'}
+              className={`rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-none transition-colors ${
+                showDoneTags
+                  ? 'border-green-500/60 bg-green-500/15 text-green-700 dark:border-green-400/50 dark:bg-green-400/15 dark:text-green-300'
+                  : 'border-void-400/40 bg-transparent text-void-500 hover:border-green-500/50 hover:text-green-700 dark:border-void-500/40 dark:text-void-400 dark:hover:border-green-400/40 dark:hover:text-green-300'
+              }`}
+            >
+              tags
+            </button>
+          )}
+          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${colors.count}`}>
+            {cards.length}
+          </span>
+        </div>
       </div>
 
       {/* Cards - with mask fade at bottom */}
@@ -251,6 +309,7 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, onCardCl
                     sessionStatus={cardSessions.get(card.id) || 'none'}
                     isActivelyWorking={activeCards.has(card.id)}
                     stage={stage.id}
+                    showTags={isDone && showDoneTags}
                     onClick={() => onCardClick(card)}
                     onContextMenu={onCardContextMenu ? (e) => onCardContextMenu(card, e) : undefined}
                     onDragStart={() => {}}

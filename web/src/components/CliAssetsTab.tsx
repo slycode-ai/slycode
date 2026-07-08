@@ -8,6 +8,7 @@ import { AssetMatrix } from './AssetMatrix';
 import { StoreView } from './StoreView';
 import { UpdatesView } from './UpdatesView';
 import { AssetAssistant } from './AssetAssistant';
+import { StoreImportDiffViewer } from './StoreImportDiffViewer';
 
 interface ProjectInfo {
   id: string;
@@ -676,9 +677,9 @@ export function CliAssetsTab() {
         />
       )}
 
-      {/* Import to Store dialog */}
+      {/* Import to Store — diff review before the write */}
       {importTarget && (
-        <ImportDialog
+        <StoreImportDiffViewer
           target={importTarget}
           onConfirm={async (fullFolder) => {
             const { assetName, assetType, sourceProjectId } = importTarget;
@@ -692,160 +693,6 @@ export function CliAssetsTab() {
   );
 }
 
-/**
- * Import Dialog — shows file listing and lets user choose SKILL.md only vs full folder.
- */
-function ImportDialog({
-  target,
-  onConfirm,
-  onClose,
-}: {
-  target: ImportTarget;
-  onConfirm: (fullFolder: boolean) => void;
-  onClose: () => void;
-}) {
-  const [files, setFiles] = useState<string[] | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const params = new URLSearchParams({
-      provider: target.provider,
-      assetType: target.assetType,
-      assetName: target.assetName,
-      sourceProjectId: target.sourceProjectId,
-    });
-    fetch(`/api/cli-assets/store/preview?${params}`)
-      .then(r => r.json())
-      .then(data => {
-        setFiles(data.files ?? []);
-        setLoading(false);
-      })
-      .catch(() => {
-        setFiles([]);
-        setLoading(false);
-      });
-  }, [target]);
-
-  const hasExtraFiles = files && files.length > 1;
-  const skillMdOnly = files?.filter(f => f === 'SKILL.md') ?? [];
-  const extraFiles = files?.filter(f => f !== 'SKILL.md') ?? [];
-
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg rounded-xl bg-white p-6 shadow-(--shadow-overlay) dark:bg-void-800"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/30">
-            <svg className="h-5 w-5 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-void-900 dark:text-void-100">
-              Import to Store
-            </h3>
-            <p className="text-sm text-void-500 dark:text-void-400">
-              {target.assetName}
-            </p>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-void-300 border-t-purple-500" />
-          </div>
-        ) : (
-          <>
-            {/* File listing */}
-            <div className="mb-4 rounded-lg border border-void-200 bg-void-50 dark:border-void-700 dark:bg-void-900">
-              <div className="px-3 py-2 text-xs font-medium text-void-500 dark:text-void-400 border-b border-void-200 dark:border-void-700">
-                Files in source ({files?.length ?? 0})
-              </div>
-              <div className="max-h-48 overflow-y-auto p-2">
-                {files?.map(file => (
-                  <div
-                    key={file}
-                    className={`flex items-center gap-2 rounded px-2 py-1 text-xs font-mono ${
-                      file === 'SKILL.md'
-                        ? 'text-purple-700 dark:text-purple-300 font-semibold'
-                        : 'text-void-500 dark:text-void-400'
-                    }`}
-                  >
-                    <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      {file === 'SKILL.md' ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                      )}
-                    </svg>
-                    {file}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {hasExtraFiles && (
-              <p className="mb-4 text-xs text-void-500 dark:text-void-400">
-                This skill has {extraFiles.length} supporting file{extraFiles.length !== 1 ? 's' : ''} beyond SKILL.md.
-                These may be project-specific (e.g. context-priming area references) and importing them would overwrite the store copies.
-              </p>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => onConfirm(false)}
-                className="flex items-center justify-between rounded-lg border border-purple-300 bg-purple-50 px-4 py-3 text-left transition-colors hover:bg-purple-100 dark:border-purple-700 dark:bg-purple-900/20 dark:hover:bg-purple-900/40"
-              >
-                <div>
-                  <div className="text-sm font-medium text-purple-700 dark:text-purple-300">
-                    SKILL.md only
-                  </div>
-                  <div className="text-xs text-purple-500 dark:text-purple-400">
-                    Import only the skill definition — leave supporting files unchanged
-                  </div>
-                </div>
-                {!hasExtraFiles && (
-                  <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:bg-purple-900/40 dark:text-purple-300">
-                    Only file
-                  </span>
-                )}
-              </button>
-
-              {hasExtraFiles && (
-                <button
-                  onClick={() => onConfirm(true)}
-                  className="flex items-center justify-between rounded-lg border border-void-200 bg-void-50 px-4 py-3 text-left transition-colors hover:bg-void-100 dark:border-void-700 dark:bg-void-900 dark:hover:bg-void-800"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-void-700 dark:text-void-300">
-                      Full folder
-                    </div>
-                    <div className="text-xs text-void-500 dark:text-void-400">
-                      Import all {files?.length} files — overwrites existing store copies
-                    </div>
-                  </div>
-                </button>
-              )}
-
-              <button
-                onClick={onClose}
-                className="mt-1 rounded-lg px-4 py-2 text-sm font-medium text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200"
-              >
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /**
  * Compliance Fix Modal — generates a prompt to fix non-compliant asset frontmatter.

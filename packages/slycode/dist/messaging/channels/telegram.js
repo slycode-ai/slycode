@@ -183,25 +183,103 @@ export class TelegramChannel {
     }
     // --- Private: Telegram Bot API methods ---
     /** Generic JSON API call to Telegram Bot API. */
-    async apiCall(method, body) {
-        const res = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!data.ok)
-            throw new Error(`Telegram API error (${method}): ${data.description}`);
-        return data.result;
+    /**
+     * Call the Telegram Bot API.
+     *
+     * `retries` is opt-in and defaults to 0 — a blanket retry would risk
+     * double-sends on non-idempotent methods (sendMessage etc.) if the request
+     * succeeded but the response was lost. Only idempotent reads (getFile) pass
+     * retries. Retries fire ONLY on network/connect failures (fetch failed /
+     * ETIMEDOUT / ECONNRESET), never on a Telegram-level `!ok` (retrying a
+     * logical error is pointless). A per-attempt timeout means a stalled connect
+     * — the `ETIMEDOUT at internalConnectMultiple` seen when the box's egress to
+     * Telegram is degraded — fails fast instead of hanging the poll loop.
+     */
+    async apiCall(method, body, opts) {
+        const retries = opts?.retries ?? 0;
+        const timeoutMs = opts?.timeoutMs ?? 20_000;
+        let lastErr;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), timeoutMs);
+            try {
+                const res = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                    signal: abort.signal,
+                });
+                const data = await res.json();
+                // Telegram-level failure — do NOT retry, it won't change.
+                if (!data.ok)
+                    throw new Error(`Telegram API error (${method}): ${data.description}`);
+                return data.result;
+            }
+            catch (err) {
+                lastErr = err;
+                // Only network/transport errors are retryable; a Telegram API error
+                // (message starts with "Telegram API error") is terminal.
+                const retryable = !(err instanceof Error && err.message.startsWith('Telegram API error'));
+                if (retryable && attempt < retries) {
+                    const backoff = 500 * 2 ** attempt; // 500ms, 1s, 2s
+                    console.warn(`[Telegram] ${method} attempt ${attempt + 1}/${retries + 1} failed (${err.message}); retrying in ${backoff}ms`);
+                    await new Promise(r => setTimeout(r, backoff));
+                    continue;
+                }
+                throw err;
+            }
+            finally {
+                clearTimeout(timer);
+            }
+        }
+        throw lastErr;
     }
     /** Send a text message via Telegram API. */
     async apiSendMessage(chatId, text, opts) {
         return this.apiCall('sendMessage', { chat_id: chatId, text, ...opts });
     }
-    /** Get a file download URL from a file_id. */
+    /** Get a file download URL from a file_id. getFile is idempotent → retry it. */
     async apiGetFileLink(fileId) {
-        const file = await this.apiCall('getFile', { file_id: fileId });
+        const file = await this.apiCall('getFile', { file_id: fileId }, { retries: 2 });
         return `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+    }
+    /**
+     * Download a file from Telegram's CDN with retry + per-attempt timeout.
+     *
+     * Telegram's file servers intermittently drop the TLS connection mid-transfer
+     * (observed: `SocketError: other side closed` / ECONNRESET after a partial
+     * read). A single fetch with no retry loses the whole message on any blip —
+     * and voice notes are hit far more than text because they require a separate
+     * ~hundreds-of-KB download rather than arriving inside the getUpdates poll.
+     * Retrying a second later almost always succeeds since the drops are transient.
+     */
+    async downloadFileWithRetry(url, label) {
+        const MAX_ATTEMPTS = 3;
+        const PER_ATTEMPT_TIMEOUT_MS = 30_000;
+        let lastErr;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            const abort = new AbortController();
+            const timer = setTimeout(() => abort.abort(), PER_ATTEMPT_TIMEOUT_MS);
+            try {
+                const response = await fetch(url, { signal: abort.signal });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+                }
+                return Buffer.from(await response.arrayBuffer());
+            }
+            catch (err) {
+                lastErr = err;
+                if (attempt < MAX_ATTEMPTS) {
+                    const backoff = 500 * 2 ** (attempt - 1); // 500ms, 1s
+                    console.warn(`[Telegram] ${label} download attempt ${attempt}/${MAX_ATTEMPTS} failed (${err.message}); retrying in ${backoff}ms`);
+                    await new Promise(r => setTimeout(r, backoff));
+                }
+            }
+            finally {
+                clearTimeout(timer);
+            }
+        }
+        throw lastErr;
     }
     /**
      * Shared multipart upload helper for sendVoice/sendAudio/sendVideo/sendDocument.
@@ -302,8 +380,7 @@ export class TelegramChannel {
             try {
                 const fileLink = await this.apiGetFileLink(msg.voice.file_id);
                 const tempPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
-                const response = await fetch(fileLink);
-                const buffer = Buffer.from(await response.arrayBuffer());
+                const buffer = await this.downloadFileWithRetry(fileLink, 'voice');
                 fs.writeFileSync(tempPath, buffer);
                 this.voiceHandler(tempPath);
             }
@@ -319,8 +396,7 @@ export class TelegramChannel {
                 const photo = msg.photo[msg.photo.length - 1];
                 const fileLink = await this.apiGetFileLink(photo.file_id);
                 const tempPath = path.join(os.tmpdir(), `photo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`);
-                const response = await fetch(fileLink);
-                const buffer = Buffer.from(await response.arrayBuffer());
+                const buffer = await this.downloadFileWithRetry(fileLink, 'photo');
                 fs.writeFileSync(tempPath, buffer);
                 const entry = { filePath: tempPath, caption: msg.caption || undefined };
                 // Capture handler ref for timer callback safety

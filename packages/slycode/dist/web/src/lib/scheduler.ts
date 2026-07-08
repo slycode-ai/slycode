@@ -20,6 +20,8 @@ import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
 import { computeSessionKey } from './session-keys';
 import { readStatus, formatStatusForPrompt } from './status';
+import { atomicWriteFile } from './atomic-write';
+import { withBoardLock } from './board-lock';
 
 /**
  * Load env vars from the project root .env file if not already set.
@@ -742,22 +744,26 @@ export async function updateCardAutomation(
 ): Promise<void> {
   const kanbanPath = path.join(projectPath, 'documentation', 'kanban.json');
   try {
-    const content = await fs.readFile(kanbanPath, 'utf-8');
-    const board: KanbanBoard = JSON.parse(content);
+    // Advisory lock around the read-modify-write (feature 077, best-effort —
+    // shared with the CLI and the web kanban POST route).
+    await withBoardLock(kanbanPath, async () => {
+      const content = await fs.readFile(kanbanPath, 'utf-8');
+      const board: KanbanBoard = JSON.parse(content);
 
-    for (const stageCards of Object.values(board.stages)) {
-      for (const card of stageCards as KanbanCard[]) {
-        if (card.id === cardId && card.automation) {
-          Object.assign(card.automation, updates);
-          // Don't bump card.updated_at for internal automation bookkeeping
-          // (lastRun, nextRun, lastResult). This prevents automation cards
-          // from floating to the top of search results on every scheduled run.
-          break;
+      for (const stageCards of Object.values(board.stages)) {
+        for (const card of stageCards as KanbanCard[]) {
+          if (card.id === cardId && card.automation) {
+            Object.assign(card.automation, updates);
+            // Don't bump card.updated_at for internal automation bookkeeping
+            // (lastRun, nextRun, lastResult). This prevents automation cards
+            // from floating to the top of search results on every scheduled run.
+            break;
+          }
         }
       }
-    }
 
-    await fs.writeFile(kanbanPath, JSON.stringify(board, null, 2) + '\n');
+      await atomicWriteFile(kanbanPath, JSON.stringify(board, null, 2) + '\n');
+    });
   } catch (err) {
     serr(`Failed to update card ${cardId}:`, err);
   }
@@ -937,6 +943,69 @@ async function checkAutomations(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Atlas nightly refresh scan (feature 076)
+//
+// Product-owned pathway — NOT a user automation card. Each registered project
+// may carry documentation/atlas/config.json ({enabled, schedule, last_run}).
+// Dueness is stateless: due when the schedule's most recent boundary is later
+// than last_run. kickoffAtlasRefresh (lib/atlas/refresh.ts) starts/resumes the
+// project's Atlas terminal session and verified-submits the skill prompt; it
+// stamps last_run on success, which also serves as the re-fire guard.
+// ---------------------------------------------------------------------------
+
+const atlasKickoffsInFlight = new Set<string>();
+
+async function checkAtlasRefreshes(): Promise<void> {
+  try {
+    const { loadRegistry } = await import('@/lib/registry');
+    const { readAtlasConfig, kickoffAtlasRefresh } = await import('@/lib/atlas/refresh');
+    // NOTE: dueness lives in atlas/cron-due.ts and walks nextRun() —
+    // croner's previousRun() reports actual executions (always null for a
+    // pattern-only instance) and silently disabled the nightly when used here.
+    const { atlasRefreshDue, latestBoundaryBefore } = await import('@/lib/atlas/cron-due');
+    const registry = await loadRegistry();
+    const now = Date.now();
+
+    for (const project of registry.projects) {
+      if (atlasKickoffsInFlight.has(project.id)) continue;
+      let config;
+      try {
+        config = await readAtlasConfig(project.path);
+      } catch {
+        continue;
+      }
+      if (!config.enabled || !config.schedule) continue;
+      try {
+        new Cron(config.schedule, { timezone: CONFIGURED_TIMEZONE }); // validate only
+      } catch {
+        swarn(`[atlas] invalid schedule for ${project.id}: ${config.schedule}`);
+        continue;
+      }
+
+      const lastRun = config.last_run ? Date.parse(config.last_run) : 0;
+      if (!atlasRefreshDue(config.schedule, CONFIGURED_TIMEZONE, lastRun, now)) continue;
+      const boundary = latestBoundaryBefore(config.schedule, CONFIGURED_TIMEZONE, now);
+
+      atlasKickoffsInFlight.add(project.id);
+      void (async () => {
+        try {
+          slog(`[atlas] refresh due for ${project.id} (boundary ${boundary?.toISOString() ?? 'unknown'})`);
+          const result = await kickoffAtlasRefresh(project.id, project.path, 'scheduled');
+          if (result.ok) slog(`[atlas] refresh kicked off for ${project.id} → ${result.sessionName}`);
+          else serr(`[atlas] refresh failed for ${project.id}: ${result.error}`);
+        } catch (err) {
+          serr(`[atlas] refresh error for ${project.id}:`, err);
+        } finally {
+          atlasKickoffsInFlight.delete(project.id);
+        }
+      })();
+    }
+  } catch (err) {
+    serr('[atlas] scan error:', err);
+  }
+}
+
 /**
  * Start the scheduler
  */
@@ -957,9 +1026,13 @@ export function startScheduler(): void {
 
   // Initial check
   checkAutomations();
+  checkAtlasRefreshes();
 
-  // Periodic check
-  setCheckTimer(setInterval(checkAutomations, CHECK_INTERVAL_MS));
+  // Periodic check (atlas scan rides the same tick, isolated by its own try/catch)
+  setCheckTimer(setInterval(() => {
+    checkAutomations();
+    checkAtlasRefreshes();
+  }, CHECK_INTERVAL_MS));
 }
 
 /**

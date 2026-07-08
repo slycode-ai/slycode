@@ -55,17 +55,18 @@ export function GlobalClaudePanel({
   const voice = useVoice();
   const [globalProvider, setGlobalProvider] = useState('claude');
 
-  // Fetch global default provider
+  // Fetch this project's default provider (last-set global as fallback)
   useEffect(() => {
     fetch('/api/providers')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data?.defaults?.global?.provider) {
-          setGlobalProvider(data.defaults.global.provider);
+        const def = (projectId ? data?.defaults?.projects?.[projectId] : undefined) ?? data?.defaults?.global;
+        if (def?.provider) {
+          setGlobalProvider(def.provider);
         }
       })
       .catch(() => { /* use default */ });
-  }, []);
+  }, [projectId]);
 
   const resolvedLabel = label || (projectName ? projectName : 'Global Terminal');
   // Use sessionKey (derived from path) for new session names so web and CLI
@@ -301,6 +302,7 @@ export function GlobalClaudePanel({
             actionsConfig={actionsConfig}
             actions={actions}
             context={terminalContext}
+            projectId={projectId}
             initialProvider={globalProvider}
             tintColor="rgba(0, 191, 255, 0.1)"
             voiceTerminalId={voiceTerminalId}

@@ -196,7 +196,7 @@ async function doctor(_args) {
         }
     }
     // 6. Global CLIs
-    const cliTools = ['sly-kanban', 'sly-messaging', 'sly-scaffold'];
+    const cliTools = ['sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
     for (const tool of cliTools) {
         try {
             (0, child_process_1.execSync)(`command -v ${tool}`, { stdio: 'pipe', windowsHide: true });

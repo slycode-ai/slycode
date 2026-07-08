@@ -23,10 +23,13 @@ interface GlobalDefault {
  * immediately. Custom model ids are free text — typos fail at next session
  * start and are corrected here.
  */
-export function DefaultProviderConfig() {
+export function DefaultProviderConfig({ projectId }: { projectId: string }) {
   const [open, setOpen] = useState(false);
   const [providers, setProviders] = useState<Record<string, ProviderInfo>>({});
   const [def, setDef] = useState<GlobalDefault | null>(null);
+  // True while this project has no default of its own and shows the
+  // inherited last-set (global) value. Cleared on first save.
+  const [inherited, setInherited] = useState(false);
   const [customMode, setCustomMode] = useState(false);
   const [customDraft, setCustomDraft] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
@@ -35,17 +38,22 @@ export function DefaultProviderConfig() {
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const customInputRef = useRef<HTMLInputElement>(null);
 
-  // Load providers + current default
+  // Load providers + this project's default (falling back to the last-set global)
   useEffect(() => {
     fetch('/api/providers')
       .then(res => (res.ok ? res.json() : null))
-      .then((data: { providers: Record<string, ProviderInfo>; defaults?: { global?: GlobalDefault } } | null) => {
+      .then((data: { providers: Record<string, ProviderInfo>; defaults?: { global?: GlobalDefault; projects?: Record<string, GlobalDefault> } } | null) => {
         if (!data?.providers) return;
         setProviders(data.providers);
-        if (data.defaults?.global) setDef(data.defaults.global);
+        const own = data.defaults?.projects?.[projectId];
+        const resolved = own ?? data.defaults?.global;
+        if (resolved) {
+          setDef(resolved);
+          setInherited(!own);
+        }
       })
       .catch(() => { /* providers.json unavailable — control stays inert */ });
-  }, []);
+  }, [projectId]);
 
   // Close on outside click / Escape
   useEffect(() => {
@@ -69,12 +77,15 @@ export function DefaultProviderConfig() {
 
   const persist = useCallback((next: GlobalDefault) => {
     setDef(next);
+    setInherited(false);
     const body: GlobalDefault = { provider: next.provider, skipPermissions: next.skipPermissions };
     if (next.model) body.model = next.model;
+    // Saves THIS project's default; the server mirrors it to `global` so
+    // projects without their own default inherit the last-set value.
     fetch('/api/providers', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ defaults: { global: body } }),
+      body: JSON.stringify({ defaults: { projects: { [projectId]: body } } }),
     })
       .then(res => {
         setSaveState(res.ok ? 'saved' : 'error');
@@ -82,7 +93,7 @@ export function DefaultProviderConfig() {
         savedTimerRef.current = setTimeout(() => setSaveState('idle'), 1800);
       })
       .catch(() => setSaveState('error'));
-  }, []);
+  }, [projectId]);
 
   const currentProvider = def ? providers[def.provider] : undefined;
   const models = currentProvider?.model?.available ?? [];
@@ -130,7 +141,9 @@ export function DefaultProviderConfig() {
           className="absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-void-200/60 bg-void-50 p-3 shadow-(--shadow-overlay) dark:border-void-600 dark:bg-void-800"
         >
           <div className="mb-2 flex items-baseline justify-between">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">Default session</span>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">
+              Project default{inherited ? ' · inherited' : ''}
+            </span>
             <span
               aria-live="polite"
               className={`text-[10px] transition-opacity ${
@@ -228,7 +241,9 @@ export function DefaultProviderConfig() {
           </label>
 
           <p className="mt-2 border-t border-void-200/60 pt-2 text-[10px] leading-snug text-void-500 dark:border-void-700/60">
-            Used by every new session. Pick a different provider at start time without changing this.
+            {inherited
+              ? 'Showing the last-set default — saving any change pins it to this project.'
+              : 'Used by every new session in this project. Pick a different provider at start time without changing this.'}
           </p>
         </div>
       )}

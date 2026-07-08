@@ -20,6 +20,15 @@ const devHostname = getParentEnv('DEV_HOSTNAME');
 const nextConfig: NextConfig = {
   // Standalone output for npm distribution (self-contained server)
   output: "standalone",
+  // Override the build dir so a production build can be validated WHILE the
+  // dev server owns .next (they share it otherwise and clobber each other).
+  // e.g.  NEXT_DIST_DIR=.next-build-check npm run build
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+  // Code Mode (feature 076): these packages must stay require()-time externals.
+  // @vscode/ripgrep ships a native rg binary that Turbopack chokes on when it
+  // traces the import ("failed to convert rope into string"); web-tree-sitter
+  // fs-loads its own .wasm relative to its module dir, which bundling breaks.
+  serverExternalPackages: ["@vscode/ripgrep", "web-tree-sitter"],
   // Auth gate (Feature 068): middleware runs on the Node.js runtime (stable in
   // Next 16, set via `export const config.runtime = 'nodejs'` in middleware.ts)
   // so it can read ~/.slycode/auth.json and verify the cookie with node:crypto.

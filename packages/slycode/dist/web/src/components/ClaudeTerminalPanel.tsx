@@ -27,9 +27,11 @@ interface ProviderDefault {
 
 interface ProvidersData {
   providers: Record<string, ProviderConfig>;
-  // Legacy files may still carry `stages`/`projects` keys — readers ignore them.
+  // Per-project defaults with `global` as the last-set fallback for projects
+  // that never set their own. Legacy `stages` keys are ignored.
   defaults: {
     global: ProviderDefault;
+    projects?: Record<string, ProviderDefault>;
   };
 }
 
@@ -95,6 +97,9 @@ interface ClaudeTerminalPanelProps {
   // For card-specific command modifications
   cardId?: string;
   cardAreas?: string[];
+  // Registry project id — resolves this project's default provider/model
+  // (defaults.projects[projectId] ?? defaults.global)
+  projectId?: string;
   // Override initial provider (e.g. from detected existing session)
   initialProvider?: string;
   // When true, provider is controlled by parent (pills in CardModal); hide built-in selector
@@ -105,6 +110,10 @@ interface ClaudeTerminalPanelProps {
   tintColor?: string;
   // Voice registry ID — must match the key used with voice.registerTerminal()
   voiceTerminalId?: string;
+  // Prompt to deliver when a session is started WITHOUT an action/custom
+  // prompt (plain Start button). Lets specialized panels (Atlas) brief the
+  // agent — action templates never fire on a bare start.
+  defaultStartupPrompt?: string;
   // Callbacks
   onSessionChange?: (info: SessionInfo | null) => void;
   onProviderChange?: (provider: string) => void;
@@ -124,11 +133,13 @@ export function ClaudeTerminalPanel({
   className = '',
   cardId,
   cardAreas = [],
+  projectId,
   initialProvider,
   parentControlsProvider,
   footerClassName,
   tintColor,
   voiceTerminalId,
+  defaultStartupPrompt,
   onSessionChange,
   onProviderChange,
   onTerminalReady,
@@ -177,9 +188,13 @@ export function ClaudeTerminalPanel({
 
   // Build session name with provider segment. Same transform applied to primary
   // and aliases so direct-fetch fallback can try them in order.
+  // Recognized suffixes: :card:<id>, :global, :atlas (Code Mode, feature 076).
   const applyProviderSegment = (base: string): string =>
-    base.includes(':card:') || base.endsWith(':global')
-      ? base.replace(/:card:/, `:${selectedProvider}:card:`).replace(/:global$/, `:${selectedProvider}:global`)
+    base.includes(':card:') || base.endsWith(':global') || base.endsWith(':atlas')
+      ? base
+          .replace(/:card:/, `:${selectedProvider}:card:`)
+          .replace(/:global$/, `:${selectedProvider}:global`)
+          .replace(/:atlas$/, `:${selectedProvider}:atlas`)
       : base;
   const sessionName = applyProviderSegment(baseSessionName);
   // Stable key for deps so useCallback doesn't churn when the parent passes a
@@ -228,9 +243,10 @@ export function ClaudeTerminalPanel({
       .then((data: ProvidersData | null) => {
         if (data) {
           setProvidersData(data);
-          // Seed from the single global default. Provider/permission changes
-          // made in this panel are ephemeral — nothing is persisted back.
-          const def = data.defaults?.global;
+          // Seed from this project's default (last-set global as fallback).
+          // Provider/permission changes made in this panel are ephemeral —
+          // nothing is persisted back.
+          const def = (projectId ? data.defaults?.projects?.[projectId] : undefined) ?? data.defaults?.global;
           if (def) {
             // Only override provider selection if no existing session was
             // detected — the session name is keyed on provider, so rewriting
@@ -253,11 +269,13 @@ export function ClaudeTerminalPanel({
     }
   }, [parentControlsProvider, initialProvider]);
 
-  // Model to pass on fresh session create: the global default model, and ONLY
-  // when the chosen provider is the default provider. A manually-switched
-  // provider starts on its own CLI default (no model flag).
+  // Model to pass on fresh session create: this project's default model
+  // (last-set global as fallback), and ONLY when the chosen provider is the
+  // default provider. A manually-switched provider starts on its own CLI
+  // default (no model flag).
   const modelForCreate = (): string | undefined => {
-    const def = providersData?.defaults?.global;
+    const def = (projectId ? providersData?.defaults?.projects?.[projectId] : undefined)
+      ?? providersData?.defaults?.global;
     if (def?.model && def.provider === selectedProvider) return def.model;
     return undefined;
   };
@@ -436,6 +454,9 @@ export function ClaudeTerminalPanel({
       } else if (command?.prompt) {
         // Sly Action button — prepend the timestamp (slash commands skipped).
         prompt = withTimestamp(buildPrompt(command.prompt, contextObj));
+      } else if (defaultStartupPrompt) {
+        // Bare Start — deliver the panel's standing briefing.
+        prompt = defaultStartupPrompt;
       }
 
       // For RESUME: use the resolved alias name so the bridge re-attaches to
@@ -685,7 +706,14 @@ export function ClaudeTerminalPanel({
               tintColor={tintColor}
               onConnectionChange={handleConnectionChange}
               onSessionExit={handleSessionExit}
-              onReady={(handle) => { terminalHandleRef.current = handle; handle.focus(); onTerminalReady?.(handle); }}
+              onReady={(handle) => {
+                terminalHandleRef.current = handle;
+                // Notify BEFORE focusing: the voice system's focusin listener
+                // checks the terminal-handle registry, so registration must
+                // exist when focus lands or the voice shortcut never arms.
+                onTerminalReady?.(handle);
+                handle.focus();
+              }}
               onImagePaste={handleImagePaste}
             />
           </div>

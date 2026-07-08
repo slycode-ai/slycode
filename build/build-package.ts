@@ -116,6 +116,34 @@ function buildWeb(): void {
     if (fs.existsSync(publicDir)) {
       copyDirRecursive(publicDir, path.join(serverDir, 'public'));
     }
+    // Code Mode symbol index (feature 076): tree-sitter grammar wasms are
+    // fs-loaded at runtime (never require()d), so Next's file tracing misses
+    // them — copy each grammar package's wasm files next to the standalone
+    // node_modules. grammarPath() resolves them from the server's cwd.
+    const grammarPkgs = [
+      'tree-sitter-typescript',
+      'tree-sitter-javascript',
+      'tree-sitter-python',
+      'tree-sitter-bash',
+      'tree-sitter-java',
+    ];
+    const standaloneModules = fs.existsSync(path.join(destDir, 'node_modules'))
+      ? path.join(destDir, 'node_modules')
+      : path.join(serverDir, 'node_modules');
+    for (const pkg of grammarPkgs) {
+      const pkgDir = path.join(ROOT, 'web', 'node_modules', pkg);
+      if (!fs.existsSync(pkgDir)) {
+        console.warn(`  ! grammar package missing (symbol index will lack it): ${pkg}`);
+        continue;
+      }
+      const destPkg = path.join(standaloneModules, pkg);
+      fs.mkdirSync(destPkg, { recursive: true });
+      for (const f of fs.readdirSync(pkgDir)) {
+        if (f.endsWith('.wasm') || f === 'package.json') {
+          fs.copyFileSync(path.join(pkgDir, f), path.join(destPkg, f));
+        }
+      }
+    }
   } else {
     console.warn('  ! Next.js standalone output not found.');
     console.warn('    Ensure next.config.ts has output: "standalone"');
@@ -317,7 +345,7 @@ function copyTemplates(): void {
   // Scripts (kanban.js, scaffold.js, env wrapper)
   const scriptsDir = path.join(DIST_DIR, 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
-  const scriptsToCopy = ['kanban.js', 'scaffold.js'];
+  const scriptsToCopy = ['atlas.js', 'kanban.js', 'scaffold.js'];
   for (const script of scriptsToCopy) {
     const srcPath = path.join(ROOT, 'scripts', script);
     if (fs.existsSync(srcPath)) {

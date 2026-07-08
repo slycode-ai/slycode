@@ -1,17 +1,25 @@
 import type { KanbanCard } from './types';
 
 /**
- * Read-time normalization for HTML attachment refs (feature 072).
+ * Merge a legacy singular ref with its list field (feature 072/074 pattern).
  *
- * Cards historically carried a single `html_ref` string; the field is now a
- * list (`html_refs`), with legacy data folded in on the next CLI write. Until
- * that write happens, readers must see both. Legacy ref sorts first (it was
- * "the" attachment), deduped against the list.
+ * Cards historically carried a single ref string (`html_ref`, `design_ref`, …);
+ * those fields are now lists (`html_refs`, `design_refs`, …), with legacy data
+ * folded in on the next CLI write. Until that write happens, readers must see
+ * both. The legacy ref sorts first (it was "the" attachment), deduped against
+ * the list.
  */
-export function getHtmlRefs(card: Pick<KanbanCard, 'html_ref' | 'html_refs'>): string[] {
-  const refs = Array.isArray(card.html_refs) ? card.html_refs : [];
-  if (card.html_ref && !refs.includes(card.html_ref)) {
-    return [card.html_ref, ...refs];
+export function mergeRefs(legacy: string | undefined, list: string[] | undefined): string[] {
+  const refs = Array.isArray(list) ? list : [];
+  if (legacy && !refs.includes(legacy)) {
+    return [legacy, ...refs];
   }
   return refs;
+}
+
+/**
+ * Read-time normalization for HTML attachment refs (feature 072).
+ */
+export function getHtmlRefs(card: Pick<KanbanCard, 'html_ref' | 'html_refs'>): string[] {
+  return mergeRefs(card.html_ref, card.html_refs);
 }

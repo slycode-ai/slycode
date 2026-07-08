@@ -32,10 +32,49 @@ export class KanbanClient {
             return { ...EMPTY_BOARD, project_id: projectId };
         }
     }
+    /**
+     * Read the cold archive board (kanban-archive.json — feature 077). Archived
+     * cards live there, same stages shape as the live board. Missing/corrupt
+     * file = empty, never an error. Read-only client; union-and-dedupe by id
+     * with live winning (mirrors scripts/kanban.js + web/src/lib/kanban-cold.ts).
+     */
+    getColdBoard(projectId) {
+        const filePath = this.getKanbanPath(projectId);
+        if (!filePath)
+            return { ...EMPTY_BOARD, project_id: projectId };
+        try {
+            const coldPath = path.join(path.dirname(filePath), 'kanban-archive.json');
+            const data = JSON.parse(fs.readFileSync(coldPath, 'utf-8'));
+            return data;
+        }
+        catch {
+            return { ...EMPTY_BOARD, project_id: projectId };
+        }
+    }
+    /** Live board unioned with the cold archive (dedupe by id, live wins). */
+    getBoardWithArchive(projectId) {
+        const live = this.getBoard(projectId);
+        const cold = this.getColdBoard(projectId);
+        const stages = { backlog: [], design: [], implementation: [], testing: [], done: [] };
+        for (const stage of STAGES) {
+            const liveCards = live.stages[stage] || [];
+            const liveIds = new Set(liveCards.map(c => c.id));
+            stages[stage] = [...liveCards, ...(cold.stages?.[stage] || []).filter(c => c && c.id && !liveIds.has(c.id))];
+        }
+        return { ...live, stages };
+    }
     getCard(projectId, cardId) {
         const board = this.getBoard(projectId);
         for (const stage of STAGES) {
             const card = board.stages[stage]?.find(c => c.id === cardId);
+            if (card)
+                return { card, stage };
+        }
+        // Cold-storage fallback: archived cards live in kanban-archive.json.
+        // Only read on a live miss so the common path stays cheap.
+        const cold = this.getColdBoard(projectId);
+        for (const stage of STAGES) {
+            const card = cold.stages?.[stage]?.find(c => c.id === cardId);
             if (card)
                 return { card, stage };
         }
@@ -68,7 +107,8 @@ export class KanbanClient {
         const lowerQuery = query.toLowerCase();
         const results = [];
         for (const projectId of projectIds) {
-            const board = this.getBoard(projectId);
+            // Union cold storage — archived cards remain searchable (scored lower)
+            const board = this.getBoardWithArchive(projectId);
             for (const stage of STAGES) {
                 for (const card of board.stages[stage] || []) {
                     let score = 0;
@@ -95,7 +135,8 @@ export class KanbanClient {
     getAllCards(projectIds) {
         const results = [];
         for (const projectId of projectIds) {
-            const board = this.getBoard(projectId);
+            // Union cold storage — this method's contract includes archived cards
+            const board = this.getBoardWithArchive(projectId);
             for (const stage of STAGES) {
                 for (const card of board.stages[stage] || []) {
                     if (!card.automation) {

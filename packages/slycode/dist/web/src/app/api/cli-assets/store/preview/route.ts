@@ -1,33 +1,23 @@
 /**
  * Store Import Preview — GET /api/cli-assets/store/preview
  *
- * Lists files in a project skill directory so the user can see what would be imported.
- * Returns { files: string[] } with relative paths like ["SKILL.md", "references/area-index.md", ...]
+ * For skills, returns a per-file diff manifest comparing the project copy
+ * (incoming) against the canonical store copy (current): each file carries a
+ * status (identical/changed/added/removed), and previewable text files carry
+ * their content for a line diff. See buildStoreImportManifest.
+ *
+ * For agents (single files), returns the legacy { files, isDirectory } shape.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
+import { buildStoreImportManifest } from '@/lib/asset-scanner';
 import { loadRegistry } from '@/lib/registry';
 import type { ProviderId, AssetType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
-
-function listFilesRecursive(dir: string, base: string = ''): string[] {
-  const files: string[] = [];
-  if (!fs.existsSync(dir)) return files;
-
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const rel = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      files.push(...listFilesRecursive(path.join(dir, entry.name), rel));
-    } else {
-      files.push(rel);
-    }
-  }
-  return files;
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,11 +45,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
-    // For skills (directories), list all files
-    // For agents (single files), just return the filename
+    // For skills (directories), return the full per-file diff manifest.
+    // For agents (single files), keep the legacy filename listing.
     if (assetType === 'skill' && fs.statSync(assetPath).isDirectory()) {
-      const files = listFilesRecursive(assetPath);
-      return NextResponse.json({ files, isDirectory: true });
+      const manifest = buildStoreImportManifest(project.path, provider, assetName);
+      return NextResponse.json(manifest);
     } else {
       return NextResponse.json({ files: [path.basename(assetPath)], isDirectory: false });
     }

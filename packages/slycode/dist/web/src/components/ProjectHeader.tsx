@@ -23,9 +23,13 @@ interface ProjectHeaderProps {
   hasActiveAutomations?: boolean;
   onToggleAutomations?: () => void;
   onRefresh?: () => Promise<void>;
+  codeMode?: boolean;
+  onToggleCodeMode?: () => void;
+  /** true when board-side sessions are busy while the user is in Code Mode */
+  boardActive?: boolean;
 }
 
-export function ProjectHeader({ name, description, tags: _tags, projectId, projectPath, showArchived = false, onToggleArchived, showAutomations = false, hasActiveAutomations = false, onToggleAutomations, onRefresh }: ProjectHeaderProps) {
+export function ProjectHeader({ name, description, tags: _tags, projectId, projectPath, showArchived = false, onToggleArchived, showAutomations = false, hasActiveAutomations = false, onToggleAutomations, onRefresh, codeMode = false, onToggleCodeMode, boardActive = false }: ProjectHeaderProps) {
   const [showCommandConfig, setShowCommandConfig] = useState(false);
   const [showActionUpdates, setShowActionUpdates] = useState(false);
   const [showShortcutsConfig, setShowShortcutsConfig] = useState(false);
@@ -112,6 +116,36 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
             </div>
 
             <div className="ml-auto flex items-center gap-1 sm:gap-2">
+              {/* Board | Code Mode toggle (feature 076) */}
+              {onToggleCodeMode && (
+                <div className="hidden overflow-hidden rounded-lg border border-void-200/40 font-mono text-[10px] uppercase tracking-[0.08em] dark:border-void-700/40 sm:flex">
+                  <button
+                    onClick={onToggleCodeMode}
+                    title={codeMode && boardActive ? 'Board sessions are busy — click to watch' : 'Kanban board'}
+                    className={`min-h-[44px] px-3 transition-all ${
+                      !codeMode
+                        ? 'bg-neon-blue-400/10 text-neon-blue-500 dark:text-neon-blue-400'
+                        : `text-void-500 hover:text-neon-blue-400 dark:text-void-400${
+                            boardActive ? ' active-glow-board-btn rounded-md text-neon-blue-500 dark:text-neon-blue-400' : ''
+                          }`
+                    }`}
+                  >
+                    Board
+                  </button>
+                  <button
+                    onClick={onToggleCodeMode}
+                    title="Code Mode — codebase atlas & explorer"
+                    className={`min-h-[44px] px-3 transition-all ${
+                      codeMode
+                        ? 'bg-teal-400/10 text-teal-600 shadow-[inset_0_0_12px_rgba(70,215,194,0.15)] dark:text-teal-300'
+                        : 'text-void-500 hover:text-teal-500 dark:text-void-400 dark:hover:text-teal-300'
+                    }`}
+                  >
+                    Code&nbsp;Mode
+                  </button>
+                </div>
+              )}
+
               {/* Refresh board */}
               {onRefresh && (
                 <button
@@ -163,8 +197,8 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
                 </svg>
               </button>
 
-              {/* Workspace default provider/model — ghost neon, sibling to Shortcuts (feature 073) */}
-              <DefaultProviderConfig />
+              {/* Per-project default provider/model — ghost neon, sibling to Shortcuts (feature 073) */}
+              {projectId && <DefaultProviderConfig projectId={projectId} />}
 
               {/* Automations toggle button - ghost orange, pulses when automations are active */}
               <button

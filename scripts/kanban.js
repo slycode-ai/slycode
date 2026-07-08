@@ -36,6 +36,12 @@ if (!PROJECT_ROOT) {
 }
 const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/[^a-zA-Z0-9-]/g, '-');
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
+// Cold storage for archived cards (feature 077). Same shape as the live board;
+// holds only `archived: true` cards. Missing file = no cold cards, never an error.
+const COLD_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban-archive.json');
+// Advisory lock around board read-modify-write (best-effort — see acquireBoardLock)
+const LOCK_PATH = KANBAN_PATH + '.lock';
+const LOCK_STALE_MS = 5000;
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
 const AREA_INDEX_PATH = path.join(PROJECT_ROOT, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
 const MAX_EVENTS = 100;
@@ -359,9 +365,12 @@ Options:
   --priority <priority>  Set priority (low|medium|high|critical)
   --areas <areas>        Set areas (comma-separated)
   --tags <tags>          Set tags (comma-separated)
-  --design-ref <path>    Set design document reference (pass "" to clear)
-  --feature-ref <path>   Set feature spec reference (pass "" to clear)
-  --test-ref <path>      Set test document reference (pass "" to clear)
+  --design-ref <path>    Append a design document ref. Cards can hold multiple;
+                         duplicates are ignored. Pass "" to clear ALL.
+  --feature-ref <path>   Append a feature spec ref. Cards can hold multiple;
+                         duplicates are ignored. Pass "" to clear ALL.
+  --test-ref <path>      Append a test document ref. Cards can hold multiple;
+                         duplicates are ignored. Pass "" to clear ALL.
   --html-ref <path>      Append an HTML attachment ref (.html/.htm). Cards can
                          hold multiple; duplicates are ignored. Pass "" to
                          clear ALL HTML attachments from the card.
@@ -369,15 +378,20 @@ Options:
                          Append a questionnaire JSON ref. Path must be under
                          documentation/questionnaires/ and end in .json.
                          Pass "" to clear ALL questionnaires from the card.
+  --unlink-ref <path>    Remove a SINGLE attachment ref by path (design/feature/
+                         test/html/questionnaire). Unlinks the reference only —
+                         never deletes the file on disk.
   --status <text>        Set progress status (max 120 chars; pass "" to clear)
 
 Examples:
   kanban update card-123 --title "New title" --priority high
   kanban update card-123 --areas "web-frontend,terminal-bridge"
+  kanban update card-123 --design-ref "documentation/designs/foo.md"   # append
+  kanban update card-123 --design-ref ""    # clear ALL design docs
   kanban update card-123 --html-ref "documentation/designs/foo.html"   # append
   kanban update card-123 --html-ref ""    # clear ALL HTML attachments
   kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
-  kanban update card-123 --questionnaire-ref ""   # clear all questionnaires
+  kanban update card-123 --unlink-ref "documentation/designs/foo.md"   # remove one
   kanban update card-123 --status "Refactoring auth path"
 `;
 
@@ -665,6 +679,72 @@ Examples:
 // Utility Functions
 // ============================================================================
 
+/**
+ * Write a file atomically: unique temp file + rename, so a killed process can
+ * never truncate the destination. Mirrors messaging/src/atomic-write.ts and
+ * web/src/lib/atomic-write.ts (keep the three in lockstep). The `*.tmp.*`
+ * pattern is gitignored.
+ */
+function atomicWriteFileSync(filePath, data) {
+  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+  try {
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Advisory board lock (best-effort). Shrinks the read-modify-write race window
+// between concurrent writers (CLI/web/scheduler). NEVER blocks an operation:
+// stale locks (> LOCK_STALE_MS) are force-broken, and any unexpected error
+// means "proceed without the lock". Full race elimination is explicitly out of
+// scope (accepted risk — see documentation/designs/kanban_json_hardening.md).
+// Web mirror: web/src/lib/board-lock.ts — keep semantics in lockstep.
+// ---------------------------------------------------------------------------
+let boardLockHeld = false;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function acquireBoardLock() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      fs.writeFileSync(LOCK_PATH, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: 'wx' });
+      boardLockHeld = true;
+      return;
+    } catch (err) {
+      if (err.code !== 'EEXIST') return; // unexpected — proceed without lock
+      try {
+        const st = fs.statSync(LOCK_PATH);
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
+          fs.unlinkSync(LOCK_PATH); // stale lock from a killed process — break it
+          continue;
+        }
+      } catch {
+        return; // lock vanished or unreadable — proceed
+      }
+      sleepSync(50);
+    }
+  }
+  // Still locked after ~500ms of retries — advisory only, proceed anyway.
+}
+
+function releaseBoardLock() {
+  if (!boardLockHeld) return;
+  boardLockHeld = false;
+  try {
+    // Only unlink if the lock is still OURS — another process may have broken
+    // our lock as stale (e.g. during a long `prompt --wait`) and taken it.
+    const parsed = JSON.parse(fs.readFileSync(LOCK_PATH, 'utf-8'));
+    if (parsed && parsed.pid === process.pid) fs.unlinkSync(LOCK_PATH);
+  } catch { /* ignore */ }
+}
+process.on('exit', releaseBoardLock);
+
 function readKanban() {
   try {
     const content = fs.readFileSync(KANBAN_PATH, 'utf-8');
@@ -681,15 +761,133 @@ function readKanban() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cold storage (feature 077). Archived cards live in kanban-archive.json,
+// same {project_id, stages, last_updated} shape as the live board. Core rules
+// (KEEP IN SYNC with web/src/lib/kanban-cold.ts):
+//  - union-and-dedupe by id, live wins; missing cold file = empty, never error
+//  - corrupt cold file = read as empty but NEVER written (no clobber risk)
+//  - moves always write the DESTINATION file first, so a crash between the two
+//    writes leaves a card in both files (healed by dedupe), never in neither
+// ---------------------------------------------------------------------------
+
+function emptyColdBoard(projectId) {
+  const stages = {};
+  for (const s of VALID_STAGES) stages[s] = [];
+  return { project_id: projectId, stages, last_updated: null };
+}
+
+/**
+ * Lazily load the cold archive board, cached (non-enumerable) on the live
+ * board object so JSON.stringify never sees it. Cold cards whose id also
+ * exists in the live board are dropped at load time (live wins) — this
+ * self-heals the crash-between-writes duplicate state on the next cold write.
+ * Sets kanban.__coldReadFailed when the file exists but can't be parsed; in
+ * that state writeKanban refuses to touch the cold file.
+ */
+function getCold(kanban) {
+  if (kanban.__cold) return kanban.__cold;
+  const cold = emptyColdBoard(kanban.project_id);
+  try {
+    if (fs.existsSync(COLD_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(COLD_PATH, 'utf-8'));
+      if (parsed && parsed.stages && typeof parsed.stages === 'object') {
+        const liveIds = new Set();
+        for (const s of VALID_STAGES) {
+          for (const c of (kanban.stages[s] || [])) liveIds.add(c.id);
+        }
+        for (const s of VALID_STAGES) {
+          cold.stages[s] = (Array.isArray(parsed.stages[s]) ? parsed.stages[s] : [])
+            .filter(c => c && c.id && !liveIds.has(c.id));
+        }
+        if (parsed.project_id) cold.project_id = parsed.project_id;
+      }
+    }
+  } catch (err) {
+    console.error(`Warning: could not read ${path.basename(COLD_PATH)} (${err.message}); treating archive as empty for this read.`);
+    Object.defineProperty(kanban, '__coldReadFailed', { value: true, enumerable: false, writable: true, configurable: true });
+  }
+  Object.defineProperty(kanban, '__cold', { value: cold, enumerable: false, writable: true, configurable: true });
+  return cold;
+}
+
+function markColdDirty(kanban) {
+  Object.defineProperty(kanban, '__coldDirty', { value: true, enumerable: false, writable: true, configurable: true });
+}
+
 function writeKanban(data) {
   data.last_updated = new Date().toISOString();
   ensureCardNumbers(data);
+
+  // Partition-on-write: move any archived card found in the live stages out to
+  // cold storage. This single path implements BOTH the one-time migration of
+  // legacy inline-archived boards AND steady-state archiving. Normal writes
+  // with no archived cards (and no cold mutation) touch the cold file zero
+  // times — that's the perf win.
+  const moved = [];
+  if (!data.__coldReadFailed) {
+    for (const stage of VALID_STAGES) {
+      const cards = data.stages[stage] || [];
+      const keep = [];
+      for (const card of cards) {
+        if (card.archived) moved.push({ stage, card });
+        else keep.push(card);
+      }
+      if (keep.length !== cards.length) data.stages[stage] = keep;
+    }
+  }
+
+  let cold = null;
+  if (moved.length > 0 || data.__coldDirty === true) {
+    cold = getCold(data);
+    if (data.__coldReadFailed) {
+      // Cold file exists but is unreadable — never risk clobbering it. Keep
+      // the archived cards inline in the live board for this write.
+      for (const { stage, card } of moved) data.stages[stage].push(card);
+      console.error('Warning: kanban-archive.json is unreadable — archived cards kept in kanban.json for this write.');
+      cold = null;
+    } else {
+      for (const { stage, card } of moved) {
+        const arr = cold.stages[stage] || (cold.stages[stage] = []);
+        const idx = arr.findIndex(c => c.id === card.id);
+        if (idx >= 0) arr[idx] = card; else arr.push(card);
+      }
+      // Card-number safety: future allocations must never collide with numbers
+      // held by cold cards (belt for boards whose root nextCardNumber is lost).
+      let maxCold = 0;
+      for (const s of VALID_STAGES) {
+        for (const c of (cold.stages[s] || [])) {
+          if (c.number != null && c.number > maxCold) maxCold = c.number;
+        }
+      }
+      if (maxCold + 1 > (data.nextCardNumber ?? 0)) data.nextCardNumber = maxCold + 1;
+      cold.last_updated = data.last_updated;
+    }
+  }
+
   try {
-    fs.writeFileSync(KANBAN_PATH, JSON.stringify(data, null, 2) + '\n');
+    // Write ordering is load-bearing (see design doc): when moving cards
+    // live→cold, the cold file (destination) is written FIRST; when the cold
+    // board was mutated without inbound moves (unarchive / edit of a cold
+    // card), the live file is written first. Either way a crash between the
+    // two writes can only DUPLICATE a card across the files (healed by
+    // dedupe-on-read), never lose one.
+    if (cold && moved.length > 0) {
+      atomicWriteFileSync(COLD_PATH, JSON.stringify(cold, null, 2) + '\n');
+    }
+    atomicWriteFileSync(KANBAN_PATH, JSON.stringify(data, null, 2) + '\n');
+    if (cold && moved.length === 0) {
+      atomicWriteFileSync(COLD_PATH, JSON.stringify(cold, null, 2) + '\n');
+    }
   } catch (err) {
     console.error('Error writing kanban.json:', err.message);
     process.exit(1);
   }
+
+  // The advisory lock's job (protecting THIS read-modify-write) is done once
+  // the board is on disk — release early so long-running commands
+  // (prompt --wait) don't sit on it. Exit handler covers error paths.
+  releaseBoardLock();
 }
 
 function findCard(kanban, cardId, includeArchived = false) {
@@ -715,6 +913,20 @@ function findCard(kanban, cardId, includeArchived = false) {
     }
   }
 
+  // Cold-storage fallback (id match only — title match stays non-archived).
+  // Mark the cold board dirty so a mutating caller's writeKanban persists the
+  // mutation to the cold file; on read-only paths the flag is inert.
+  if (includeArchived) {
+    const cold = getCold(kanban);
+    for (const stage of VALID_STAGES) {
+      const card = (cold.stages[stage] || []).find(c => c.id === cardId);
+      if (card) {
+        markColdDirty(kanban);
+        return { card, stage, cold: true };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -725,6 +937,22 @@ function getAllCards(kanban, includeArchived = false) {
       if (!card.archived || includeArchived) {
         cards.push({ card, stage });
       }
+    }
+  }
+  return cards;
+}
+
+/**
+ * Like getAllCards(kanban, true) but also unions the cold archive board.
+ * Use for search/read paths that must see archived cards; NEVER used by
+ * ensureCardNumbers (which must stay zero-cold-I/O on every write).
+ */
+function getAllCardsWithCold(kanban) {
+  const cards = getAllCards(kanban, true);
+  const cold = getCold(kanban);
+  for (const stage of VALID_STAGES) {
+    for (const card of (cold.stages[stage] || [])) {
+      cards.push({ card, stage });
     }
   }
   return cards;
@@ -820,7 +1048,7 @@ function emitEvent(type, project, detail, cardId) {
     if (events.length > MAX_EVENTS) {
       events.splice(0, events.length - MAX_EVENTS);
     }
-    fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+    atomicWriteFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
   } catch {
     // Never fail card operations due to event logging
   }
@@ -869,14 +1097,23 @@ Priority: ${card.priority}
     if (card.tags && card.tags.length > 0) {
       output += `Tags: ${card.tags.join(', ')}\n`;
     }
-    if (card.design_ref) {
-      output += `Design Doc: ${card.design_ref}\n`;
-    }
-    if (card.feature_ref) {
-      output += `Feature Spec: ${card.feature_ref}\n`;
-    }
-    if (card.test_ref) {
-      output += `Test Doc: ${card.test_ref}\n`;
+    {
+      // Design / Feature / Test refs: list + legacy singular (legacy first,
+      // deduped — same normalization the web read-fallback uses). One line per
+      // ref, keeping the historical label (feature 074).
+      const mergeRefs = (legacy, list) => {
+        const arr = Array.isArray(list) ? list : [];
+        return legacy && !arr.includes(legacy) ? [legacy, ...arr] : arr;
+      };
+      for (const ref of mergeRefs(card.design_ref, card.design_refs)) {
+        output += `Design Doc: ${ref}\n`;
+      }
+      for (const ref of mergeRefs(card.feature_ref, card.feature_refs)) {
+        output += `Feature Spec: ${ref}\n`;
+      }
+      for (const ref of mergeRefs(card.test_ref, card.test_refs)) {
+        output += `Test Doc: ${ref}\n`;
+      }
     }
     {
       // Legacy html_ref + html_refs list, normalized (legacy first, deduped)
@@ -958,7 +1195,8 @@ function cmdSearch(args) {
   const showOnlyArchived = opts.archived === true;
   const includeArchived = opts['include-archived'] === true || showOnlyArchived;
 
-  let results = getAllCards(kanban, includeArchived);
+  // Archived searches union the cold archive file (feature 077)
+  let results = includeArchived ? getAllCardsWithCold(kanban) : getAllCards(kanban, false);
 
   // Filter by archived status
   if (showOnlyArchived) {
@@ -1241,9 +1479,28 @@ function cmdUpdate(args) {
     if (autoKind) refsAttachedThisCall.push(autoKind);
   };
 
-  applyRefFlag('design-ref', 'design_ref', '--design-ref', null, 'design');
-  applyRefFlag('feature-ref', 'feature_ref', '--feature-ref', null, 'feature');
-  applyRefFlag('test-ref', 'test_ref', '--test-ref', null, 'test');
+  // Design / Feature / Test refs are now lists (feature 074 — mirrors
+  // html_refs). Legacy singular fields migrate on write: fold into the list
+  // before the flag applies, so append preserves the old value and "" clears
+  // BOTH. Cards never touched by the flag keep their legacy field (read-time
+  // fallback via getDocRefs on the web side).
+  for (const [flag, legacyKey, listKey] of [
+    ['design-ref', 'design_ref', 'design_refs'],
+    ['feature-ref', 'feature_ref', 'feature_refs'],
+    ['test-ref', 'test_ref', 'test_refs'],
+  ]) {
+    if (flag in opts && card[legacyKey]) {
+      const existing = Array.isArray(card[listKey]) ? card[listKey] : [];
+      if (!existing.includes(card[legacyKey])) {
+        card[listKey] = [card[legacyKey], ...existing];
+      }
+      delete card[legacyKey];
+      updates.push(`${listKey}: migrated legacy ${legacyKey}`);
+    }
+  }
+  applyRefFlag('design-ref', 'design_refs', '--design-ref', null, 'design', { list: true });
+  applyRefFlag('feature-ref', 'feature_refs', '--feature-ref', null, 'feature', { list: true });
+  applyRefFlag('test-ref', 'test_refs', '--test-ref', null, 'test', { list: true });
 
   // HTML refs are a list (feature 072 — mirrors questionnaire_refs). Legacy
   // single `html_ref` migrates on write: fold it into the list before the
@@ -1268,6 +1525,41 @@ function cmdUpdate(args) {
     'questionnaire',
     { list: true, strict: true }
   );
+
+  // Unlink a single attachment ref by path (feature 074). Removes the ref from
+  // whichever list (or legacy singular) holds it — across design/feature/test,
+  // HTML, and questionnaires. This is UNLINK, not delete: the file on disk is
+  // never touched.
+  if ('unlink-ref' in opts) {
+    const target = opts['unlink-ref'];
+    if (target === '' || target === true) {
+      console.error('Error: --unlink-ref requires a path');
+      process.exit(1);
+    }
+    const norm = (p) => String(p).replace(/\\/g, '/');
+    const wanted = norm(target);
+    let removed = false;
+    for (const listKey of ['design_refs', 'feature_refs', 'test_refs', 'html_refs', 'questionnaire_refs']) {
+      if (!Array.isArray(card[listKey])) continue;
+      const kept = card[listKey].filter((r) => norm(r) !== wanted);
+      if (kept.length !== card[listKey].length) {
+        removed = true;
+        if (kept.length === 0) delete card[listKey];
+        else card[listKey] = kept;
+      }
+    }
+    for (const legacyKey of ['design_ref', 'feature_ref', 'test_ref', 'html_ref']) {
+      if (card[legacyKey] && norm(card[legacyKey]) === wanted) {
+        delete card[legacyKey];
+        removed = true;
+      }
+    }
+    if (removed) {
+      updates.push(`unlinked ref: ${target}`);
+    } else {
+      console.log(`No attachment ref matching "${target}" found on card ${cardId}.`);
+    }
+  }
 
   if ('status' in opts) {
     const value = opts.status;
@@ -1562,6 +1854,18 @@ function cmdArchive(args) {
 
       card.archived = false;
       card.last_modified_by = 'cli';
+
+      if (result.cold) {
+        // Card lives in cold storage — move it back to its original stage in
+        // the live board. findCard already marked the cold board dirty, so
+        // writeKanban writes live first (card in both files during the window),
+        // then cold without it.
+        const cold = getCold(kanban);
+        cold.stages[stage] = (cold.stages[stage] || []).filter(c => c.id !== card.id);
+        kanban.stages[stage] = kanban.stages[stage] || [];
+        kanban.stages[stage].push(card);
+      }
+
       writeKanban(kanban);
       emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' unarchived`, cardId);
 
@@ -3119,20 +3423,32 @@ function cmdPrompt(args) {
   const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
   const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
 
-  // Load providers.json for the global default (feature 073)
+  // Load providers.json for the default provider (feature 073)
   let providers = null;
   try {
     const providersPath = path.join(PROJECT_ROOT, 'data', 'providers.json');
     providers = JSON.parse(fs.readFileSync(providersPath, 'utf-8'));
   } catch { /* providers.json optional */ }
 
+  // Resolve this project's registry id so per-project defaults apply
+  // (defaults.projects is keyed by registry project id, not directory name).
+  let registryProjectId = null;
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'projects', 'registry.json'), 'utf-8'));
+    const entries = Array.isArray(registry) ? registry : (registry.projects || []);
+    const match = entries.find((p) => p && p.path && path.resolve(p.path) === PROJECT_ROOT);
+    if (match) registryProjectId = match.id;
+  } catch { /* registry optional — fall back to global default */ }
+
   const doPrompt = async () => {
     try {
-      // Resolve provider: flag > global default > 'claude' (feature 073 —
-      // stage defaults removed; legacy stages keys in old files are ignored)
+      // Resolve provider: flag > project default > last-set global > 'claude'
+      // (per-project defaults, feature 073 follow-up; legacy stages keys ignored)
       let provider = providerFlag;
-      if (!provider && providers?.defaults?.global?.provider) {
-        provider = providers.defaults.global.provider;
+      if (!provider) {
+        const def = (registryProjectId && providers?.defaults?.projects?.[registryProjectId])
+          || providers?.defaults?.global;
+        if (def?.provider) provider = def.provider;
       }
       if (!provider) provider = 'claude';
 
@@ -3701,6 +4017,19 @@ function main() {
   if (!command || command === '--help' || command === '-h') {
     console.log(MAIN_HELP);
     return;
+  }
+
+  // Advisory lock for board-mutating commands (wraps the whole read-modify-
+  // write; released by the process exit handler). Read-only commands (search,
+  // show, board, areas) never take the lock. `prompt`/`respond` write only a
+  // status/auto-status early in their flow, then may block on the bridge —
+  // the stale-lock break (5s) keeps a long --wait from wedging other writers.
+  const MUTATING_COMMANDS = new Set([
+    'create', 'update', 'move', 'reorder', 'archive', 'checklist',
+    'problem', 'notes', 'status', 'automation', 'questionnaire', 'prompt',
+  ]);
+  if (MUTATING_COMMANDS.has(command)) {
+    acquireBoardLock();
   }
 
   switch (command) {

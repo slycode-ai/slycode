@@ -199,10 +199,13 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
       return res.status(400).json({ error: 'No image file provided. Send as multipart field "image".' });
     }
 
-    // Resolve CWD: session lookup first, fall back to explicit cwd field
-    const cwd = sessionManager.getSessionCwd(name) || (req.body?.cwd as string | undefined);
+    // Resolve CWD strictly from the registered session. We deliberately do NOT
+    // honour a caller-supplied `req.body.cwd` fallback: on a session-lookup miss
+    // that would be a write-anywhere primitive, letting a caller drop uploaded
+    // images into any user-writable directory outside the project tree.
+    const cwd = sessionManager.getSessionCwd(name);
     if (!cwd) {
-      return res.status(404).json({ error: 'Session not found and no cwd provided' });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
     try {

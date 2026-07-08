@@ -1,0 +1,281 @@
+/**
+ * Atlas artifact schema + validation (feature 076) — CANONICAL.
+ *
+ * scripts/atlas.js mirrors this validation for CLI write-time enforcement.
+ * KEEP IN LOCKSTEP (same convention as status.ts / questionnaire.ts ↔
+ * scripts/kanban.js). The contract: the AI agent only ever emits structure
+ * that passes these validators; anything else is rejected at the boundary and
+ * never reaches the UI.
+ *
+ * Storage layout (per project, committed):
+ *   documentation/atlas/atlas.json        — root: areas, flows, overview
+ *   documentation/atlas/nodes/<area>.json — per-area explanation node
+ *   documentation/atlas/config.json       — nightly refresh settings
+ *   documentation/atlas/nav-events.json   — ephemeral AI navigation directives
+ */
+
+export const ATLAS_SCHEMA_VERSION = 1;
+
+// Deterministic area palette — the AI NEVER picks colors; index-assigned.
+export const AREA_PALETTE = [
+  '#4cb8f0', '#9d8cf5', '#ef6fb0', '#e8b64a', '#52c98b', '#7f8ea3',
+  '#5fd4d0', '#d98d5f', '#b3a1f7', '#8fbf6a', '#e8748a', '#6a9ac9',
+];
+
+export interface AtlasArea {
+  id: string;            // slug: [a-z0-9-]{1,32}
+  name: string;
+  paths: string[];       // repo-relative dir prefixes this area covers
+  summary?: string;      // one-liner shown on the building card
+  pinned?: boolean;      // user-pinned identity — refresh must not rename/remove
+  color?: string;        // assigned deterministically at write time
+}
+
+export interface AtlasFlow {
+  from: string;          // area id
+  to: string;            // area id
+  label: string;
+}
+
+export interface AtlasRoot {
+  schema_version: number;
+  updated_at: string;    // ISO
+  generated_by?: string;
+  project_overview?: string;
+  areas: AtlasArea[];
+  flows?: AtlasFlow[];
+}
+
+export interface AtlasKeyFile { path: string; role: string }
+export interface AtlasModule { path: string; name: string; summary: string }
+/** A declared homogeneous family (specs, migrations, …): counts as covered
+ *  for the coverage crawl; its member LIST is hashed for staleness. */
+export interface AtlasCollection { prefix: string; summary?: string }
+
+export interface AtlasNode {
+  schema_version: number;
+  area: string;          // area id
+  updated_at: string;
+  explanation: string;   // main AI prose for the area
+  key_files: AtlasKeyFile[];
+  modules?: AtlasModule[];
+  /** file → symbol name → one-line summary (L3 file atlas enrichment) */
+  symbol_summaries?: Record<string, Record<string, string>>;
+  /** declared homogeneous families under this area (collections rule) */
+  collections?: AtlasCollection[];
+  /** file → 12-hex content hash, stamped by the CLI at write time */
+  source_hashes: Record<string, string>;
+}
+
+export interface AtlasConfig {
+  enabled: boolean;
+  schedule: string;      // cron
+  provider?: string | null;  // null = follow the global default (feature 073)
+  model?: string | null;     // null = provider's default (global default's model when provider matches)
+  last_run?: string | null;
+  next_run?: string | null;
+}
+
+export interface DeckItem { file: string; line?: number; note?: string }
+
+export interface NavEvent {
+  id: string;
+  ts: string;            // ISO
+  type: 'navigate' | 'highlight' | 'deck';
+  file?: string;
+  line?: number;
+  endLine?: number;
+  note?: string;
+  deck?: { title: string; items: DeckItem[] };
+}
+
+// ---------------------------------------------------------------------------
+// Limits (mirror in scripts/atlas.js)
+// ---------------------------------------------------------------------------
+export const LIMITS = {
+  maxAreas: 16,
+  maxPathsPerArea: 10,
+  maxNameLen: 60,
+  maxSummaryLen: 200,
+  maxOverviewLen: 2000,
+  maxExplanationLen: 8000,
+  maxKeyFiles: 40,
+  maxModules: 80,
+  maxRoleLen: 80,
+  maxSymbolFiles: 60,
+  maxSymbolsPerFile: 60,
+  maxSymbolSummaryLen: 200,
+  maxFlows: 12,
+  maxFlowLabelLen: 60,
+  maxDeckItems: 30,
+  maxNoteLen: 500,
+  maxNavEvents: 50,
+  maxCollections: 20,
+} as const;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+function isRelPath(p: unknown): p is string {
+  return (
+    typeof p === 'string' &&
+    p.length > 0 &&
+    p.length < 300 &&
+    !p.startsWith('/') &&
+    !/^[a-zA-Z]:/.test(p) &&
+    !p.split(/[\\/]/).includes('..')
+  );
+}
+
+/** Validate an atlas root document. Returns [] when valid. */
+export function validateAtlasRoot(data: unknown): string[] {
+  const errs: string[] = [];
+  const d = data as Partial<AtlasRoot> | null;
+  if (!d || typeof d !== 'object') return ['root: not an object'];
+  if (d.schema_version !== ATLAS_SCHEMA_VERSION) errs.push(`root: schema_version must be ${ATLAS_SCHEMA_VERSION}`);
+  if (typeof d.updated_at !== 'string' || isNaN(Date.parse(d.updated_at))) errs.push('root: updated_at must be ISO date');
+  if (d.project_overview !== undefined && (typeof d.project_overview !== 'string' || d.project_overview.length > LIMITS.maxOverviewLen)) {
+    errs.push(`root: project_overview must be a string ≤ ${LIMITS.maxOverviewLen} chars`);
+  }
+  if (!Array.isArray(d.areas) || d.areas.length === 0) {
+    errs.push('root: areas must be a non-empty array');
+    return errs;
+  }
+  if (d.areas.length > LIMITS.maxAreas) errs.push(`root: too many areas (max ${LIMITS.maxAreas})`);
+  const ids = new Set<string>();
+  d.areas.forEach((a, i) => {
+    const where = `areas[${i}]`;
+    if (!a || typeof a !== 'object') { errs.push(`${where}: not an object`); return; }
+    if (typeof a.id !== 'string' || !SLUG_RE.test(a.id)) errs.push(`${where}: id must match ${SLUG_RE}`);
+    else if (ids.has(a.id)) errs.push(`${where}: duplicate id '${a.id}'`);
+    else ids.add(a.id);
+    if (typeof a.name !== 'string' || !a.name.trim() || a.name.length > LIMITS.maxNameLen) errs.push(`${where}: name required (≤ ${LIMITS.maxNameLen} chars)`);
+    if (!Array.isArray(a.paths) || a.paths.length === 0 || a.paths.length > LIMITS.maxPathsPerArea || !a.paths.every(isRelPath)) {
+      errs.push(`${where}: paths must be 1-${LIMITS.maxPathsPerArea} repo-relative prefixes`);
+    }
+    if (a.summary !== undefined && (typeof a.summary !== 'string' || a.summary.length > LIMITS.maxSummaryLen)) {
+      errs.push(`${where}: summary must be ≤ ${LIMITS.maxSummaryLen} chars`);
+    }
+    if (a.pinned !== undefined && typeof a.pinned !== 'boolean') errs.push(`${where}: pinned must be boolean`);
+  });
+  if (d.flows !== undefined) {
+    if (!Array.isArray(d.flows) || d.flows.length > LIMITS.maxFlows) errs.push(`root: flows must be an array ≤ ${LIMITS.maxFlows}`);
+    else d.flows.forEach((f, i) => {
+      if (!f || typeof f !== 'object' || !ids.has(f.from) || !ids.has(f.to) ||
+          typeof f.label !== 'string' || f.label.length > LIMITS.maxFlowLabelLen) {
+        errs.push(`flows[${i}]: from/to must be known area ids, label ≤ ${LIMITS.maxFlowLabelLen} chars`);
+      }
+    });
+  }
+  return errs;
+}
+
+/** Validate a per-area node document (before hash stamping). */
+export function validateAtlasNode(data: unknown, knownAreaIds?: Set<string>): string[] {
+  const errs: string[] = [];
+  const d = data as Partial<AtlasNode> | null;
+  if (!d || typeof d !== 'object') return ['node: not an object'];
+  if (d.schema_version !== ATLAS_SCHEMA_VERSION) errs.push(`node: schema_version must be ${ATLAS_SCHEMA_VERSION}`);
+  if (typeof d.area !== 'string' || !SLUG_RE.test(d.area)) errs.push('node: area must be a slug');
+  else if (knownAreaIds && !knownAreaIds.has(d.area)) errs.push(`node: unknown area '${d.area}' — not in atlas.json`);
+  if (typeof d.updated_at !== 'string' || isNaN(Date.parse(d.updated_at))) errs.push('node: updated_at must be ISO date');
+  if (typeof d.explanation !== 'string' || !d.explanation.trim() || d.explanation.length > LIMITS.maxExplanationLen) {
+    errs.push(`node: explanation required (≤ ${LIMITS.maxExplanationLen} chars)`);
+  }
+  if (!Array.isArray(d.key_files) || d.key_files.length === 0 || d.key_files.length > LIMITS.maxKeyFiles) {
+    errs.push(`node: key_files must be 1-${LIMITS.maxKeyFiles} entries`);
+  } else {
+    d.key_files.forEach((k, i) => {
+      if (!k || !isRelPath(k.path) || typeof k.role !== 'string' || k.role.length > LIMITS.maxRoleLen) {
+        errs.push(`node.key_files[${i}]: needs repo-relative path + role ≤ ${LIMITS.maxRoleLen} chars`);
+      }
+    });
+  }
+  if (d.modules !== undefined) {
+    if (!Array.isArray(d.modules) || d.modules.length > LIMITS.maxModules) errs.push(`node: modules must be an array ≤ ${LIMITS.maxModules}`);
+    else d.modules.forEach((m, i) => {
+      if (!m || !isRelPath(m.path) || typeof m.name !== 'string' || !m.name ||
+          typeof m.summary !== 'string' || m.summary.length > LIMITS.maxSummaryLen) {
+        errs.push(`node.modules[${i}]: needs path, name, summary ≤ ${LIMITS.maxSummaryLen} chars`);
+      }
+    });
+  }
+  if (d.symbol_summaries !== undefined) {
+    if (!d.symbol_summaries || typeof d.symbol_summaries !== 'object' || Array.isArray(d.symbol_summaries)) {
+      errs.push('node: symbol_summaries must be an object');
+    } else {
+      const files = Object.keys(d.symbol_summaries);
+      if (files.length > LIMITS.maxSymbolFiles) errs.push(`node: symbol_summaries covers too many files (max ${LIMITS.maxSymbolFiles})`);
+      for (const f of files) {
+        if (!isRelPath(f)) { errs.push(`node.symbol_summaries: bad path '${f}'`); continue; }
+        const syms = d.symbol_summaries[f];
+        if (!syms || typeof syms !== 'object' || Array.isArray(syms)) { errs.push(`node.symbol_summaries[${f}]: must be an object`); continue; }
+        const names = Object.keys(syms);
+        if (names.length > LIMITS.maxSymbolsPerFile) errs.push(`node.symbol_summaries[${f}]: too many symbols (max ${LIMITS.maxSymbolsPerFile})`);
+        for (const n of names) {
+          if (typeof syms[n] !== 'string' || syms[n].length > LIMITS.maxSymbolSummaryLen) {
+            errs.push(`node.symbol_summaries[${f}].${n}: summary must be ≤ ${LIMITS.maxSymbolSummaryLen} chars`);
+          }
+        }
+      }
+    }
+  }
+  if (d.collections !== undefined) {
+    if (!Array.isArray(d.collections) || d.collections.length > LIMITS.maxCollections) {
+      errs.push(`node: collections must be an array ≤ ${LIMITS.maxCollections}`);
+    } else {
+      d.collections.forEach((c, i) => {
+        if (!c || !isRelPath(c.prefix) ||
+            (c.summary !== undefined && (typeof c.summary !== 'string' || c.summary.length > LIMITS.maxSummaryLen))) {
+          errs.push(`node.collections[${i}]: needs repo-relative prefix (+ summary ≤ ${LIMITS.maxSummaryLen} chars)`);
+        }
+      });
+    }
+  }
+  // source_hashes is stamped by the CLI — when present it must be well-formed.
+  if (d.source_hashes !== undefined) {
+    if (!d.source_hashes || typeof d.source_hashes !== 'object' || Array.isArray(d.source_hashes)) {
+      errs.push('node: source_hashes must be an object');
+    } else {
+      for (const [p, h] of Object.entries(d.source_hashes)) {
+        // trailing '/' = collection member-list hash (directory convention)
+        const key = p.endsWith('/') ? p.slice(0, -1) : p;
+        if (!isRelPath(key) || typeof h !== 'string' || !/^[0-9a-f]{12}$/.test(h)) {
+          errs.push(`node.source_hashes['${p}']: must map repo-relative path → 12-hex hash`);
+        }
+      }
+    }
+  }
+  return errs;
+}
+
+/** Validate a navigation event (CLI verbs → nav-events.json → UI). */
+export function validateNavEvent(data: unknown): string[] {
+  const errs: string[] = [];
+  const d = data as Partial<NavEvent> | null;
+  if (!d || typeof d !== 'object') return ['nav: not an object'];
+  if (d.type !== 'navigate' && d.type !== 'highlight' && d.type !== 'deck') errs.push('nav: type must be navigate|highlight|deck');
+  if (d.note !== undefined && (typeof d.note !== 'string' || d.note.length > LIMITS.maxNoteLen)) errs.push(`nav: note ≤ ${LIMITS.maxNoteLen} chars`);
+  if (d.type === 'navigate' || d.type === 'highlight') {
+    if (!isRelPath(d.file)) errs.push('nav: file must be repo-relative');
+    if (d.line !== undefined && (!Number.isInteger(d.line) || d.line! < 1)) errs.push('nav: line must be a positive integer');
+    if (d.endLine !== undefined && (!Number.isInteger(d.endLine) || d.endLine! < (d.line ?? 1))) errs.push('nav: endLine must be ≥ line');
+    if (d.type === 'highlight' && d.line === undefined) errs.push('nav: highlight requires a line');
+  }
+  if (d.type === 'deck') {
+    const deck = d.deck;
+    if (!deck || typeof deck !== 'object' || typeof deck.title !== 'string' || !deck.title.trim()) {
+      errs.push('nav: deck requires a title');
+    } else if (!Array.isArray(deck.items) || deck.items.length === 0 || deck.items.length > LIMITS.maxDeckItems) {
+      errs.push(`nav: deck.items must be 1-${LIMITS.maxDeckItems} entries`);
+    } else {
+      deck.items.forEach((it, i) => {
+        if (!it || !isRelPath(it.file) ||
+            (it.line !== undefined && (!Number.isInteger(it.line) || it.line < 1)) ||
+            (it.note !== undefined && (typeof it.note !== 'string' || it.note.length > LIMITS.maxNoteLen))) {
+          errs.push(`nav: deck.items[${i}] invalid`);
+        }
+      });
+    }
+  }
+  return errs;
+}

@@ -149,8 +149,11 @@ export interface KanbanCard {
   problems: Array<{ id: string; description: string; severity: string; resolved_at?: string }>;
   checklist: Array<{ id: string; text: string; done: boolean }>;
   agentNotes?: Array<{ id: number; text: string; timestamp: string }>;
-  design_ref?: string;
-  feature_ref?: string;
+  design_ref?: string;   // LEGACY single ref — read-time fallback (feature 074)
+  feature_ref?: string;  // LEGACY single ref — read-time fallback (feature 074)
+  design_refs?: string[];  // List of design docs (feature 074)
+  feature_refs?: string[]; // List of feature specs (feature 074)
+  test_refs?: string[];    // List of test docs (feature 074)
   status?: {
     text: string;
     setAt: string;

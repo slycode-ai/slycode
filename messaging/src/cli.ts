@@ -142,6 +142,10 @@ async function sendFile(filePath: string, caption: string | undefined, asOverrid
         cwd: process.cwd(),
         ...(caption !== undefined && { caption }),
         ...(asOverride !== undefined && { as: asOverride }),
+        // Forward the caller's session so the endpoint can emit a 'Switch to
+        // Card' button when the file comes from a non-active session (same as
+        // /send and /voice).
+        ...(process.env.SLYCODE_SESSION && { session: process.env.SLYCODE_SESSION }),
       }),
     });
     const data = await res.json() as { ok?: boolean; channel?: string; kind?: string; messageId?: number; bytes?: number; error?: string; message?: string };

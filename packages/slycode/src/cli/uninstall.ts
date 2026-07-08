@@ -24,7 +24,7 @@ export async function uninstall(_args: string[]): Promise<void> {
   console.log('This will:');
   console.log('  - Stop any running services');
   console.log('  - Remove system services (if installed)');
-  console.log('  - Remove global CLI links (slycode, sly-kanban, sly-messaging, sly-scaffold)');
+  console.log('  - Remove global CLI links (slycode, sly-atlas, sly-kanban, sly-messaging, sly-scaffold)');
   console.log(`  - Remove state directory (~/.slycode)`);
   console.log('');
   console.log('Note: ~/.slycode contains the workspace pointer used by global CLI commands.');

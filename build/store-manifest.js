@@ -12,6 +12,7 @@ module.exports = {
     'design',
     'feature',
     'implement',
+    'atlas',
     'kanban',
     'messaging',
   ],

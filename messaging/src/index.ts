@@ -34,16 +34,19 @@ const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS);
 
 interface ProviderDefaults {
   global: { provider: string; model?: string };
+  projects?: Record<string, { provider: string; model?: string }>;
 }
 
-// Single global default (feature 073). Legacy files may still carry
-// stages/projects keys — ignored here.
-function getProviderDefault(): { provider: string; model?: string } {
+// Per-project default with the last-set global as fallback (feature 073
+// follow-up). Pass the registry project id when the target has one; legacy
+// stages keys in old files are ignored.
+function getProviderDefault(projectId?: string): { provider: string; model?: string } {
   try {
     const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
     const data = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
     const defaults = data.defaults as ProviderDefaults;
-    return { provider: defaults.global?.provider || 'claude', model: defaults.global?.model };
+    const def = (projectId ? defaults.projects?.[projectId] : undefined) ?? defaults.global;
+    return { provider: def?.provider || 'claude', model: def?.model };
   } catch {
     return { provider: 'claude' };
   }
@@ -324,6 +327,9 @@ async function renderSwitchView(
       callbackData: `sw_proj_${p.id}`,
     }]);
 
+    // Cross-project recent-cards jump list — last row, global from anywhere.
+    buttons.push([{ label: '🕐 Recent', callbackData: 'sw_recent' }]);
+
     await channel.sendInlineKeyboard(breadcrumb, buttons);
     return;
   }
@@ -354,7 +360,10 @@ async function renderSwitchView(
     laneButtons.push([{ label: `⚙ automations (${autoCards.length})`, callbackData: 'sw_lane_automations' }]);
   }
 
-  await channel.sendInlineKeyboard(breadcrumb, [navRow, ...laneButtons]);
+  // Cross-project recent-cards jump list — last row, global from anywhere.
+  const recentRow: InlineButton[] = [{ label: '🕐 Recent', callbackData: 'sw_recent' }];
+
+  await channel.sendInlineKeyboard(breadcrumb, [navRow, ...laneButtons, recentRow]);
 }
 
 async function renderLaneDrilldown(
@@ -429,6 +438,7 @@ async function handleSessionLifecycle(
   bridge: BridgeClient,
   kanban: KanbanClient,
   actionFilter: SlyActionFilter,
+  opts: { suppressStartupActions?: boolean } = {},
 ): Promise<void> {
   const target = ensureStage(state.getTarget(), kanban, state);
   const sessionName = state.getSessionName();
@@ -446,7 +456,7 @@ async function handleSessionLifecycle(
   const modelLabel = currentModel
     ? (await getProviderModels(currentProvider)).find(m => m.id === currentModel)?.label || currentModel
     : null;
-  const defaultProvider = getProviderDefault().provider;
+  const defaultProvider = getProviderDefault(state.getTarget().projectId).provider;
   const defaultDiffers = defaultProvider !== currentProvider;
   const providerLine = `Provider: ${providerLabel}${modelLabel ? ` · ${modelLabel}` : ''}${explicit ? '' : ' (default)'}${defaultDiffers ? `\nDefault: ${PROVIDER_LABELS[defaultProvider] || defaultProvider}` : ''}`;
 
@@ -466,6 +476,16 @@ async function handleSessionLifecycle(
   if (session && (session.status === 'running' || session.status === 'detached')) {
     // Active session — connected
     const parts = [`${breadcrumb} — Connected`, providerLine];
+    if (statusLine) parts.push(statusLine);
+    await channel.sendText(parts.join('\n'));
+    return;
+  }
+
+  // Quiet mode (quick-launch landing): show the context line but suppress the
+  // startup Sly Actions buttons. The caller follows up with the quick-access
+  // card list, falling back to the buttons only when that list is empty.
+  if (opts.suppressStartupActions) {
+    const parts = [breadcrumb, providerLine];
     if (statusLine) parts.push(statusLine);
     await channel.sendText(parts.join('\n'));
     return;
@@ -724,7 +744,14 @@ async function handleQuickLaunch(
       return;
     }
     updateKeyboard(channel, state);
-    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value);
+    // Land on the quick-access recent/active card list for this project (one tap
+    // to any card) instead of the Sly Actions wall. Quiet lifecycle gives the
+    // context line; fall back to startup actions only if there are no cards.
+    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value, { suppressStartupActions: true });
+    const rendered = await renderQuickAccessRef.value([resolved.projectId], { silentIfEmpty: true });
+    if (!rendered) {
+      await renderStartupActions(channel, state, bridge, kanban, actionFilterRef.value);
+    }
     return;
   }
 
@@ -765,9 +792,16 @@ async function handleQuickLaunch(
     state.setProviderOverride(providerToUse);
   }
 
-  // Card-only (no prompt) — surface the lifecycle status like /switch would.
+  // Card-only (no prompt) — land on the selected card's context, then offer the
+  // quick-access switcher for its project so a card shortcut doubles as a project
+  // entry point (the user can grab other cards from there). Quiet lifecycle +
+  // quick-access, with startup actions as the empty-list fallback.
   if (resolved.kind === 'card' || !resolved.prompt) {
-    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value);
+    await handleSessionLifecycle(channel, state, bridge, kanban, actionFilterRef.value, { suppressStartupActions: true });
+    const rendered = await renderQuickAccessRef.value([resolved.projectId], { silentIfEmpty: true });
+    if (!rendered) {
+      await renderStartupActions(channel, state, bridge, kanban, actionFilterRef.value);
+    }
     return;
   }
 
@@ -804,6 +838,44 @@ async function handleQuickLaunch(
 // has wired the channel and the bot is polling.
 const actionFilterRef: { value: SlyActionFilter } = { value: null as unknown as SlyActionFilter };
 
+// renderQuickAccess is a closure inside setupChannel; handleQuickLaunch is
+// module-level, so expose it via a ref (mirrors actionFilterRef). Set when
+// setupChannel runs. Returns whether it rendered any cards so callers can fall
+// back when the project has no recent/active cards.
+const renderQuickAccessRef: {
+  value: (projectIds: string[], opts?: { silentIfEmpty?: boolean }) => Promise<boolean>;
+} = { value: async () => false };
+
+// Render just the startup Sly Actions buttons for the current target (no
+// breadcrumb/provider header). Used as the empty-quick-access fallback on the
+// quick-launch landing so the user is never left without an actionable option.
+async function renderStartupActions(
+  channel: Channel,
+  state: StateManager,
+  bridge: BridgeClient,
+  kanban: KanbanClient,
+  actionFilter: SlyActionFilter,
+): Promise<void> {
+  const target = ensureStage(state.getTarget(), kanban, state);
+  let session = null;
+  try {
+    session = await bridge.getSession(state.getSessionName());
+  } catch {
+    // Bridge unavailable — treat as no session; buttons still let the user act.
+  }
+  const terminalClass = actionFilter.getTerminalClass(target);
+  const cardType = getCardType(target, kanban);
+  const commands = actionFilter.filterActions(terminalClass, 'startup', cardType);
+  const buttons = actionsToButtons(commands);
+  const label = session?.status === 'stopped' ? 'Session paused' : 'No session';
+  const text = `${label}. Start with a command or message:`;
+  if (buttons.length > 0) {
+    await channel.sendInlineKeyboard(text, buttons);
+  } else {
+    await channel.sendText(text);
+  }
+}
+
 // --- Main Setup ---
 
 function setupChannel(
@@ -817,6 +889,10 @@ function setupChannel(
   // Expose actionFilter to module-level handlers (handleQuickLaunch) that need
   // to invoke handleSessionLifecycle.
   actionFilterRef.value = actionFilter;
+  // Expose renderQuickAccess too — handleQuickLaunch lands project/card
+  // shortcodes on the quick-access card list (function declaration below is
+  // hoisted, so this assignment is safe here).
+  renderQuickAccessRef.value = renderQuickAccess;
 
   // Track current lane drilldown for back navigation
   let currentDrilldownStage: string | null = null;
@@ -863,8 +939,15 @@ function setupChannel(
 
   // Reusable quick-access view: shows active + recent cards for given project scope.
   // Used by /search (no query) and after project selection in /switch.
-  async function renderQuickAccess(projectIds: string[]): Promise<void> {
-    const isGlobal = projectIds.length > 1;
+  async function renderQuickAccess(
+    projectIds: string[],
+    opts: { silentIfEmpty?: boolean; maxTotal?: number; showMoreButton?: boolean; forceGlobal?: boolean } = {},
+  ): Promise<boolean> {
+    // forceGlobal: render with project-name labels + project-qualified callbacks
+    // even when scoped to a single project (the cross-project Recent jump uses
+    // this so its buttons always carry the projectId and switch correctly from
+    // the global level, where no project is currently selected).
+    const isGlobal = opts.forceGlobal || projectIds.length > 1;
     const projectMap = new Map(state.getProjects().map(p => [p.id, p.name]));
 
     function buttonLabel(cardTitle: string, cardProjectId: string, isAutomation?: boolean): string {
@@ -916,14 +999,18 @@ function setupChannel(
         return (b.card.created_at || '').localeCompare(a.card.created_at || '');
       });
 
-    const maxTotal = 5;
+    const maxTotal = opts.maxTotal ?? 5;
     const activeSlice = activeCards.slice(0, maxTotal);
     const recentSlots = maxTotal - activeSlice.length;
     const recentSlice = recentCards.slice(0, recentSlots);
 
     if (activeSlice.length === 0 && recentSlice.length === 0) {
-      await channel.sendText('No recent cards. Use /switch to navigate.');
-      return;
+      // silentIfEmpty: caller (quick-launch landing) wants to handle the empty
+      // case itself (fall back to startup actions) without this stock message.
+      if (!opts.silentIfEmpty) {
+        await channel.sendText('No recent cards. Use /switch to navigate.');
+      }
+      return false;
     }
 
     let header = '';
@@ -949,7 +1036,18 @@ function setupChannel(
       }
     }
 
+    // "Show 5 more" — only in the Recent-jump context (showMoreButton) and only
+    // when there are eligible cards beyond what's currently shown.
+    if (opts.showMoreButton) {
+      const shown = activeSlice.length + recentSlice.length;
+      const totalAvailable = activeCards.length + recentCards.length;
+      if (totalAvailable > shown) {
+        buttons.push([{ label: '🔽 Show 5 more', callbackData: 'sw_recent_more' }]);
+      }
+    }
+
     await channel.sendInlineKeyboard(header, buttons);
+    return true;
   }
 
   channel.onCommand('search', async (args) => {
@@ -1026,7 +1124,7 @@ function setupChannel(
         state.setSelectedProvider(override);
       } else {
         const projProvider = await resolveProjectProviderFromBridge(bridge, target.projectId, state);
-        state.setSelectedProvider(projProvider || getProviderDefault().provider);
+        state.setSelectedProvider(projProvider || getProviderDefault(target.projectId).provider);
       }
       updateKeyboard(channel, state);
       await handleSessionLifecycle(channel, state, bridge, kanban, actionFilter);
@@ -1332,8 +1430,8 @@ function setupChannel(
     if (!ALL_PROVIDERS.includes(provider)) return;
     state.setProviderOverride(provider);
     state.setSelectedProvider(provider);
-    // Pre-fill model from the global default when it targets this provider
-    const globalDefault = getProviderDefault();
+    // Pre-fill model from the project default when it targets this provider
+    const globalDefault = getProviderDefault(state.getTarget().projectId);
     if (globalDefault.model && globalDefault.provider === provider) {
       state.setSelectedModel(globalDefault.model);
     }
@@ -1436,6 +1534,21 @@ function setupChannel(
   // --- Switch Callbacks (sw_ prefix) ---
 
   channel.onCallback('sw_', async (data) => {
+    if (data === 'sw_recent' || data === 'sw_recent_more') {
+      // Cross-project recent-cards jump list. Reuses renderQuickAccess scoped to
+      // ALL projects (forceGlobal so buttons always carry the projectId, even at
+      // the global level where no project is selected). Show 5; "Show 5 more"
+      // re-renders with 10.
+      const maxTotal = data === 'sw_recent_more' ? 10 : 5;
+      const allProjectIds = state.getProjects().map(p => p.id);
+      await renderQuickAccess(allProjectIds, {
+        maxTotal,
+        forceGlobal: true,
+        showMoreButton: maxTotal === 5,
+      });
+      return;
+    }
+
     if (data === 'sw_global') {
       state.selectGlobal();
       const override = state.getProviderOverride();
@@ -1481,7 +1594,7 @@ function setupChannel(
         state.setSelectedProvider(override);
       } else {
         const projBridgeProvider = await resolveProjectProviderFromBridge(bridge, projectId, state);
-        state.setSelectedProvider(projBridgeProvider || getProviderDefault().provider);
+        state.setSelectedProvider(projBridgeProvider || getProviderDefault(projectId).provider);
       }
       currentDrilldownStage = null;
       kanban.updateProjects(state.getProjects());
@@ -1537,9 +1650,9 @@ function setupChannel(
       }
       const cardStage = cardInfo.stage;
       state.selectCard(projectId, cardId, cardStage);
-      // Resolve provider: sticky override > earliest bridge session > global default
+      // Resolve provider: sticky override > earliest bridge session > project default
       const override = state.getProviderOverride();
-      const globalDefault = getProviderDefault();
+      const globalDefault = getProviderDefault(projectId);
       if (override) {
         state.setSelectedProvider(override);
       } else {
@@ -1833,6 +1946,30 @@ async function main() {
     return `sw_proj_${projectId}`;
   }
 
+  /**
+   * Emit the standalone "📍 <label>" origin note + optional 'Switch to Card'
+   * button when a send originates from a session OTHER than the user's
+   * currently-active one. No-op when the session matches the current session or
+   * is absent. Media messages (voice, files) can't carry an inline keyboard, so
+   * this goes out as a SEPARATE text message — used by /voice and /send/file.
+   * /send is structurally different: text carries its own keyboard, so it folds
+   * the origin into the message itself rather than calling this.
+   */
+  async function maybeSendSwitchMessage(session: string | undefined): Promise<void> {
+    if (!channel) return;
+    if (!session || session === state.getSessionName()) return;
+    const label = getSessionLabel(session);
+    const switchCb = getSessionSwitchCallback(session);
+    if (switchCb) {
+      await channel.sendInlineKeyboard(
+        `📍 ${label}`,
+        [[{ label: 'Switch to Card', callbackData: switchCb }]],
+      );
+    } else {
+      await channel.sendTextRaw(`📍 ${label}`);
+    }
+  }
+
   // --- HTTP Server for Outbound Messages (called by CLI) ---
 
   const noChannelError = 'Messaging is not configured. Telegram bot token and user ID are not set. Tell the user they can configure messaging in .env or remove the messaging skill from this project.';
@@ -1881,23 +2018,6 @@ async function main() {
       }
       if (!channel.isReady()) return res.status(400).json({ error: 'No active chat. Send a message from the channel first.' });
 
-      const currentSession = state.getSessionName();
-      const isMismatch = session && session !== currentSession;
-
-      // For voice mismatch, send a text header + switch button before the audio
-      if (isMismatch) {
-        const label = getSessionLabel(session);
-        const switchCb = getSessionSwitchCallback(session);
-        if (switchCb) {
-          await channel.sendInlineKeyboard(
-            `📍 ${label}`,
-            [[{ label: 'Switch to Card', callbackData: switchCb }]],
-          );
-        } else {
-          await channel.sendTextRaw(`📍 ${label}`);
-        }
-      }
-
       await channel.sendChatAction('upload_voice');
       // Resolve voice from the CALLER's session/project, not the ambient
       // Telegram target. An automation for project X must render in X's voice
@@ -1931,6 +2051,12 @@ async function main() {
       audioArchive.save(audioBuffer, archiveExt, contextSlug);
 
       await channel.sendVoice(audioBuffer);
+      // Switch button trails the audio (media can't carry an inline keyboard).
+      // Sent AFTER the voice so that in text+voice ("both") mode the standalone
+      // switch message never lands sandwiched right after the text reply — which
+      // already carries the button inline. It belongs to the media, so it
+      // follows the media.
+      await maybeSendSwitchMessage(session);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1939,7 +2065,7 @@ async function main() {
 
   app.post('/send/file', async (req, res) => {
     try {
-      const { path: filePath, cwd: callerCwd, caption, as } = req.body ?? {};
+      const { path: filePath, cwd: callerCwd, caption, as, session } = req.body ?? {};
 
       if (typeof filePath !== 'string' || filePath.length === 0) {
         return res.status(400).json({ ok: false, error: 'bad_request', message: 'path must be a non-empty string' });
@@ -1957,6 +2083,9 @@ async function main() {
       }
       if (as !== undefined && as !== 'document') {
         return res.status(400).json({ ok: false, error: 'bad_request', message: 'as must be omitted or "document"' });
+      }
+      if (session !== undefined && typeof session !== 'string') {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'session must be a string' });
       }
       if (!channel) return res.status(400).json({ ok: false, error: 'no_channel', message: noChannelError });
       if (!channel.isReady()) return res.status(400).json({ ok: false, error: 'no_chat_configured', message: 'No active chat. Send a message from the channel first.' });
@@ -1988,8 +2117,22 @@ async function main() {
         });
       }
 
+      // When the file originates from a non-active session, mark its origin on
+      // the caption too (Decision 2: label on both the caption and the trailing
+      // switch message), so the origin is visible the moment the media arrives.
+      let effectiveCaption: string | undefined = caption;
+      if (session && session !== state.getSessionName()) {
+        const originPrefix = `📍 ${getSessionLabel(session)}`;
+        const combined = effectiveCaption ? `${originPrefix}\n${effectiveCaption}` : originPrefix;
+        // Telegram caption hard limit is 1024 chars; clamp after prefixing.
+        effectiveCaption = combined.length > 1024 ? combined.slice(0, 1024) : combined;
+      }
+
       try {
-        const { messageId } = await channel.sendMedia({ filePath: preflight.absolutePath, kind, caption });
+        const { messageId } = await channel.sendMedia({ filePath: preflight.absolutePath, kind, caption: effectiveCaption });
+        // File-first ordering: media delivered, now the trailing 'Switch to
+        // Card' message (media can't carry an inline keyboard itself).
+        await maybeSendSwitchMessage(session);
         return res.json({ ok: true, channel: channel.name, kind, messageId, bytes: preflight.bytes });
       } catch (err) {
         return res.status(502).json({ ok: false, error: 'telegram_error', message: (err as Error).message });

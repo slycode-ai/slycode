@@ -343,7 +343,10 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     if (isDirtyRef.current || isSavingRef.current) return;
 
     try {
-      const res = await fetch(`/api/kanban?projectId=${project.id}`, { signal });
+      // Archived cards live in cold storage (feature 077) — merged in by the
+      // API only when the archived view asks for them.
+      const archivedParam = showArchived ? '&includeArchived=true' : '';
+      const res = await fetch(`/api/kanban?projectId=${project.id}${archivedParam}`, { signal });
       const data = await res.json();
 
       // If checking for changes, only update if last_updated changed
@@ -362,12 +365,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     } catch {
       // Silently ignore — network errors are expected during sleep/wake
     }
-  }, [project.id]);
+  }, [project.id, showArchived]);
 
   // Force refresh — bypasses dirty/saving guards for manual user-initiated reload
   const forceRefresh = useCallback(async () => {
     try {
-      const res = await fetch(`/api/kanban?projectId=${project.id}`);
+      const archivedParam = showArchived ? '&includeArchived=true' : '';
+      const res = await fetch(`/api/kanban?projectId=${project.id}${archivedParam}`);
       const data = await res.json();
       lastKnownUpdateRef.current = data.last_updated;
       const loadedStages = data.stages || EMPTY_STAGES;
@@ -378,7 +382,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     } catch {
       // Silently ignore
     }
-  }, [project.id]);
+  }, [project.id, showArchived]);
 
   // Expose force refresh to parent
   useEffect(() => {
@@ -565,7 +569,9 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       const res = await fetch('/api/kanban', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, stages: stagesToSave, changedCards }),
+        // includeArchived keeps the response stages (our next baseline) in
+        // sync with the archived view — cold-storage cards stay visible.
+        body: JSON.stringify({ projectId: project.id, stages: stagesToSave, changedCards, includeArchived: showArchived }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -605,7 +611,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     } finally {
       isSavingRef.current = false;
     }
-  }, [project.id]);
+  }, [project.id, showArchived]);
 
   // Debounced save when stages change — only if dirty (user-originated changes)
   useEffect(() => {

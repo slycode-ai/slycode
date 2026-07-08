@@ -7,6 +7,8 @@ import { SessionManager } from './session-manager.js';
 import { setupWebSocket } from './websocket.js';
 import { createApiRouter } from './api.js';
 import { ResponseStore } from './response-store.js';
+import { Reaper, resolveReaperPaths } from './reaper.js';
+import { loadProviders } from './provider-utils.js';
 import type { BridgeRuntimeConfig } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +90,21 @@ async function main() {
   responseStore.start();
   sessionManager.setResponseStore(responseStore);
 
+  // Orphan provider reaper (feature 078): sweeps /proc for SlyCode-spawned
+  // provider processes left behind by dead bridge instances. Linux-only;
+  // configured via the optional "reaper" section of bridge-config.json.
+  const reaper = new Reaper({
+    config: runtimeConfig.reaper,
+    getProviderCommands: async () => {
+      const data = await loadProviders();
+      return new Set(Object.values(data.providers).map(p => p.command));
+    },
+    getLivePids: () => sessionManager.getLiveSessionPids(),
+    getStaleSessionPids: () => sessionManager.getStaleSessionPids(),
+    ...resolveReaperPaths(),
+  });
+  reaper.start();
+
   // Clear depth tracking when a response is delivered (prevents stale depth poisoning)
   responseStore.onResponseDelivered = (targetSession: string) => {
     sessionManager.clearPromptChain(targetSession);
@@ -136,6 +153,7 @@ async function main() {
     server.close();
 
     // Shutdown session manager (kills PTYs, saves state)
+    reaper.stop();
     responseStore.stop();
     await sessionManager.shutdown();
 

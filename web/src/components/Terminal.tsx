@@ -147,8 +147,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     fitAddonRef.current = fitAddon;
     terminal.loadAddon(fitAddon);
 
-    // Add web links addon
-    terminal.loadAddon(new WebLinksAddon());
+    // Add web links addon with an explicit click handler. xterm renders OSC 8
+    // hyperlinks from PTY output, where the visible text and the underlying URL
+    // can diverge (a prompt-injected provider session could spoof a safe-looking
+    // label over a malicious link). Show the real destination and require
+    // confirmation before opening.
+    terminal.loadAddon(
+      new WebLinksAddon((event: MouseEvent, uri: string) => {
+        event.preventDefault();
+        if (window.confirm(`Open this link?\n\n${uri}`)) {
+          window.open(uri, '_blank', 'noopener,noreferrer');
+        }
+      }),
+    );
 
     // Open terminal in container
     terminal.open(containerRef.current);

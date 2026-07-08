@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { createTwoFilesPatch } from 'diff';
+import { buildDiffLines, diffStats, DiffLineRows } from './DiffLineView';
 
 interface SkillDiffViewerProps {
   skillName: string;
@@ -11,67 +11,6 @@ interface SkillDiffViewerProps {
   newContent: string;
   onClose: () => void;
 }
-
-interface DiffLine {
-  type: 'add' | 'remove' | 'context' | 'header';
-  content: string;
-  oldLineNo?: number;
-  newLineNo?: number;
-}
-
-function parseDiffLines(patch: string): DiffLine[] {
-  const lines: DiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-
-  for (const raw of patch.split('\n')) {
-    if (raw.startsWith('@@')) {
-      // Parse hunk header for line numbers
-      const match = raw.match(/@@ -(\d+)/);
-      if (match) {
-        oldLine = parseInt(match[1], 10) - 1;
-        const newMatch = raw.match(/\+(\d+)/);
-        if (newMatch) newLine = parseInt(newMatch[1], 10) - 1;
-      }
-      lines.push({ type: 'header', content: raw });
-    } else if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('Index:') || raw.startsWith('===')) {
-      // Skip file headers
-    } else if (raw.startsWith('+')) {
-      newLine++;
-      lines.push({ type: 'add', content: raw.slice(1), newLineNo: newLine });
-    } else if (raw.startsWith('-')) {
-      oldLine++;
-      lines.push({ type: 'remove', content: raw.slice(1), oldLineNo: oldLine });
-    } else if (raw.startsWith(' ') || raw === '') {
-      oldLine++;
-      newLine++;
-      lines.push({ type: 'context', content: raw.startsWith(' ') ? raw.slice(1) : raw, oldLineNo: oldLine, newLineNo: newLine });
-    }
-  }
-
-  return lines;
-}
-
-const lineStyles: Record<string, string> = {
-  add: 'bg-emerald-950/40 text-emerald-300',
-  remove: 'bg-red-950/40 text-red-300',
-  context: 'text-void-300',
-  header: 'bg-neon-blue-950/30 text-neon-blue-300 font-medium',
-};
-
-const lineNoStyles: Record<string, string> = {
-  add: 'text-emerald-600',
-  remove: 'text-red-600',
-  context: 'text-void-600',
-  header: 'text-neon-blue-600',
-};
-
-const prefixChars: Record<string, string> = {
-  add: '+',
-  remove: '-',
-  context: ' ',
-  header: '',
-};
 
 export function SkillDiffViewer({
   skillName,
@@ -92,30 +31,16 @@ export function SkillDiffViewer({
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const diffLines = useMemo(() => {
-    const oldContent = currentContent ?? '';
-    const patch = createTwoFilesPatch(
-      'current/SKILL.md',
-      'updated/SKILL.md',
-      oldContent,
-      newContent,
-      currentVersion ?? '(none)',
-      newVersion,
-      { context: 4 },
-    );
-    return parseDiffLines(patch);
-  }, [currentContent, newContent, currentVersion, newVersion]);
+  const diffLines = useMemo(() => buildDiffLines({
+    oldContent: currentContent ?? '',
+    newContent,
+    fileName: 'SKILL.md',
+    oldLabel: currentVersion ?? '(none)',
+    newLabel: newVersion,
+  }), [currentContent, newContent, currentVersion, newVersion]);
 
   const isNewSkill = currentContent === null;
-  const stats = useMemo(() => {
-    let additions = 0;
-    let deletions = 0;
-    for (const line of diffLines) {
-      if (line.type === 'add') additions++;
-      if (line.type === 'remove') deletions++;
-    }
-    return { additions, deletions };
-  }, [diffLines]);
+  const stats = useMemo(() => diffStats(diffLines), [diffLines]);
 
   return (
     <div
@@ -180,36 +105,21 @@ export function SkillDiffViewer({
 
         {/* Diff content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="font-mono text-xs leading-relaxed">
-            {(viewMode === 'diff' || isNewSkill) ? (
-              diffLines.map((line, i) => (
-                <div key={i} className={`flex ${lineStyles[line.type]}`}>
-                  <span className={`w-10 flex-shrink-0 select-none px-2 text-right ${lineNoStyles[line.type]}`}>
-                    {line.type === 'header' ? '···' : (line.oldLineNo ?? line.newLineNo ?? '')}
-                  </span>
-                  <span className={`w-10 flex-shrink-0 select-none px-2 text-right ${lineNoStyles[line.type]}`}>
-                    {line.type === 'header' ? '···' : (line.newLineNo ?? '')}
-                  </span>
-                  <span className={`w-4 flex-shrink-0 select-none text-center ${lineNoStyles[line.type]}`}>
-                    {prefixChars[line.type]}
-                  </span>
-                  <span className="flex-1 whitespace-pre-wrap break-all px-2">
-                    {line.type === 'header' ? line.content : line.content}
-                  </span>
-                </div>
-              ))
-            ) : (
-              // Full view of new content
-              newContent.split('\n').map((line, i) => (
+          {(viewMode === 'diff' || isNewSkill) ? (
+            <DiffLineRows lines={diffLines} />
+          ) : (
+            // Full view of new content
+            <div className="font-mono text-xs leading-relaxed">
+              {newContent.split('\n').map((line, i) => (
                 <div key={i} className="flex text-void-300">
                   <span className="w-10 flex-shrink-0 select-none px-2 text-right text-void-600">
                     {i + 1}
                   </span>
                   <span className="flex-1 whitespace-pre-wrap break-all px-2">{line}</span>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

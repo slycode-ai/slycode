@@ -133,6 +133,54 @@
       "namedRegex": "^/api/areas(?:/)?$"
     },
     {
+      "page": "/api/atlas/artifacts",
+      "regex": "^/api/atlas/artifacts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/artifacts(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/file",
+      "regex": "^/api/atlas/file(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/file(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/git",
+      "regex": "^/api/atlas/git(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/git(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/nav-events",
+      "regex": "^/api/atlas/nav\\-events(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/nav\\-events(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/refresh",
+      "regex": "^/api/atlas/refresh(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/refresh(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/search",
+      "regex": "^/api/atlas/search(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/search(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/symbols",
+      "regex": "^/api/atlas/symbols(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/symbols(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/tree",
+      "regex": "^/api/atlas/tree(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/tree(?:/)?$"
+    },
+    {
       "page": "/api/auth/login",
       "regex": "^/api/auth/login(?:/)?$",
       "routeKeys": {},

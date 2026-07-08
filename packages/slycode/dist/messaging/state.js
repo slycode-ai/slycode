@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { computeSessionKey, resolveCanonicalProjectId } from './session-keys.js';
+import { atomicWriteFileSync } from './atomic-write.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function getWorkspaceRoot() {
     if (process.env.SLYCODE_HOME)
@@ -125,7 +126,7 @@ export class StateManager {
     }
     saveState() {
         try {
-            fs.writeFileSync(getStateFile(), JSON.stringify({
+            atomicWriteFileSync(getStateFile(), JSON.stringify({
                 targetType: this.state.targetType,
                 selectedProjectId: this.state.selectedProjectId,
                 selectedCardId: this.state.selectedCardId,

@@ -75,6 +75,8 @@ interface KanbanCardItemProps {
   sessionStatus: CardSessionStatus;
   isActivelyWorking?: boolean;
   stage?: KanbanStage;
+  /** Force tags to render even in compact (Done) mode. Done-lane tag toggle. */
+  showTags?: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onDragStart?: () => void;
@@ -187,7 +189,7 @@ function formatCardNumber(num: number): string {
   return `#${String(num).padStart(num > 9999 ? 0 : 4, '0')}`;
 }
 
-export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false, stage, onClick, onContextMenu, onDragStart, onDragEnd }: KanbanCardItemProps) {
+export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false, stage, showTags = false, onClick, onContextMenu, onDragStart, onDragEnd }: KanbanCardItemProps) {
   const unresolvedProblems = card.problems.filter((p) => !p.resolved_at).length;
   const checklistTotal = card.checklist?.length || 0;
   const checklistCompleted = card.checklist?.filter((item) => item.done).length || 0;
@@ -260,7 +262,10 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
 
   const status = !isCompact ? readStatus(card.status) : null;
   const hasTags = !isCompact && !status && (card.areas.length > 0 || card.tags.length > 0);
-  const hasFooterContent = hasTags || !!status;
+  // Done-lane tag toggle: in compact (Done) mode, show ALL tags (no areas, no
+  // truncation) when the column's toggle is on.
+  const showDoneTags = isCompact && showTags && card.tags.length > 0;
+  const hasFooterContent = hasTags || !!status || showDoneTags;
 
   return (
     <>
@@ -355,6 +360,18 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
                   +{card.tags.length - 1}
                 </span>
               )}
+            </div>
+          )}
+          {showDoneTags && (
+            <div className="flex min-w-0 flex-1 flex-wrap gap-1 overflow-hidden">
+              {card.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="shrink-0 rounded border border-void-300 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-600 transition-colors group-hover:bg-void-100 dark:border-void-600 dark:text-void-400 dark:group-hover:bg-void-800"
+                >
+                  {tag}
+                </span>
+              ))}
             </div>
           )}
           <div className="flex shrink-0 items-center gap-1.5">

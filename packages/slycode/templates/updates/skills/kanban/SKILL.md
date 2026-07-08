@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.12.0
-updated: 2026-06-11
+version: 1.13.1
+updated: 2026-07-07
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -70,12 +70,16 @@ Acceptance criteria:
 # Update card
 sly-kanban update card-123 --title "New title" --areas "web-frontend,terminal-bridge"
 
-# Link documentation to card
+# Link documentation to card (all ref types append — cards can hold multiple)
 sly-kanban update card-123 --design-ref "documentation/designs/foo.md"
 sly-kanban update card-123 --feature-ref "documentation/features/bar.md"
-sly-kanban update card-123 --html-ref "documentation/designs/foo.html"   # appends — cards can hold multiple
+sly-kanban update card-123 --html-ref "documentation/designs/foo.html"
 
-# Clear an attached document (pass empty string; html/questionnaire refs clear ALL)
+# Remove ONE ref by path (any type) — unlinks the reference, never deletes the file
+sly-kanban update card-123 --unlink-ref "documentation/designs/foo.md"
+
+# Clear ALL refs of a type (pass empty string)
+sly-kanban update card-123 --design-ref ""
 sly-kanban update card-123 --html-ref ""
 
 # Move card
@@ -279,35 +283,38 @@ Cards support dedicated reference fields for documentation:
 
 | Field | Flag | Purpose |
 |-------|------|---------|
-| Design Doc | `--design-ref` | Link to design document (Markdown) |
-| Feature Spec | `--feature-ref` | Link to feature specification (Markdown) |
-| Test Doc | `--test-ref` | Link to test documentation (Markdown) |
+| Design Doc | `--design-ref` | Append a design document (Markdown, multiple per card). Pass `""` to clear ALL. |
+| Feature Spec | `--feature-ref` | Append a feature specification (Markdown, multiple per card). Pass `""` to clear ALL. |
+| Test Doc | `--test-ref` | Append a test documentation doc (Markdown, multiple per card). Pass `""` to clear ALL. |
 | HTML Attachment | `--html-ref` | Append a self-contained HTML file (multiple per card, rendered in sandboxed iframes). Pass `""` to clear ALL. |
 | Questionnaire | `--questionnaire-ref` | Append a structured Q&A questionnaire (JSON, multiple per card). See "Questionnaires" below. |
+| (remove one) | `--unlink-ref <path>` | Remove a SINGLE ref by path — works across design/feature/test/html/questionnaire. Unlinks the reference only; **never deletes the file** on disk. |
+
+**All five ref types now append and accept multiple per card** (feature 074 — design/feature/test joined html/questionnaire). Setting a new ref adds it (duplicates ignored); `""` clears ALL of that type. The card modal shows a filename-labelled index to switch between docs when a tab holds more than one, with an Unlink button per entry.
 
 ```bash
-# Link design doc when moving to design stage
+# Attach a design doc (appends — cards can hold multiple)
 sly-kanban update card-123 --design-ref "documentation/designs/my-feature.md"
+sly-kanban update card-123 --design-ref "documentation/designs/my-feature-v2.md"
 
-# Link feature spec when feature is fully specified
+# Feature spec / test doc — same append behaviour
 sly-kanban update card-123 --feature-ref "documentation/features/001_my_feature.md"
-
-# Link test doc when test plan exists
 sly-kanban update card-123 --test-ref "documentation/tests/my-feature-tests.md"
 
-# Append an HTML mockup, POC, or interactive preview (cards can have multiple)
+# Append an HTML mockup / a questionnaire (also multiple per card)
 sly-kanban update card-123 --html-ref "documentation/designs/my-feature-mockup.html"
-
-# Append a questionnaire (cards can have multiple)
 sly-kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
 
-# Clear any ref by passing an empty string (html + questionnaires clear ALL)
+# Remove ONE ref (any type) without deleting the file
+sly-kanban update card-123 --unlink-ref "documentation/designs/my-feature.md"
+
+# Clear ALL refs of a type by passing an empty string
 sly-kanban update card-123 --design-ref ""
 sly-kanban update card-123 --html-ref ""
 sly-kanban update card-123 --questionnaire-ref ""
 ```
 
-These appear as dedicated fields on the card (not in description).
+These appear as dedicated fields on the card (not in description). Legacy cards with a single design/feature/test ref keep working — the singular value is read as the first entry and folds into the list on the next CLI write.
 
 **HTML attachment notes:** the file is rendered inside a sandboxed iframe (`sandbox="allow-scripts"`) with a tightened CSP (`connect-src 'none'`, `img-src data:`, `script-src https:`). This means:
 
@@ -644,5 +651,5 @@ The CLI provides clear error messages:
 
 - The CLI modifies `documentation/kanban.json` directly
 - Changes are visible in the web UI on refresh
-- Archived cards are hidden by default (use `--include-archived` to see them)
+- Archived cards are hidden by default (use `--include-archived` to see them). They live in cold storage (`documentation/kanban-archive.json`), managed automatically by the CLI/web — archive/unarchive round-trips cards between the files; never edit either file directly
 - All timestamps are in ISO format

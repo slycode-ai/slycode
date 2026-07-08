@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { KanbanCard, KanbanStage, Problem, ChecklistItem, AgentNote, AutomationConfig as AutomationConfigType } from '@/lib/types';
-import { MarkdownContent } from './MarkdownContent';
 import {
   getTerminalClassFromStage,
   getActionsForClass,
@@ -15,7 +14,9 @@ import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel
 import { AutomationConfig } from './AutomationConfig';
 import { QuestionnaireTab } from './QuestionnaireTab';
 import { HtmlAttachmentsTab } from './HtmlAttachmentsTab';
+import { DocAttachmentsTab } from './DocAttachmentsTab';
 import { getHtmlRefs } from '@/lib/html-refs';
+import { getDesignRefs, getFeatureRefs, getTestRefs } from '@/lib/doc-refs';
 import { ConfirmDialog } from './ConfirmDialog';
 import { getProviderColor } from '@/lib/provider-colors';
 import { VoiceControlBar } from './VoiceControlBar';
@@ -222,7 +223,6 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
 
 export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
-  const [docLoading, setDocLoading] = useState(false);
 
   const [newProblem, setNewProblem] = useState('');
   // In create mode, start with title editing enabled
@@ -608,7 +608,6 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   };
 
   // Copy feedback state
-  const [copiedPath, setCopiedPath] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState(false);
 
   // Canonical session key derived from the project's folder path. This is what
@@ -661,8 +660,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   ctxLines.push(`Type: ${card.type} | Priority: ${card.priority} | Stage: ${stage}`);
   if (card.description) ctxLines.push(`Description: ${card.description}`);
   if (card.areas.length > 0) ctxLines.push(`Areas: ${card.areas.join(', ')}`);
-  if (card.design_ref) ctxLines.push(`Design Doc: ${card.design_ref}`);
-  if (card.feature_ref) ctxLines.push(`Feature Spec: ${card.feature_ref}`);
+  for (const ref of getDesignRefs(card)) ctxLines.push(`Design Doc: ${ref}`);
+  for (const ref of getFeatureRefs(card)) ctxLines.push(`Feature Spec: ${ref}`);
+  for (const ref of getTestRefs(card)) ctxLines.push(`Test Doc: ${ref}`);
   for (const htmlRef of getHtmlRefs(card)) ctxLines.push(`HTML: ${htmlRef}`);
   if (card.questionnaire_refs && card.questionnaire_refs.length > 0) {
     ctxLines.push(`Questionnaires: ${card.questionnaire_refs.join(', ')}`);
@@ -705,8 +705,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       type: card.type,
       priority: card.priority,
       areas: card.areas,
-      design_ref: card.design_ref,
-      feature_ref: card.feature_ref,
+      // Singular template vars resolve to the first (legacy-first) ref (feature 074).
+      design_ref: getDesignRefs(card)[0],
+      feature_ref: getFeatureRefs(card)[0],
       // Status flattened to plain strings for the template engine.
       // `{{card.status}}` resolves to the normalized text only; empty when unset.
       status: ctxStatus?.text ?? '',
@@ -741,13 +742,15 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   useEffect(() => {
     fetch('/api/providers')
       .then(res => res.ok ? res.json() : null)
-      .then((data: { providers: Record<string, ProviderInfo>; defaults?: { global?: { provider: string; model?: string } } } | null) => {
+      .then((data: { providers: Record<string, ProviderInfo>; defaults?: { global?: { provider: string; model?: string }; projects?: Record<string, { provider: string; model?: string }> } } | null) => {
         if (!data?.providers) return;
         setAvailableProviders(Object.values(data.providers));
-        if (data.defaults?.global) setGlobalDefault(data.defaults.global);
+        // This project's default, falling back to the last-set global
+        const def = data.defaults?.projects?.[projectId] ?? data.defaults?.global;
+        if (def) setGlobalDefault(def);
       })
       .catch(() => {});
-  }, []);
+  }, [projectId]);
 
   // Close "+" dropdown on outside click
   useEffect(() => {
@@ -955,10 +958,14 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     return () => { cancelled = true; };
   }, [pendingShortcut, cardSessions, card.id, sessionKey, cwd, refreshCardSessions, onPendingShortcutConsumed, sessionsLoaded]);
 
-  // Document refs
-  const hasDesign = !!card.design_ref;
-  const hasFeature = !!card.feature_ref;
-  const hasTest = !!card.test_ref;
+  // Document refs — lists with legacy single-ref fallback (feature 074).
+  // Rendering + fetching now live in DocAttachmentsTab (self-contained).
+  const designRefs = getDesignRefs(card);
+  const featureRefs = getFeatureRefs(card);
+  const testRefs = getTestRefs(card);
+  const hasDesign = designRefs.length > 0;
+  const hasFeature = featureRefs.length > 0;
+  const hasTest = testRefs.length > 0;
   // HTML attachments: list + legacy single-ref fallback (feature 072)
   const htmlRefs = getHtmlRefs(card);
   const hasHtml = htmlRefs.length > 0;
@@ -972,49 +979,25 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const terminalTint = isAutomation ? automationTerminalTint : stageTerminalTint[stage];
   const focusRgb = isAutomation ? automationFocusRgb : stageFocusRgb[stage];
 
-  // Get document path based on active tab
-  const getDocPath = (tab: TabId): string | undefined => {
-    if (tab === 'design') return card.design_ref;
-    if (tab === 'feature') return card.feature_ref;
-    if (tab === 'test') return card.test_ref;
-    return undefined;
+  // Unlink a single attachment ref from the card (feature 074). Removes the ref
+  // from whichever list (or legacy singular) holds it — UNLINK, not delete: the
+  // file on disk is untouched. Persists via the modal's existing onUpdate path.
+  const handleUnlinkRef = (ref: string) => {
+    const updated: KanbanCard = { ...card, updated_at: new Date().toISOString() };
+    const listKeys = ['design_refs', 'feature_refs', 'test_refs', 'html_refs', 'questionnaire_refs'] as const;
+    for (const key of listKeys) {
+      const list = updated[key];
+      if (Array.isArray(list) && list.includes(ref)) {
+        const kept = list.filter((r) => r !== ref);
+        updated[key] = kept.length > 0 ? kept : undefined;
+      }
+    }
+    const legacyKeys = ['design_ref', 'feature_ref', 'test_ref', 'html_ref'] as const;
+    for (const key of legacyKeys) {
+      if (updated[key] === ref) updated[key] = undefined;
+    }
+    onUpdate(updated);
   };
-  const currentDocPath = getDocPath(activeTab);
-
-  // Track loaded docs by path
-  const [loadedDocs, setLoadedDocs] = useState<Record<string, string>>({});
-  const [docErrors, setDocErrors] = useState<Record<string, string>>({});
-
-  // Re-fetch document every time a doc tab is selected (always show latest from disk)
-  useEffect(() => {
-    const isDocTab = activeTab === 'design' || activeTab === 'feature' || activeTab === 'test';
-    if (!isDocTab || !currentDocPath) return;
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- gating fetch with loading flag
-    setDocLoading(true);
-    const fetchPath = currentDocPath;
-    fetch(`/api/file?path=${encodeURIComponent(fetchPath)}&projectId=${encodeURIComponent(projectId)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          setDocErrors((prev) => ({ ...prev, [fetchPath]: data.error }));
-        } else {
-          setDocErrors((prev) => {
-            const next = { ...prev };
-            delete next[fetchPath];
-            return next;
-          });
-          setLoadedDocs((prev) => ({ ...prev, [fetchPath]: data.content }));
-        }
-      })
-      .catch((err) => {
-        setDocErrors((prev) => ({ ...prev, [fetchPath]: err.message }));
-      })
-      .finally(() => {
-        setDocLoading(false);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-fetch on every tab switch
-  }, [activeTab, currentDocPath, projectId]);
 
   const handleTitleSave = () => {
     if (editedTitle.trim() && editedTitle !== card.title) {
@@ -1119,33 +1102,6 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     onUpdate({ ...card, tags: newTags, updated_at: new Date().toISOString() });
     setDragTagIndex(null);
     setDragOverTagIndex(null);
-  };
-
-  // Copy filepath handler
-  const handleCopyPath = async (path: string) => {
-    try {
-      // Try modern clipboard API first
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(path);
-      } else {
-        // Fallback for older browsers or non-HTTPS
-        const textArea = document.createElement('textarea');
-        textArea.value = path;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-      }
-      setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-      // Still show feedback attempt
-      setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 2000);
-    }
   };
 
   const handleCopyTitle = async () => {
@@ -1604,6 +1560,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               Design
+              {designRefs.length > 1 && (
+                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{designRefs.length}</span>
+              )}
             </button>
           )}
           {hasFeature && (
@@ -1619,6 +1578,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
               Feature
+              {featureRefs.length > 1 && (
+                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{featureRefs.length}</span>
+              )}
             </button>
           )}
           {hasHtml && (
@@ -1649,6 +1611,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
               Test
+              {testRefs.length > 1 && (
+                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{testRefs.length}</span>
+              )}
             </button>
           )}
           {hasQuestionnaires && (
@@ -1944,33 +1909,43 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </div>
 
                 {/* References (icons only) */}
-                {(card.design_ref || card.feature_ref || card.test_ref || hasHtml) && (
+                {(hasDesign || hasFeature || hasTest || hasHtml) && (
                   <>
                     <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
                     <div className="flex items-center gap-1">
                       <span className="text-xs font-medium text-void-500 dark:text-void-400">Docs:</span>
-                      {card.design_ref && (
+                      {hasDesign && (
                         <button
                           onClick={() => setActiveTab('design')}
-                          className="rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
-                          title={card.design_ref}
+                          className="relative rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
+                          title={designRefs.join('\n')}
                         >
                           {/* Clipboard/pencil icon for design */}
                           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                           </svg>
+                          {designRefs.length > 1 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                              {designRefs.length}
+                            </span>
+                          )}
                         </button>
                       )}
-                      {card.feature_ref && (
+                      {hasFeature && (
                         <button
                           onClick={() => setActiveTab('feature')}
-                          className="rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                          title={card.feature_ref}
+                          className="relative rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                          title={featureRefs.join('\n')}
                         >
                           {/* Checklist icon for feature */}
                           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                           </svg>
+                          {featureRefs.length > 1 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                              {featureRefs.length}
+                            </span>
+                          )}
                         </button>
                       )}
                       {hasHtml && (
@@ -1990,16 +1965,21 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                           )}
                         </button>
                       )}
-                      {card.test_ref && (
+                      {hasTest && (
                         <button
                           onClick={() => setActiveTab('test')}
-                          className="rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-                          title={card.test_ref}
+                          className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+                          title={testRefs.join('\n')}
                         >
                           {/* Checkmark box icon for test */}
                           <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
+                          {testRefs.length > 1 && (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                              {testRefs.length}
+                            </span>
+                          )}
                         </button>
                       )}
                     </div>
@@ -2136,47 +2116,25 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 activeProvider={selectedProvider ?? activeSession?.provider ?? undefined}
                 cwd={cwd}
                 onSubmitSuccess={() => setActiveTab('terminal')}
+                onUnlink={handleUnlinkRef}
               />
             </div>
           ) : activeTab === 'html' && hasHtml ? (
             /* HTML Attachments View — index list + sandboxed iframe viewer (feature 072) */
             <div className="flex h-full flex-col">
-              <HtmlAttachmentsTab refs={htmlRefs} projectId={projectId} cardId={card.id} />
+              <HtmlAttachmentsTab refs={htmlRefs} projectId={projectId} cardId={card.id} onUnlink={handleUnlinkRef} />
             </div>
           ) : activeTab === 'design' || activeTab === 'feature' || activeTab === 'test' ? (
-            /* Document View - Design, Feature, or Test */
-            <div className="relative p-4">
-              {/* Copy filepath button */}
-              {currentDocPath && (
-                <button
-                  onClick={() => handleCopyPath(currentDocPath)}
-                  className="absolute right-4 top-4 z-10 rounded p-1.5 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
-                  title={copiedPath ? 'Copied!' : `Copy path: ${currentDocPath}`}
-                >
-                  {copiedPath ? (
-                    <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                    </svg>
-                  )}
-                </button>
-              )}
-              {docLoading && !loadedDocs[currentDocPath!] && !docErrors[currentDocPath!] && (
-                <div className="flex items-center justify-center py-8">
-                  <div className="text-void-500">Loading document...</div>
-                </div>
-              )}
-              {currentDocPath && docErrors[currentDocPath] && !loadedDocs[currentDocPath] && (
-                <div className="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-900/20 dark:text-red-300">
-                  Error loading document: {docErrors[currentDocPath]}
-                </div>
-              )}
-              {currentDocPath && loadedDocs[currentDocPath] && (
-                <MarkdownContent>{loadedDocs[currentDocPath]}</MarkdownContent>
-              )}
+            /* Document View - Design, Feature, or Test (multi-attachment, feature 074) */
+            <div className="flex h-full flex-col">
+              <DocAttachmentsTab
+                key={activeTab}
+                kind={activeTab}
+                refs={activeTab === 'design' ? designRefs : activeTab === 'feature' ? featureRefs : testRefs}
+                projectId={projectId}
+                cardId={card.id}
+                onUnlink={handleUnlinkRef}
+              />
             </div>
           ) : activeTab === 'checklist' ? (
             /* Checklist View */
@@ -2378,6 +2336,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 context={terminalContext}
                 cardId={card.id}
                 cardAreas={card.areas}
+                projectId={projectId}
                 initialProvider={selectedProvider ?? undefined}
                 parentControlsProvider={hasMultipleSessions}
                 footerClassName={terminalColor}

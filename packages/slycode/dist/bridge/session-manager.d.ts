@@ -31,6 +31,19 @@ export declare class SessionManager {
      * Check for and terminate idle sessions
      */
     private checkIdleSessions;
+    /**
+     * PIDs of this bridge's currently-live sessions — the orphan reaper
+     * (feature 078) must never touch these.
+     */
+    getLiveSessionPids(): Set<number>;
+    /**
+     * pid -> session name for persisted sessions that are NOT live in this
+     * bridge but still have a recorded pid — i.e. sessions a previous bridge
+     * incarnation spawned and never observed exiting. Corroboration source for
+     * the orphan reaper (feature 078); the reaper still requires the process's
+     * own SLYCODE_SESSION env tag to match before it counts (PID-reuse guard).
+     */
+    getStaleSessionPids(): Map<number, string>;
     private loadPersistedState;
     private savePersistedState;
     private extractGroup;
@@ -171,6 +184,15 @@ export declare class SessionManager {
     /** Post-Enter poll ladder (cumulative ~1s/3s/6s) — spike observed legitimate submits clearing as late as ~5s. */
     private static readonly VERIFY_POLL_DELAYS_MS;
     private static readonly VERIFY_MAX_RESENDS;
+    /**
+     * Post-paste confirm settle-retry (extra re-check delays beyond the paste's
+     * own settle). The paste render can lag, and a transient screen state (agent
+     * output still repainting, a redraw) can momentarily read as queued_other/
+     * empty even though our paste landed — a single glance here was the cause of
+     * spurious `paste_not_observed` failures. The common case matches on the
+     * first check and pays none of this; only an unsettled screen re-checks.
+     */
+    private static readonly POST_PASTE_CONFIRM_DELAYS_MS;
     /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
     private static readonly VERIFY_SNAPSHOT_LINES;
     private verifySnapshotClassify;

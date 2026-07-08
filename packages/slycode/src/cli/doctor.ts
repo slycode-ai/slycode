@@ -170,7 +170,7 @@ export async function doctor(_args: string[]): Promise<void> {
   }
 
   // 6. Global CLIs
-  const cliTools = ['sly-kanban', 'sly-messaging', 'sly-scaffold'];
+  const cliTools = ['sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
   for (const tool of cliTools) {
     try {
       execSync(`command -v ${tool}`, { stdio: 'pipe', windowsHide: true });

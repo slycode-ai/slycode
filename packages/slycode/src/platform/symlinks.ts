@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 
-const CLI_TOOLS = ['slycode', 'sly-kanban', 'sly-messaging', 'sly-scaffold'] as const;
+const CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'] as const;
 
 function getTargetBinDir(): string {
   if (process.platform === 'win32') {

@@ -1,6 +1,6 @@
 {
   "name": "@slycode/create-slycode",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Create a new SlyCode workspace",
   "bin": {
     "create-slycode": "./bin/create-slycode.js"
@@ -35,7 +35,7 @@
     "url": "https://github.com/slycode-ai/slycode/issues"
   },
   "dependencies": {
-    "@slycode/slycode": "^0.3.0"
+    "@slycode/slycode": "^0.4.0"
   },
   "devDependencies": {
     "typescript": "^5.3.0",

@@ -246,6 +246,37 @@ export class SessionManager {
     }
   }
 
+  /**
+   * PIDs of this bridge's currently-live sessions — the orphan reaper
+   * (feature 078) must never touch these.
+   */
+  getLiveSessionPids(): Set<number> {
+    const pids = new Set<number>();
+    for (const session of this.sessions.values()) {
+      if (session.pid) pids.add(session.pid);
+      if (session.pty?.pid) pids.add(session.pty.pid);
+    }
+    return pids;
+  }
+
+  /**
+   * pid -> session name for persisted sessions that are NOT live in this
+   * bridge but still have a recorded pid — i.e. sessions a previous bridge
+   * incarnation spawned and never observed exiting. Corroboration source for
+   * the orphan reaper (feature 078); the reaper still requires the process's
+   * own SLYCODE_SESSION env tag to match before it counts (PID-reuse guard).
+   */
+  getStaleSessionPids(): Map<number, string> {
+    const live = this.getLiveSessionPids();
+    const stale = new Map<number, string>();
+    for (const [name, persisted] of Object.entries(this.persistedState.sessions)) {
+      if (typeof persisted.pid === 'number' && persisted.pid > 0 && !live.has(persisted.pid)) {
+        stale.set(persisted.pid, name);
+      }
+    }
+    return stale;
+  }
+
   private async loadPersistedState(): Promise<void> {
     try {
       const data = await fs.readFile(this.config.sessionFile, 'utf-8');
@@ -564,6 +595,13 @@ export class SessionManager {
       });
 
       session.pid = session.pty.pid;
+      // Record the pid in persisted state in memory only — the next save
+      // (GUID detection, exit, any state change) carries it. No immediate
+      // save here: that would race handlePtyExit for fast-exiting PTYs
+      // (see the persist-before-spawn comment above).
+      if (this.persistedState.sessions[name]) {
+        this.persistedState.sessions[name].pid = session.pid;
+      }
       // Replace the 'creating' placeholder with the fully initialized session
       this.sessions.set(name, session);
 
@@ -855,6 +893,7 @@ export class SessionManager {
       this.persistedState.sessions[name].lastActive = session.lastActive;
       this.persistedState.sessions[name].exitCode = code;
       this.persistedState.sessions[name].exitedAt = exitedAt;
+      this.persistedState.sessions[name].pid = null; // observed exit — not an orphan candidate
       if (session.exitOutput) {
         this.persistedState.sessions[name].exitOutput = session.exitOutput;
       }
@@ -1695,6 +1734,15 @@ export class SessionManager {
   /** Post-Enter poll ladder (cumulative ~1s/3s/6s) — spike observed legitimate submits clearing as late as ~5s. */
   private static readonly VERIFY_POLL_DELAYS_MS = [1000, 2000, 3000];
   private static readonly VERIFY_MAX_RESENDS = 2;
+  /**
+   * Post-paste confirm settle-retry (extra re-check delays beyond the paste's
+   * own settle). The paste render can lag, and a transient screen state (agent
+   * output still repainting, a redraw) can momentarily read as queued_other/
+   * empty even though our paste landed — a single glance here was the cause of
+   * spurious `paste_not_observed` failures. The common case matches on the
+   * first check and pays none of this; only an unsettled screen re-checks.
+   */
+  private static readonly POST_PASTE_CONFIRM_DELAYS_MS = [600, 900, 1200];
   /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
   private static readonly VERIFY_SNAPSHOT_LINES = 60;
 
@@ -1847,28 +1895,53 @@ export class SessionManager {
       }
       const preWasEmptyish = pre === 'empty' || pre === null || pre === 'unrecognized';
 
-      // --- Paste + confirm queued ---
+      // --- Paste + confirm queued (with settle-retry) ---
+      // A single post-paste glance was too fragile: the paste render can lag,
+      // or a transient screen (agent output still on screen / a redraw) reads
+      // as queued_other|empty for a moment even though our paste landed. Re-
+      // check across a short window — mirrors the post-Enter ladder — and only
+      // conclude failure if it never settles to a good state. Breaks
+      // immediately in the common case (matches on the first look).
       await paste();
       let post = this.verifySnapshotClassify(resolvedName, prompt);
-      if (post === 'no_input_region') {
-        // A dialog swallowed the paste between the pre-check and now.
-        // Do NOT send Enter — it could accept the dialog.
-        return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
-      }
-      if (post === 'empty' && preWasEmptyish) {
-        // Paste provably absent over an empty box — the one case where a
-        // re-paste is safe (cannot duplicate or merge).
-        warnings.push('paste_retried');
-        await paste();
+      let repasted = false;
+      for (const extraDelay of SessionManager.POST_PASTE_CONFIRM_DELAYS_MS) {
+        if (post === 'queued_ours') break;                 // settled + matched
+        if (post === 'no_input_region') {
+          // A dialog swallowed the paste. Do NOT send Enter — it could accept it.
+          return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
+        }
+        if (post === 'empty' && preWasEmptyish && !repasted) {
+          // Paste provably absent over an empty box — the one case where a
+          // re-paste is safe (cannot duplicate or merge). Once only.
+          warnings.push('paste_retried');
+          repasted = true;
+          await paste();
+          post = this.verifySnapshotClassify(resolvedName, prompt);
+          continue;
+        }
+        // queued_other | empty | unrecognized | null → let the screen settle, re-check.
+        await new Promise(r => setTimeout(r, extraDelay));
         post = this.verifySnapshotClassify(resolvedName, prompt);
+      }
+
+      if (post === 'no_input_region') {
+        return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
       }
       if (post === 'empty') {
         return mk('failed', { reason: 'paste_lost' });
       }
       if (post === 'queued_other') {
-        // Box has content but ours is not findable in it. Enter here would
-        // submit content we cannot account for — refuse, loudly.
-        return mk('failed', { reason: 'paste_not_observed_over_existing_input' });
+        // Persisted across the whole confirm window — genuinely can't attribute
+        // the box to our paste. Capture a BOUNDED region snippet (~200 chars)
+        // so the next occurrence is diagnosable; it rides the already-rotating
+        // messaging/automation logs via the delivery reason.
+        const regTxt = extractInputRegion(
+          session.provider as SubmitProvider,
+          this.getSnapshot(resolvedName, SessionManager.VERIFY_SNAPSHOT_LINES)?.content || '',
+        ).text;
+        const seen = regTxt.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+        return mk('failed', { reason: `paste_not_observed_over_existing_input; box="${seen}"` });
       }
       // post === 'queued_ours' | 'unrecognized' | null → proceed. For
       // unrecognized/null we still send Enter: the paste DID land (or we

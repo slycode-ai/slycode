@@ -5,6 +5,15 @@ export declare class KanbanClient {
     updateProjects(projects: Project[]): void;
     getKanbanPath(projectId: string): string | null;
     getBoard(projectId: string): KanbanBoard;
+    /**
+     * Read the cold archive board (kanban-archive.json — feature 077). Archived
+     * cards live there, same stages shape as the live board. Missing/corrupt
+     * file = empty, never an error. Read-only client; union-and-dedupe by id
+     * with live winning (mirrors scripts/kanban.js + web/src/lib/kanban-cold.ts).
+     */
+    private getColdBoard;
+    /** Live board unioned with the cold archive (dedupe by id, live wins). */
+    private getBoardWithArchive;
     getCard(projectId: string, cardId: string): {
         card: KanbanCard;
         stage: string;

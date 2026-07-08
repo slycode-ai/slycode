@@ -23,7 +23,8 @@ export type TerminalClass =
   | 'implementation'
   | 'testing'
   | 'done'
-  | 'action-assistant';
+  | 'action-assistant'
+  | 'atlas';
 
 // Command with ID attached (used by consumers after normalization)
 export interface SlyActionItem {

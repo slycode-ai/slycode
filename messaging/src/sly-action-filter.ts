@@ -11,6 +11,16 @@ function getWorkspaceRoot(): string {
 }
 
 /**
+ * Merge a legacy singular ref with its list field (feature 074). Legacy sorts
+ * first (it was "the" ref), deduped — mirrors the web getHtmlRefs/getDocRefs
+ * read-fallback so messaging sees multi-attachment cards correctly.
+ */
+function mergeCardRefs(legacy: string | undefined, list: string[] | undefined): string[] {
+  const arr = Array.isArray(list) ? list : [];
+  return legacy && !arr.includes(legacy) ? [legacy, ...arr] : arr;
+}
+
+/**
  * Parse YAML frontmatter from an action .md file.
  * Lightweight parser — handles the fields we need without a full YAML library.
  */
@@ -213,8 +223,9 @@ export class SlyActionFilter {
       resolved = resolved.replace(/\{\{card\.priority\}\}/g, context.card.priority);
       resolved = resolved.replace(/\{\{card\.description\}\}/g, context.card.description || '');
       resolved = resolved.replace(/\{\{card\.areas\}\}/g, (context.card.areas || []).join(', '));
-      resolved = resolved.replace(/\{\{card\.design_ref\}\}/g, context.card.design_ref || '');
-      resolved = resolved.replace(/\{\{card\.feature_ref\}\}/g, context.card.feature_ref || '');
+      // Template vars stay singular — resolve to the first (legacy-first) ref (feature 074).
+      resolved = resolved.replace(/\{\{card\.design_ref\}\}/g, mergeCardRefs(context.card.design_ref, context.card.design_refs)[0] || '');
+      resolved = resolved.replace(/\{\{card\.feature_ref\}\}/g, mergeCardRefs(context.card.feature_ref, context.card.feature_refs)[0] || '');
     }
 
     if (context.project) {
@@ -252,8 +263,9 @@ export class SlyActionFilter {
     lines.push(`Type: ${card.type} | Priority: ${card.priority} | Stage: ${stage || 'unknown'}`);
     if (card.description) lines.push(`Description: ${card.description}`);
     if (card.areas?.length) lines.push(`Areas: ${card.areas.join(', ')}`);
-    if (card.design_ref) lines.push(`Design Doc: ${card.design_ref}`);
-    if (card.feature_ref) lines.push(`Feature Spec: ${card.feature_ref}`);
+    for (const ref of mergeCardRefs(card.design_ref, card.design_refs)) lines.push(`Design Doc: ${ref}`);
+    for (const ref of mergeCardRefs(card.feature_ref, card.feature_refs)) lines.push(`Feature Spec: ${ref}`);
+    for (const ref of mergeCardRefs(undefined, card.test_refs)) lines.push(`Test Doc: ${ref}`);
 
     // Checklist summary (always shown)
     const checklist = card.checklist || [];

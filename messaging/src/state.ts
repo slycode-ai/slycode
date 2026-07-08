@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { AppState, NavigationTarget, PendingInstructionFileConfirm, Project, ResponseMode, TargetType } from './types.js';
 import { computeSessionKey, resolveCanonicalProjectId } from './session-keys.js';
+import { atomicWriteFileSync } from './atomic-write.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -139,7 +140,7 @@ export class StateManager {
 
   private saveState(): void {
     try {
-      fs.writeFileSync(getStateFile(), JSON.stringify({
+      atomicWriteFileSync(getStateFile(), JSON.stringify({
         targetType: this.state.targetType,
         selectedProjectId: this.state.selectedProjectId,
         selectedCardId: this.state.selectedCardId,

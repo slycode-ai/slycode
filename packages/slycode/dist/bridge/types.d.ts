@@ -102,6 +102,7 @@ export interface PersistedSession {
     exitCode?: number;
     exitedAt?: string;
     exitOutput?: string;
+    pid?: number | null;
 }
 export interface PersistedState {
     sessions: Record<string, PersistedSession>;
@@ -117,6 +118,12 @@ export interface BridgeRuntimeConfig {
     allowedCommands: string[];
     cors: {
         origins: string[];
+    };
+    reaper?: {
+        enabled?: boolean;
+        intervalMinutes?: number;
+        idleHours?: number;
+        dryRun?: boolean;
     };
 }
 export interface WsInputMessage {

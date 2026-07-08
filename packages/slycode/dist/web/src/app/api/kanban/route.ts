@@ -4,6 +4,7 @@ import path from 'path';
 import type { KanbanBoard, KanbanStages, KanbanCard, KanbanStage, ChangedCard } from '@/lib/types';
 import { getNextRun } from '@/lib/scheduler';
 import { appendEvent } from '@/lib/event-log';
+import { atomicWriteFile } from '@/lib/atomic-write';
 import {
   getKanbanPath,
   getArchiveDir,
@@ -14,6 +15,17 @@ import {
   type BackupTier,
 } from '@/lib/kanban-paths';
 import { ensureCardNumbers } from '@/lib/kanban-numbering';
+import {
+  coldPathFor,
+  readColdBoard,
+  unionStages,
+  partitionArchived,
+  upsertIntoCold,
+  removeFromCold,
+  maxColdCardNumber,
+  STAGE_KEYS,
+} from '@/lib/kanban-cold';
+import { withBoardLock } from '@/lib/board-lock';
 
 // Number of versions to keep per tier
 const VERSIONS_PER_TIER = 3;
@@ -135,6 +147,17 @@ async function updateTieredBackups(projectId: string, kanbanPath: string): Promi
       return;
     }
 
+    // Cold archive file rides the same tier rotation (feature 077): after
+    // migration the archived cards exist ONLY in kanban-archive.json, so it
+    // deserves the same backstop. Missing cold file → live-only backups.
+    let coldContent: string | null = null;
+    try {
+      coldContent = await fs.readFile(coldPathFor(kanbanPath), 'utf-8');
+      JSON.parse(coldContent); // never snapshot a corrupt cold file
+    } catch {
+      coldContent = null;
+    }
+
     const now = Date.now();
     const archiveDir = await getArchiveDir(projectId);
 
@@ -151,12 +174,43 @@ async function updateTieredBackups(projectId: string, kanbanPath: string): Promi
       // Rotate and write new version if file doesn't exist or threshold has passed
       if (!mtime || (now - mtime.getTime()) >= thresholdMs) {
         await rotateTierVersions(projectId, typedTier, currentContent);
+        if (coldContent !== null) {
+          await rotateColdTierVersions(projectId, typedTier, coldContent);
+        }
       }
     }
   } catch (error) {
     console.error('Failed to update tiered backups:', error);
     // Don't fail the save if backup fails
   }
+}
+
+/**
+ * Rotate cold-archive backups within a tier, mirroring rotateTierVersions.
+ * Files: {archiveDir}/kanban-archive_{tier}_{version}.json
+ */
+async function rotateColdTierVersions(
+  projectId: string,
+  tier: BackupTier,
+  content: string
+): Promise<void> {
+  const archiveDir = await getArchiveDir(projectId);
+  const pathFor = (version: number) =>
+    path.join(archiveDir, `kanban-archive_${tier}_${String(version).padStart(3, '0')}.json`);
+
+  try {
+    await fs.unlink(pathFor(VERSIONS_PER_TIER));
+  } catch {
+    // Doesn't exist, that's fine
+  }
+  for (let i = VERSIONS_PER_TIER - 1; i >= 1; i--) {
+    try {
+      await fs.rename(pathFor(i), pathFor(i + 1));
+    } catch {
+      // Doesn't exist, skip
+    }
+  }
+  await fs.writeFile(pathFor(1), content);
 }
 
 /**
@@ -185,6 +239,7 @@ async function cleanupLegacyBackups(projectId: string): Promise<void> {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get('projectId');
+  const includeArchived = searchParams.get('includeArchived') === 'true';
 
   if (!projectId) {
     return NextResponse.json({ error: 'projectId required' }, { status: 400 });
@@ -196,6 +251,13 @@ export async function GET(request: NextRequest) {
     try {
       const content = await fs.readFile(kanbanPath, 'utf-8');
       const data = JSON.parse(content) as KanbanBoard;
+
+      // Union the cold archive only when asked (feature 077) — the default
+      // board load stays on the small live file.
+      if (includeArchived) {
+        const { board: cold } = await readColdBoard(kanbanPath, data.stages);
+        data.stages = unionStages(data.stages, cold.stages);
+      }
 
       // Compute nextRun dynamically — single source of truth for timezone
       for (const stageCards of Object.values(data.stages)) {
@@ -231,11 +293,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { projectId, stages: incomingStages, changedCardIds, changedCards } = body as {
+    const { projectId, stages: incomingStages, changedCardIds, changedCards, includeArchived } = body as {
       projectId: string;
       stages: KanbanStages;
       changedCardIds?: string[];
       changedCards?: ChangedCard[];
+      includeArchived?: boolean;
     };
     let stages = incomingStages;
 
@@ -289,6 +352,11 @@ export async function POST(request: NextRequest) {
 
     // Clean up old numbered backups from previous system (one-time migration)
     await cleanupLegacyBackups(projectId);
+
+    // Everything from the merge's disk read to the final write is one
+    // read-modify-write — run it under the advisory board lock (feature 077;
+    // best-effort, shared with the CLI's acquireBoardLock).
+    return await withBoardLock(kanbanPath, async () => {
 
     // Type-aware merge: changedCards carries per-card operation types (move/edit/create/delete).
     // For "move" cards, preserve disk content and overlay only positional fields.
@@ -418,8 +486,72 @@ export async function POST(request: NextRequest) {
     // bumps nextCardNumber if needed. No-op when everything is consistent.
     ensureCardNumbers(data);
 
+    // ------------------------------------------------------------------
+    // Cold storage (feature 077): archived cards live in kanban-archive.json.
+    // Partition any archived card out of the live board; this one path covers
+    // web archive edits AND the one-time migration of legacy inline-archived
+    // boards. Cold I/O happens only when needed:
+    //  - moved.length > 0 (cards going live→cold)
+    //  - a changed card that was NOT on the live disk (came from cold —
+    //    unarchive or edit-of-archived), whose stale cold copy must be removed
+    // Write ordering is load-bearing: destination file first, so a crash
+    // between the two writes duplicates a card (healed by dedupe-on-read),
+    // never loses one.
+    // ------------------------------------------------------------------
+    const { keep, moved } = partitionArchived(data.stages);
+    const diskIds = new Set<string>();
+    for (const stage of STAGE_KEYS) {
+      for (const card of oldStages?.[stage] || []) diskIds.add(card.id);
+    }
+    const liveKeepIds = new Set<string>();
+    for (const stage of STAGE_KEYS) {
+      for (const card of keep[stage] || []) liveKeepIds.add(card.id);
+    }
+    const cameFromCold = (effectiveChangedIds ?? []).some(
+      (id) => !diskIds.has(id) && liveKeepIds.has(id)
+    );
+
+    let coldBoard: KanbanBoard | null = null;
+    if (moved.length > 0 || cameFromCold) {
+      const coldRes = await readColdBoard(kanbanPath); // unfiltered — keep everything for crash safety
+      if (coldRes.writable) {
+        coldBoard = coldRes.board;
+        upsertIntoCold(coldBoard, moved);
+        if (!coldBoard.project_id) coldBoard.project_id = projectId;
+        coldBoard.last_updated = data.last_updated;
+        // Card-number safety: future allocations must never collide with
+        // numbers held by cold cards.
+        const target = maxColdCardNumber(coldBoard) + 1;
+        if ((data.nextCardNumber ?? 0) < target) data.nextCardNumber = target;
+        data.stages = keep;
+      } else {
+        // Cold file exists but is unreadable — never risk clobbering it.
+        // Keep archived cards inline in the live board for this save.
+        console.warn('kanban POST: kanban-archive.json unreadable — archived cards kept in kanban.json');
+      }
+    } else {
+      data.stages = keep; // moved is empty; keep === stages content-wise
+    }
+
     await fs.mkdir(path.dirname(kanbanPath), { recursive: true });
-    await fs.writeFile(kanbanPath, JSON.stringify(data, null, 2));
+
+    // Pre-live cold write: cards moving live→cold must be in the cold file
+    // BEFORE they leave the live file. No removals in this write.
+    if (coldBoard && moved.length > 0) {
+      await atomicWriteFile(coldPathFor(kanbanPath), JSON.stringify(coldBoard, null, 2));
+    }
+
+    await atomicWriteFile(kanbanPath, JSON.stringify(data, null, 2));
+
+    // Post-live cold write: drop cold copies of cards that now live in the
+    // live board (unarchive) — only after the live write has landed. Also
+    // heals crash-duplicated cards from earlier interrupted moves.
+    if (coldBoard) {
+      const removed = removeFromCold(coldBoard, liveKeepIds);
+      if (removed > 0) {
+        await atomicWriteFile(coldPathFor(kanbanPath), JSON.stringify(coldBoard, null, 2));
+      }
+    }
 
     // Emit events for card changes (compare old vs new stage membership)
     if (oldStages) {
@@ -474,7 +606,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, last_updated: data.last_updated, stages: normalizedStages });
+    // Respond with the live board as written (post-partition) so the client's
+    // baseline matches what a subsequent default GET returns. Clients in the
+    // archived view pass includeArchived so their baseline keeps the cold
+    // cards they're displaying (response-only union — the files are already
+    // written correctly above).
+    let responseStages = data.stages;
+    if (includeArchived) {
+      const { board: coldNow } = await readColdBoard(kanbanPath, data.stages);
+      responseStages = unionStages(data.stages, coldNow.stages);
+    }
+    return NextResponse.json({ success: true, last_updated: data.last_updated, stages: responseStages });
+
+    }); // end withBoardLock
   } catch (error) {
     console.error('Failed to save kanban:', error);
     return NextResponse.json({ error: 'Failed to save' }, { status: 500 });

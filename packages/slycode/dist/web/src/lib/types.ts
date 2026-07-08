@@ -123,9 +123,12 @@ export interface KanbanCard {
   checklist: ChecklistItem[];  // Task checklist (esp. for testing)
   agentNotes?: AgentNote[];    // Cross-agent notes
   claude_session?: ClaudeSession;
-  design_ref?: string;  // Reference to design document
-  feature_ref?: string; // Reference to feature spec
-  test_ref?: string;    // Reference to test document
+  design_ref?: string;  // LEGACY single design doc — read-time fallback only; folded into design_refs on next CLI write (feature 074)
+  feature_ref?: string; // LEGACY single feature spec — read-time fallback only; folded into feature_refs on next CLI write (feature 074)
+  test_ref?: string;    // LEGACY single test doc — read-time fallback only; folded into test_refs on next CLI write (feature 074)
+  design_refs?: string[];  // List of design documents (multiple per card, feature 074)
+  feature_refs?: string[]; // List of feature specs (multiple per card, feature 074)
+  test_refs?: string[];    // List of test documents (multiple per card, feature 074)
   html_ref?: string;    // LEGACY single HTML attachment — read-time fallback only; folded into html_refs on next CLI write (feature 072)
   html_refs?: string[]; // List of HTML attachments (rendered in sandboxed iframes, multiple per card)
   questionnaire_refs?: string[]; // List of attached questionnaires (JSON, multiple per card)

@@ -38,7 +38,7 @@ exports.unlinkClis = unlinkClis;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
-const CLI_TOOLS = ['slycode', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
+const CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
 function getTargetBinDir() {
     if (process.platform === 'win32') {
         // Windows: use a directory in LOCALAPPDATA

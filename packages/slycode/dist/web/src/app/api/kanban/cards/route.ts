@@ -6,6 +6,8 @@ import type { KanbanBoard, KanbanCard, KanbanStages } from '@/lib/types';
 import { appendEvent } from '@/lib/event-log';
 import { getKanbanPath, ProjectResolutionError } from '@/lib/kanban-paths';
 import { ensureCardNumbers } from '@/lib/kanban-numbering';
+import { atomicWriteFile } from '@/lib/atomic-write';
+import { withBoardLock } from '@/lib/board-lock';
 
 // Eager card creation endpoint.
 //
@@ -54,6 +56,10 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    // Advisory lock around the read-modify-write (feature 077, best-effort —
+    // shared with the CLI, kanban POST, and scheduler).
+    return await withBoardLock(kanbanPath, async () => {
+
     let board: KanbanBoard;
     try {
       const content = await fs.readFile(kanbanPath, 'utf-8');
@@ -100,7 +106,7 @@ export async function POST(request: NextRequest) {
     ensureCardNumbers(board);
 
     await fs.mkdir(path.dirname(kanbanPath), { recursive: true });
-    await fs.writeFile(kanbanPath, JSON.stringify(board, null, 2));
+    await atomicWriteFile(kanbanPath, JSON.stringify(board, null, 2));
 
     try {
       appendEvent({
@@ -119,6 +125,8 @@ export async function POST(request: NextRequest) {
     // so we read it back from the board (the same object reference is mutated).
     const persisted = (board.stages.backlog || []).find((c) => c.id === id) ?? newCard;
     return NextResponse.json({ card: persisted });
+
+    }); // end withBoardLock
   } catch (error) {
     console.error('Failed to create card:', error);
     return NextResponse.json({ error: 'Failed to create card' }, { status: 500 });

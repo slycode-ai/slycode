@@ -60,6 +60,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
   const [classes, setClasses] = useState<TerminalClassesConfig | null>(null);
   const [commandsConfig, setCommandsConfig] = useState<CommandsConfig | null>(null);
   const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  const [slycodeRoot, setSlycodeRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -88,8 +89,11 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
   // Track editing state to avoid reloading while user is typing
   const isEditingRef = useRef(false);
 
-  // Command Assistant is global — always runs in the SlyCode root
-  const assistantCwd = _projectPath!;
+  // Command Assistant is global — always runs in the SlyCode workspace root,
+  // where everything it manages lives (store/actions/, documentation/
+  // terminal-classes.json). The project path is only a fallback for the
+  // window before /api/dashboard resolves (dev-safe: they coincide there).
+  const assistantCwd = slycodeRoot ?? _projectPath!;
   const assistantSessionName = 'action-assistant:global';
 
   // Load/refresh data function
@@ -115,6 +119,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
         const dashboardData = await dashboardRes.json();
         const projectIds = (dashboardData.projects || []).map((p: { id: string }) => p.id);
         setAvailableProjects(projectIds);
+        if (dashboardData.slycodeRoot) setSlycodeRoot(dashboardData.slycodeRoot);
       }
 
       // Load actions for the assistant terminal (normalize Record → array)

@@ -50,7 +50,26 @@ export function loadAllShortcuts(projects) {
 function loadKanban(projectPath) {
     try {
         const content = fs.readFileSync(path.join(projectPath, 'documentation', 'kanban.json'), 'utf-8');
-        return JSON.parse(content);
+        const board = JSON.parse(content);
+        // Union cold storage (kanban-archive.json — feature 077) so card-number /
+        // card-id deeplinks still resolve archived cards. Dedupe by id, live wins.
+        // Missing/corrupt cold file = no cold cards, never an error. Mirrors
+        // web/src/lib/shortcuts.ts — keep in lockstep.
+        try {
+            const coldRaw = fs.readFileSync(path.join(projectPath, 'documentation', 'kanban-archive.json'), 'utf-8');
+            const cold = JSON.parse(coldRaw);
+            for (const stage of STAGE_ORDER) {
+                const liveCards = board.stages[stage] || [];
+                const liveIds = new Set(liveCards.map((c) => c.id));
+                const coldCards = (cold.stages?.[stage] || []).filter((c) => c && c.id && !liveIds.has(c.id));
+                if (coldCards.length > 0)
+                    board.stages[stage] = [...liveCards, ...coldCards];
+            }
+        }
+        catch {
+            // No cold file — nothing to union
+        }
+        return board;
     }
     catch {
         return null;

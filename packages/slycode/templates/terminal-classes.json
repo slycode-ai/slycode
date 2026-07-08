@@ -46,6 +46,11 @@
       "id": "action-assistant",
       "name": "Action Assistant",
       "description": "AI assistant in the Sly Action Configuration modal"
+    },
+    {
+      "id": "atlas",
+      "name": "Atlas Terminal",
+      "description": "Ask-the-codebase terminal in Code Mode (side panel next to the code)"
     }
   ]
 }

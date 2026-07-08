@@ -1,7 +1,7 @@
 ---
 name: messaging
-version: 2.4.0
-updated: 2026-05-10
+version: 2.5.0
+updated: 2026-06-06
 description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc.
 ---
 
@@ -72,6 +72,24 @@ Telegram delivers it as a generic file attachment.
 - Missing file returns `404 file_not_found`.
 - The `--caption` text is limited to 1024 characters.
 - On Telegram API failure, the CLI prints `Error: telegram_error: <message>`.
+
+### Generate-Only TTS (render audio to disk, no send)
+
+Render ElevenLabs TTS audio to a file **without sending anything** to the
+channel. Use this when the audio is an ingredient for something else — e.g.
+a voiceover track for a video pipeline — rather than a message.
+
+```bash
+sly-messaging generate "Your narration text here"                      # → data/generated-audio/<date>/*.ogg
+sly-messaging generate "Your narration" --format mp3 --out-dir /tmp    # custom format + location
+sly-messaging generate "Your narration" --filename intro --voice-id <id>
+sly-messaging generate "Your narration" --project slycode              # use a project's voice
+```
+
+- Prints the **absolute path** of the generated file on success.
+- Defaults: `ogg` format, `data/generated-audio/<date>/` output dir.
+- Voice resolution: `--voice-id` > `--project` voice > caller's session voice > global default.
+- All the audio tags from "Speech Control" below work here too.
 
 **When to use `send-file` instead of `send --tts`:**
 - You already have an audio/video file on disk that you want delivered as-is

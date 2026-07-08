@@ -29,6 +29,8 @@ interface QuestionnaireTabProps {
   activeProvider?: string;
   /** Working directory for session creation if no session exists. */
   cwd?: string;
+  /** Unlink a single questionnaire ref (feature 074). Removes the ref only — never deletes the file. */
+  onUnlink?: (ref: string) => void;
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
@@ -40,6 +42,7 @@ export function QuestionnaireTab({
   activeSessionName,
   activeProvider,
   cwd,
+  onUnlink,
 }: QuestionnaireTabProps) {
   const refs = useMemo(() => card.questionnaire_refs || [], [card.questionnaire_refs]);
 
@@ -264,46 +267,61 @@ export function QuestionnaireTab({
           <div className="text-center text-sm text-void-500 dark:text-void-400">No questionnaires found.</div>
         )}
         {indexItems && indexItems.map((item) => (
-          <button
+          <div
             key={item.ref}
-            onClick={() => item.name && setSelectedName(item.name)}
-            disabled={!item.name}
-            className="block w-full rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-void-700/50 dark:bg-void-900/40"
+            className="group flex items-start gap-2 rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 dark:border-void-700/50 dark:bg-void-900/40"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-void-900 dark:text-void-100">
-                  {item.title || item.name || item.ref}
-                </div>
-                {item.title && item.name && (
-                  <div className="mt-0.5 font-mono text-xs text-void-500 dark:text-void-400">
-                    {item.name}
+            <button
+              onClick={() => item.name && setSelectedName(item.name)}
+              disabled={!item.name}
+              className="min-w-0 flex-1 text-left disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-void-900 dark:text-void-100">
+                    {item.title || item.name || item.ref}
                   </div>
-                )}
-                {item.error && (
-                  <div className="mt-1 text-xs text-red-600 dark:text-red-400">{item.error}</div>
-                )}
+                  {item.title && item.name && (
+                    <div className="mt-0.5 font-mono text-xs text-void-500 dark:text-void-400">
+                      {item.name}
+                    </div>
+                  )}
+                  {item.error && (
+                    <div className="mt-1 text-xs text-red-600 dark:text-red-400">{item.error}</div>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  {item.status && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                        item.status === 'submitted'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                          : 'bg-void-100 text-void-600 dark:bg-void-800 dark:text-void-400'
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                  )}
+                  {item.answerable !== undefined && (
+                    <span className="font-mono text-xs text-void-500 dark:text-void-400">
+                      {item.answered ?? 0} / {item.answerable} answered
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                {item.status && (
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-                      item.status === 'submitted'
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                        : 'bg-void-100 text-void-600 dark:bg-void-800 dark:text-void-400'
-                    }`}
-                  >
-                    {item.status}
-                  </span>
-                )}
-                {item.answerable !== undefined && (
-                  <span className="font-mono text-xs text-void-500 dark:text-void-400">
-                    {item.answered ?? 0} / {item.answerable} answered
-                  </span>
-                )}
-              </div>
-            </div>
-          </button>
+            </button>
+            {onUnlink && (
+              <button
+                onClick={() => onUnlink(item.ref)}
+                className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                title="Unlink this questionnaire (removes the reference; file is not deleted)"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </button>
+            )}
+          </div>
         ))}
       </div>
     );
