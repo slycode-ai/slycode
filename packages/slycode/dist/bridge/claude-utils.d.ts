@@ -89,6 +89,24 @@ export declare function detectNewGeminiSessionId(dir: string, beforeFiles: strin
  */
 export declare function getMostRecentProviderSessionId(providerId: string, cwd: string): Promise<string | null>;
 /**
+ * Parse the local-time timestamp embedded in a Codex rollout filename
+ * (rollout-YYYY-MM-DDTHH-mm-ss-<uuid>.jsonl). Returns epoch ms or null.
+ * Codex names files with the session's mint time in SERVER LOCAL time, so we
+ * parse with the local Date constructor (same machine writes and reads).
+ */
+export declare function parseCodexRolloutTimestamp(filename: string): number | null;
+export interface SessionFileCandidate {
+    sessionId: string;
+    /** Best-known file timestamp (epoch ms): Codex filename time, else stat mtime. Null when unknown. */
+    timestampMs: number | null;
+}
+/**
+ * List all session-file candidates for a provider+cwd, newest-first (feature 080).
+ * Used by relink so it can walk candidates instead of blindly taking the newest
+ * file — Codex multi-agent runs put sub-agent rollouts in the same directory.
+ */
+export declare function listProviderSessionCandidates(providerId: string, cwd: string): Promise<SessionFileCandidate[]>;
+/**
  * Get the session directory for a provider.
  */
 export declare function getProviderSessionDir(providerId: string, cwd: string): string | null;

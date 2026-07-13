@@ -5,6 +5,7 @@ import * as os from 'os';
 import { spawn, execSync } from 'child_process';
 import { resolveWorkspaceOrExit, resolveConfig, ensureStateDir, getStateDir, resolvePackageDir } from './workspace';
 import { refreshUpdates } from './sync';
+import { ensureClis } from '../platform/symlinks';
 import { SERVICES, detectInstalledServiceManager, ensureXdgRuntime } from '../platform/service-detect';
 
 interface ServiceState {
@@ -91,6 +92,11 @@ export async function start(_args: string[]): Promise<void> {
     console.log(`  Refreshed ${updateResult.refreshed} skill update(s)`);
     console.log('');
   }
+
+  // Self-heal CLI links (quiet no-op when correct): `slycode update` runs the
+  // OLD package's linking code, so tools introduced by the new release (e.g.
+  // sly-atlas) only converge here, where the NEW code runs.
+  ensureClis(workspace);
 
   // Check for newer version on npm (non-blocking, 3-second timeout)
   try {

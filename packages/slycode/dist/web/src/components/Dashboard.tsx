@@ -12,6 +12,7 @@ import { AddProjectModal } from './AddProjectModal';
 import { GlobalClaudePanel } from './GlobalClaudePanel';
 import { SearchBar } from './SearchBar';
 import { CliAssetsTab } from './CliAssetsTab';
+import { AtlasRollup } from './AtlasRollup';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
 import { LogoutButton } from './LogoutButton';
@@ -24,7 +25,7 @@ interface DashboardProps {
   data: DashboardData;
 }
 
-type Tab = 'projects' | 'cli-assets';
+type Tab = 'projects' | 'cli-assets' | 'atlas';
 
 export function Dashboard({ data: initialData }: DashboardProps) {
   const [data, setData] = useState<DashboardData>(initialData);
@@ -424,6 +425,16 @@ export function Dashboard({ data: initialData }: DashboardProps) {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('atlas')}
+              className={`border-b-2 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'atlas'
+                  ? 'border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
+                  : 'border-transparent text-void-500 hover:text-void-300 dark:text-void-400 dark:hover:text-void-300'
+              }`}
+            >
+              Atlas
+            </button>
           </nav>
         </div>
       </div>
@@ -496,6 +507,13 @@ export function Dashboard({ data: initialData }: DashboardProps) {
             <section>
               <ActivityFeed />
             </section>
+          </>
+        ) : activeTab === 'atlas' ? (
+          <>
+            <p className="mb-6 text-sm text-void-400 dark:text-void-500">
+              Codebase atlases across the workspace — one map per project
+            </p>
+            <AtlasRollup />
           </>
         ) : (
           <>

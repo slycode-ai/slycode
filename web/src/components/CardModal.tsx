@@ -11,6 +11,7 @@ import {
 import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
 import { submitVerified, notifyDeliveryFailure, type VerifiedDelivery } from '@/lib/submit-verified';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
+import EndedSessionPanel from './EndedSessionPanel';
 import { AutomationConfig } from './AutomationConfig';
 import { QuestionnaireTab } from './QuestionnaireTab';
 import { HtmlAttachmentsTab } from './HtmlAttachmentsTab';
@@ -39,6 +40,7 @@ interface SessionInfo {
   lastActive?: string;
   createdAt?: string;
   provider?: string;
+  exitedAt?: string;
 }
 
 interface CardSession {
@@ -48,6 +50,10 @@ interface CardSession {
   hasHistory: boolean;
   createdAt: string;
   displayName: string;
+  /** False for stopped sessions whose provider conversation id was never captured (feature 080). */
+  resumable: boolean;
+  exitedAt?: string;
+  lastActive?: string;
 }
 
 export type NewCardData = Omit<KanbanCard, 'id' | 'order' | 'created_at' | 'updated_at'>;
@@ -408,7 +414,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         const localStr = JSON.stringify(checklistRef.current);
         if (localStr === lastKnownChecklistRef.current) {
           const newChecklist = card.checklist || [];
-          // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external SSE data to local state
+           
           setLocalChecklist(newChecklist);
           checklistRef.current = newChecklist;
         }
@@ -631,9 +637,6 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const anyDetached = cardSessions.some(s => s.status === 'detached') && !cardSessions.some(s => s.status === 'running');
   const hasMultipleSessions = cardSessions.length > 1;
   const activeSession = cardSessions.find(s => s.provider === selectedProvider) || cardSessions[0] || null;
-  // Backward compat aliases
-  const isRunning = anyRunning;
-  const hasHistory = activeSession?.hasHistory ?? false;
 
   // Determine terminal class from stage
   const terminalClass = getTerminalClassFromStage(stage);
@@ -785,10 +788,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         const matches = (data.sessions as SessionInfo[]).filter((s) =>
           s.name?.endsWith(cardSuffix) && sessionBelongsToProject(s.name, projectKeyShape)
         );
-        const visible = matches.filter(s =>
-          s.status !== 'stopped' || s.hasHistory
-        );
-        if (visible.length === 0) {
+        if (matches.length === 0) {
           // Clear stale pill state — switching to a card with no sessions, or
           // after the last session was deleted, would otherwise leave a
           // ghost Resume button and selected provider visible.
@@ -796,8 +796,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           setSelectedProvider(null);
           return;
         }
-        visible.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
-        const sessions: CardSession[] = visible.map(s => {
+        // Stopped sessions with no captured conversation id are shown as
+        // "ended — not resumable" instead of silently hidden (feature 080)
+        const sessions: CardSession[] = matches.map(s => {
           let provider = s.provider || 'claude';
           if (s.name) {
             const parts = s.name.split(':');
@@ -811,7 +812,16 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             hasHistory: s.hasHistory ?? false,
             createdAt: s.createdAt ?? '',
             displayName: provider.charAt(0).toUpperCase() + provider.slice(1),
+            resumable: s.status !== 'stopped' || (s.hasHistory ?? false),
+            exitedAt: s.exitedAt,
+            lastActive: s.lastActive,
           };
+        });
+        // Resumable sessions first (so opening a card never lands on a dead
+        // tab by default), then oldest-created first within each group
+        sessions.sort((a, b) => {
+          if (a.resumable !== b.resumable) return a.resumable ? -1 : 1;
+          return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
         });
         setCardSessions(sessions);
         setSelectedProvider(prev => {
@@ -843,7 +853,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
   useEffect(() => {
     if (!hasAutoSwitched && !suppressAutoTerminal && !isAutomation && anyRunning) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time auto-switch on session detection
+       
       setActiveTab('terminal');
       setHasAutoSwitched(true);
     }
@@ -1698,28 +1708,36 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
               {hasMultipleSessions && cardSessions.map(session => {
                 const colors = getProviderColor(session.provider);
                 const isActive = session.provider === selectedProvider;
+                const isEnded = !session.resumable;
                 return (
                   <button
                     key={session.provider}
                     onClick={() => setSelectedProvider(session.provider)}
+                    title={isEnded ? 'Session ended — not resumable' : undefined}
                     className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                      isActive ? 'shadow-sm' : 'opacity-60 hover:opacity-90'
+                      isActive ? 'shadow-sm' : isEnded ? 'opacity-35 hover:opacity-60' : 'opacity-60 hover:opacity-90'
                     }`}
                     style={isActive ? {
                       backgroundColor: colors.bg,
                       border: `1px solid ${colors.border}`,
                       color: colors.color,
+                      ...(isEnded ? { filter: 'saturate(0.4)' } : {}),
                     } : {
                       border: '1px solid transparent',
                       color: colors.color,
                     }}
                   >
-                    <div className="h-1.5 w-1.5 rounded-full" style={{
-                      backgroundColor: session.status === 'running' ? '#00e676'
-                        : session.status === 'detached' ? '#ff9800'
-                        : '#6b7280',
-                      boxShadow: session.status === 'running' ? '0 0 4px rgba(0, 230, 118, 0.6)' : 'none',
-                    }} />
+                    {isEnded ? (
+                      /* Hollow ring = session record with nothing live behind it */
+                      <div className="h-1.5 w-1.5 rounded-full border border-current opacity-70" />
+                    ) : (
+                      <div className="h-1.5 w-1.5 rounded-full" style={{
+                        backgroundColor: session.status === 'running' ? '#00e676'
+                          : session.status === 'detached' ? '#ff9800'
+                          : '#6b7280',
+                        boxShadow: session.status === 'running' ? '0 0 4px rgba(0, 230, 118, 0.6)' : 'none',
+                      }} />
+                    )}
                     {session.displayName}
                   </button>
                 );
@@ -2324,6 +2342,19 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 </button>
               </div>
             </div>
+          ) : activeTab === 'terminal' && activeSession && !activeSession.resumable ? (
+            /* Ended session with no captured conversation id (feature 080) —
+               nothing to resume, so offer recovery/removal instead of a terminal */
+            <div className="h-full min-w-0">
+              <EndedSessionPanel
+                sessionName={activeSession.name}
+                provider={activeSession.provider}
+                displayName={activeSession.displayName}
+                endedAt={activeSession.exitedAt ?? activeSession.lastActive}
+                onRelinked={refreshCardSessions}
+                onDismissed={refreshCardSessions}
+              />
+            </div>
           ) : activeTab === 'terminal' ? (
             /* Terminal Tab - uses shared component */
             <div className="h-full min-w-0">
@@ -2355,10 +2386,16 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                   // Update the current provider's status in place
                   setCardSessions(prev => {
                     if (!info) return prev.filter(s => s.provider !== selectedProvider);
-                    return prev.map(s => s.provider === selectedProvider
-                      ? { ...s, status: info.status, hasHistory: info.hasHistory ?? s.hasHistory }
-                      : s
-                    );
+                    return prev.map(s => {
+                      if (s.provider !== selectedProvider) return s;
+                      const hasHistory = info.hasHistory ?? s.hasHistory;
+                      return {
+                        ...s,
+                        status: info.status,
+                        hasHistory,
+                        resumable: info.status !== 'stopped' || hasHistory,
+                      };
+                    });
                   });
                   // Re-check for new sibling sessions (e.g. cross-card prompt created a new provider)
                   refreshCardSessions();
@@ -2460,20 +2497,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                               setNewSessionDropdown(false);
                               setNewSessionProvider(null);
                               // Refresh sessions list after a short delay for bridge to register
-                              setTimeout(() => {
-                                const cardSuffix = `card:${card.id}`;
-                                fetch('/api/bridge/sessions').then(r => r.ok ? r.json() : null).then(data => {
-                                  if (!data?.sessions) return;
-                                  const matches = (data.sessions as SessionInfo[]).filter(s => s.name?.endsWith(cardSuffix) && sessionBelongsToProject(s.name, projectKeyShape));
-                                  const visible = matches.filter(s => s.status !== 'stopped' || s.hasHistory);
-                                  visible.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
-                                  setCardSessions(visible.map(s => {
-                                    let provider = s.provider || 'claude';
-                                    if (s.name) { const parts = s.name.split(':'); if (parts.indexOf('card') === 2) provider = parts[1]; }
-                                    return { name: s.name || '', provider, status: s.status, hasHistory: s.hasHistory ?? false, createdAt: s.createdAt ?? '', displayName: provider.charAt(0).toUpperCase() + provider.slice(1) };
-                                  }));
-                                });
-                              }, 1000);
+                              setTimeout(() => refreshCardSessions(), 1000);
                             } catch { /* bridge error */ }
                           }}
                           className="rounded-md bg-neon-blue-400/20 px-3 py-1.5 text-xs font-medium text-neon-blue-400 transition-colors hover:bg-neon-blue-400/30"

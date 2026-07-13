@@ -64,6 +64,20 @@ export declare class SessionManager {
      * Background task to detect provider session ID after spawn
      */
     private detectProviderSessionId;
+    /**
+     * Exit-time last-chance session-id detection (feature 080). Single-shot
+     * before/after diff against the spawn-time snapshot — no polling watch.
+     * Called from handlePtyExit AFTER guidDetectionCancelled is set, so it
+     * claims via allowCancelled.
+     */
+    private detectSessionIdAtExit;
+    /**
+     * Atomically claim a detected session id for a session (feature 080 —
+     * shared by spawn-time watch, re-armed watches, and exit-time detection).
+     * `allowCancelled` lets the exit-time check link a session whose watch
+     * cancellation flag was just set by handlePtyExit.
+     */
+    private claimDetectedSessionId;
     private handlePtyOutput;
     /**
      * Deliver a deferred prompt to the PTY.
@@ -141,10 +155,14 @@ export declare class SessionManager {
      */
     private getClaimedGuids;
     /**
-     * Retry GUID detection for sessions that didn't capture it initially.
-     * Uses the before-files list AND excludes GUIDs already claimed by other sessions.
+     * Event-anchored session-id detection (feature 080). Idempotent: no-ops when
+     * the id is captured, detection was cancelled (session stopped), a watch is
+     * already in flight, or one was armed within the cooldown. Otherwise starts
+     * a fresh 60s watch with the spawn-time before-files snapshot — providers
+     * like Codex create their session file lazily on FIRST PROMPT, so input
+     * delivery (not spawn) is the event that makes detection succeed.
      */
-    private retryGuidDetection;
+    private ensureSessionIdDetection;
     resizeSession(name: string, cols: number, rows: number): boolean;
     sendSignal(name: string, signal: string): boolean;
     private responseStore;

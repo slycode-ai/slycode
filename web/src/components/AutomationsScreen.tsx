@@ -78,7 +78,7 @@ function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: bool
 }
 
 export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardClick, onCardContextMenu, onCreateAutomation }: AutomationsScreenProps) {
-  const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null);
+  const [, setSchedulerRunning] = useState<boolean | null>(null);
   const [timezoneAbbr, setTimezoneAbbr] = useState<string>('');
 
   // Ping scheduler API on mount — triggers auto-start if not running

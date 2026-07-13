@@ -37,7 +37,6 @@ export function ConnectionStatusIndicator({
       if (!debounceRef.current) {
         debounceRef.current = setTimeout(() => {
           debounceRef.current = null;
-          // eslint-disable-next-line react-hooks/set-state-in-effect -- debounce timer callback
           setShowDisconnect(true);
         }, TOAST_DEBOUNCE_MS);
       }

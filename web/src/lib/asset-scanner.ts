@@ -23,6 +23,7 @@ import type {
 
 import { getSlycodeRoot } from './paths';
 import { getProviderAssetDir, getProviderAssetFilePath } from './provider-paths';
+import { validateAssetName, assertInside } from './asset-path-guard';
 
 // SlyCode root path — derived, not hardcoded
 const MASTER_PATH = getSlycodeRoot();
@@ -344,6 +345,13 @@ export function detectPlatforms(projectPath: string): PlatformDetection {
  * Get the full filesystem path for an asset in a project.
  */
 export function getAssetPath(projectPath: string, assetType: AssetType, assetName: string): string {
+  // Traversal guard (defense-in-depth): skill/agent paths embed assetName.
+  // Route handlers reject invalid names with a 400 before reaching here, but
+  // throw as a backstop so no caller can build a traversing path. mcp ignores
+  // assetName (fixed .mcp.json), so it's exempt.
+  if (assetType !== 'mcp' && !validateAssetName(assetName)) {
+    throw new Error(`Invalid asset name: ${JSON.stringify(assetName)}`);
+  }
   switch (assetType) {
     case 'skill':
       return path.join(projectPath, '.claude', 'skills', assetName);
@@ -662,6 +670,11 @@ export function importAssetToStore(
   assetName: string,
   options?: { skillMainOnly?: boolean },
 ): void {
+  // Source read: getProviderAssetFilePath validates assetName and returns null
+  // on a bad name or a traversing path. Distinguish "unsupported" from "invalid".
+  if (!validateAssetName(assetName)) {
+    throw new Error(`Invalid asset name: ${JSON.stringify(assetName)}`);
+  }
   const srcFilePath = getProviderAssetFilePath(projectPath, provider, assetType, assetName);
   if (!srcFilePath) {
     throw new Error(`Provider '${provider}' does not support asset type '${assetType}'`);
@@ -671,7 +684,11 @@ export function importAssetToStore(
   const storePath = path.join(getSlycodeRoot(), 'store', typeDir);
 
   if (assetType === 'skill') {
-    const dstDir = path.join(storePath, assetName);
+    // Destination write guard: assetName must stay inside store/<type>.
+    const dstDir = assertInside(storePath, assetName);
+    if (!dstDir) {
+      throw new Error(`Invalid asset name: ${JSON.stringify(assetName)}`);
+    }
     const mainOnly = options?.skillMainOnly ?? true;
     if (mainOnly) {
       fs.mkdirSync(dstDir, { recursive: true });

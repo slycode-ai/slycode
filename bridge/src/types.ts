@@ -39,7 +39,9 @@ export interface Session {
   // For GUID detection - files that existed before this session started
   claudeBeforeFiles?: string[];
   claudeDir?: string;
-  guidRetryAttempted?: boolean;
+  // Event-anchored detection re-arm state (feature 080)
+  guidDetectionInFlight?: boolean;
+  guidDetectionLastArmedAt?: number;
   // Cancel GUID detection when session stops/exits
   guidDetectionCancelled?: boolean;
   // For disconnect grace period (race condition fix)

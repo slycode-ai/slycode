@@ -67,7 +67,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
 
   // Assistant terminal state
   const [actionsConfig, setActionsConfig] = useState<SlyActionsConfig | null>(null);
-  const [assistantSessionInfo, setAssistantSessionInfo] = useState<{ hasHistory?: boolean } | null>(null);
+  const [, setAssistantSessionInfo] = useState<{ hasHistory?: boolean } | null>(null);
 
   // Navigation state
   const [nav, setNav] = useState<NavigationState>({ level: 'list', commandId: null });

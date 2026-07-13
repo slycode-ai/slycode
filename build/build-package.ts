@@ -345,7 +345,7 @@ function copyTemplates(): void {
   // Scripts (kanban.js, scaffold.js, env wrapper)
   const scriptsDir = path.join(DIST_DIR, 'scripts');
   fs.mkdirSync(scriptsDir, { recursive: true });
-  const scriptsToCopy = ['atlas.js', 'kanban.js', 'scaffold.js'];
+  const scriptsToCopy = ['atlas.js', 'db-introspect.js', 'kanban.js', 'scaffold.js'];
   for (const script of scriptsToCopy) {
     const srcPath = path.join(ROOT, 'scripts', script);
     if (fs.existsSync(srcPath)) {

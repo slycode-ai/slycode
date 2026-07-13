@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard, CardChangeType } from '@/lib/types';
+import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard } from '@/lib/types';
 import type { NewCardData, CardCreatingState } from './CardModal';
 import { connectionManager } from '@/lib/connection-manager';
 import { tabSync } from '@/lib/tab-sync';
@@ -17,6 +17,7 @@ import { readStatus, getStatusAgeLabel } from '@/lib/status';
 import { ConfirmDialog } from './ConfirmDialog';
 import { VersionUpdateToast } from './VersionUpdateToast';
 import { SkillUpdateToast } from './SkillUpdateToast';
+import { RetentionWarningToast } from './RetentionWarningToast';
 import { projectKeyAlternation } from '@/lib/session-keys';
 
 interface SessionInfo {
@@ -1173,6 +1174,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
       <SkillUpdateToast projectId={project.id} />
+      <RetentionWarningToast />
 
       {/* Save status indicator - absolute positioned */}
       <div className="absolute top-1 right-4 z-10 flex gap-3">

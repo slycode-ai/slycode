@@ -20,9 +20,11 @@ interface AreaViewProps {
   onAreaChanged: () => void;
   onRunRefresh: () => void;
   refreshBusy: boolean;
+  /** guided tours (feature 079) — this area's tours listed in the drawer */
+  onStartTour?: (tourId: string) => void;
 }
 
-export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenFile, onAreaChanged, onRunRefresh, refreshBusy }: AreaViewProps) {
+export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenFile, onAreaChanged, onRunRefresh, refreshBusy, onStartTour }: AreaViewProps) {
   const [drawerExpanded, setDrawerExpanded] = useState(false);
   const area = snapshot.root?.areas.find(a => a.id === areaId);
   const node = snapshot.nodes[areaId];
@@ -119,12 +121,13 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
         onToggleExpand={() => setDrawerExpanded(e => !e)}
         onOpenFile={onOpenFile}
         onAreaChanged={onAreaChanged}
+        onStartTour={onStartTour}
       />
     </div>
   );
 }
 
-function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onOpenFile, onAreaChanged }: {
+function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onOpenFile, onAreaChanged, onStartTour }: {
   projectId: string;
   snapshot: AtlasSnapshot;
   areaId: string;
@@ -132,6 +135,7 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
   onToggleExpand: () => void;
   onOpenFile: (path: string) => void;
   onAreaChanged: () => void;
+  onStartTour?: (tourId: string) => void;
 }) {
   const area = snapshot.root!.areas.find(a => a.id === areaId)!;
   const node = snapshot.nodes[areaId];
@@ -151,7 +155,7 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
   const stale = !fresh || !fresh.hasNode || fresh.stale;
 
   return (
-    <div className={`border-t border-(--cm-line) bg-(--cm-panel) px-6 py-3 ${expanded ? 'min-h-0 flex-1' : 'h-[280px] flex-none'}`}>
+    <div className={`border-t border-(--cm-line) bg-(--cm-panel) px-6 py-3 ${expanded ? 'min-h-0 flex-1' : 'h-[340px] flex-none'}`}>
       <div className="mx-auto flex h-full max-w-[1100px] min-w-0 flex-col">
         <div className="mb-1.5 flex items-center gap-2.5">
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: area.color }} />
@@ -208,6 +212,30 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
           </div>
           {node && node.key_files.length > 0 && (
             <div className="w-[320px] min-w-0 flex-none overflow-y-auto">
+              {/* This area's guided tours (feature 079) */}
+              {onStartTour && (snapshot.tours ?? []).some(t => t.tour.area === areaId) && (
+                <div className="mb-2">
+                  <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Guided tours</p>
+                  {(snapshot.tours ?? []).filter(t => t.tour.area === areaId).map(({ tour, stale: tourStale }) => (
+                    <button
+                      key={tour.id}
+                      onClick={() => onStartTour(tour.id)}
+                      className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
+                      title={tour.description ?? tour.title}
+                    >
+                      <span className="flex items-center gap-1.5 truncate text-[11.5px] font-medium text-(--cm-text)">
+                        ▶ {tour.title}
+                        {tourStale && (
+                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                            stale
+                          </span>
+                        )}
+                      </span>
+                      <span className="block font-mono text-[9.5px] text-(--cm-faint)">{tour.steps.length} steps</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key files</p>
               {node.key_files.map(k => (
                 <button

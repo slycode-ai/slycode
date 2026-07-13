@@ -14,12 +14,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  AtlasSnapshot, CodeModeScene, ContextSelection, NavEvent, OpenTarget, RailTab, TreeNode,
+  AtlasSnapshot, CodeModeScene, ContextSelection, NavEvent, OpenTarget, RailTab, TourStep, TreeNode,
 } from './types';
+import { RAIL_TABS } from './types';
 import { FileTree } from './FileTree';
 import { SymbolsRail } from './SymbolsRail';
 import { SearchRail } from './SearchRail';
 import { GitRail } from './GitRail';
+import { DbRail } from './DbRail';
 import { EditorPane } from './EditorPane';
 import { DiffView } from './DiffView';
 import { LogView } from './LogView';
@@ -29,8 +31,9 @@ import { FileAtlas } from './FileAtlas';
 import { AtlasTerminal } from './AtlasTerminal';
 import { AtlasSettingsModal } from './AtlasSettingsModal';
 import { ResultDeck } from './ResultDeck';
+import { TourPlayer } from './TourPlayer';
+import { DbSchemaView } from './DbSchemaView';
 import { computeSessionKey } from '@/lib/session-keys';
-import { submitVerified } from '@/lib/submit-verified';
 
 /** Files with at least this many symbols get the L3 file atlas before code. */
 const FILE_ATLAS_MIN_SYMBOLS = 6;
@@ -66,7 +69,6 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
       return value;
     });
   }, [termStorageKey]);
-  const [termProvider, setTermProvider] = useState('claude');
   const [termWidth, setTermWidth] = useState<number>(() => {
     if (typeof window === 'undefined') return TERM_WIDTH_DEFAULT;
     try {
@@ -99,6 +101,8 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
   const [toast, setToast] = useState<string | null>(null);
   const stackRef = useRef<CodeModeScene[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
+  // Stretch (feature 079): active tour playback.
+  const [activeTour, setActiveTour] = useState<{ id: string; step: number } | null>(null);
 
   const sceneRef = useRef(scene);
   useEffect(() => { sceneRef.current = scene; }, [scene]);
@@ -163,6 +167,32 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
     const t = setInterval(fetchSnapshot, 15000);
     return () => clearInterval(t);
   }, [fetchSnapshot]);
+
+  // ---------- view-state (feature 079): digest anchor + area view counts ----------
+  const postViewState = useCallback((body: Record<string, string>) => {
+    return fetch('/api/atlas/view-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, ...body }),
+    }).catch(() => null);
+  }, [projectId]);
+
+  // Entering Code Mode seeds the digest anchor on the very first visit.
+  useEffect(() => {
+    postViewState({ action: 'enter' });
+  }, [postViewState]);
+
+  // Area visits feed the comprehension-debt ranking. Scene-driven so every
+  // entry path (map, breadcrumbs, digest links) counts.
+  useEffect(() => {
+    if (scene.kind === 'area') postViewState({ action: 'visit-area', areaId: scene.areaId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene.kind === 'area' ? scene.areaId : null]);
+
+  const ackDigest = useCallback(async (action: 'digest-read' | 'digest-dismiss') => {
+    await postViewState({ action });
+    fetchSnapshot();
+  }, [postViewState, fetchSnapshot]);
 
   // ---------- navigation ----------
   const pushScene = useCallback((next: CodeModeScene) => {
@@ -265,21 +295,109 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
     }
   }, [projectId, refreshBusy, flashToast, setTermOpen]);
 
-  const explainSelection = useCallback(async (path: string, startLine: number, endLine: number, code: string) => {
-    if (!projectPath) { flashToast('Explain needs a project path'); return; }
+  /** Deliver a prompt to the Atlas session in ANY state (created if missing,
+   *  resumed if stopped, verified-submitted if running) via /api/atlas/ask.
+   *  Never throws — failures surface as a toast. */
+  const askAtlas = useCallback(async (prompt: string, busyMsg?: string): Promise<boolean> => {
     setTermOpen(true);
-    const sessionName = `${computeSessionKey(projectPath)}:${termProvider}:atlas`;
+    if (busyMsg) flashToast(busyMsg);
+    try {
+      const res = await fetch('/api/atlas/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, prompt }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      return true;
+    } catch (e) {
+      flashToast(`Atlas unreachable: ${String((e as Error).message ?? e)}`);
+      return false;
+    }
+  }, [projectId, flashToast, setTermOpen]);
+
+  const explainSelection = useCallback(async (path: string, startLine: number, endLine: number, code: string) => {
     const prompt = [
       `Explain this selection from ${path}:${startLine}-${endLine} — what it does and where it fits:`,
       '```',
       code.length > 4000 ? code.slice(0, 4000) + '\n…(truncated)' : code,
       '```',
     ].join('\n');
-    const delivery = await submitVerified(sessionName, prompt);
-    if (!delivery || delivery.outcome !== 'delivered') {
-      flashToast('Could not reach the Atlas session — start it in the terminal panel first');
+    await askAtlas(prompt);
+  }, [askAtlas]);
+
+  // ---------- guided tours (feature 079): client-side playback ----------
+  const currentTour = activeTour ? snapshot?.tours?.find(t => t.tour.id === activeTour.id) : undefined;
+
+  const anchorStep = useCallback((step: TourStep) => {
+    if (step.line) {
+      openFile({
+        path: step.file,
+        line: step.line,
+        highlight: { line: step.line, endLine: step.endLine, note: step.title },
+      });
+    } else {
+      openFile({ path: step.file });
     }
-  }, [projectPath, termProvider, flashToast, setTermOpen]);
+  }, [openFile]);
+
+  const startTour = useCallback((tourId: string) => {
+    const entry = snapshot?.tours?.find(t => t.tour.id === tourId);
+    if (!entry) return;
+    setActiveTour({ id: tourId, step: 0 });
+    anchorStep(entry.tour.steps[0]);
+  }, [snapshot, anchorStep]);
+
+  const goTourStep = useCallback((index: number) => {
+    if (!currentTour) return;
+    const step = currentTour.tour.steps[index];
+    if (!step) return;
+    setActiveTour({ id: currentTour.tour.id, step: index });
+    anchorStep(step);
+  }, [currentTour, anchorStep]);
+
+  const askAboutStep = useCallback(async (step: TourStep, index: number) => {
+    if (!currentTour) return;
+    const prompt = [
+      `I'm on step ${index + 1} ("${step.title}") of the guided tour "${currentTour.tour.title}", anchored at ${step.file}${step.line ? `:${step.line}${step.endLine ? '-' + step.endLine : ''}` : ''}.`,
+      `The step explains: ${step.body.length > 1000 ? step.body.slice(0, 1000) + '…' : step.body}`,
+      'Please expand on this step — assume I can see the anchored code.',
+    ].join('\n\n');
+    await askAtlas(prompt);
+  }, [currentTour, askAtlas]);
+
+  /** ✦ Create tour: the "+ new tour" card's request goes to the Atlas
+   *  session, which researches the code and authors the artifact via
+   *  write-tour; the 15s snapshot poll surfaces it in the Tours tab. */
+  const createTour = useCallback(async (request: string) => {
+    const prompt = [
+      'Load the atlas skill if you haven\'t, then AUTHOR a new guided tour.',
+      `The user's request: "${request.slice(0, 600)}"`,
+      'Derive a slug id and a title, and set the tour\'s \'prompt\' field to the question it answers (from the request). Research the relevant code, verify every step\'s file and line anchor by reading the files, then write it via sly-atlas write-tour. Reply briefly when it\'s written — it appears in the Tours tab automatically.',
+    ].join('\n');
+    await askAtlas(prompt, 'Tour requested — the Atlas is researching it now');
+  }, [askAtlas]);
+
+  /** ⟳ Refresh tour: the Atlas re-answers the tour's prompt/title against the
+   *  CURRENT code and rewrites the artifact (same id). The tour's `prompt`
+   *  field is the regeneration anchor — not the possibly-drifted step bodies. */
+  const refreshTour = useCallback(async (tourId: string) => {
+    const entry = snapshot?.tours?.find(t => t.tour.id === tourId);
+    if (!entry) return;
+    const { tour } = entry;
+    const prompt = [
+      `Load the atlas skill if you haven't, then REFRESH the guided tour '${tour.id}'.`,
+      `Title: ${tour.title}`,
+      tour.prompt ? `It answers: ${tour.prompt}` : `Description: ${tour.description ?? '(none)'}`,
+      entry.stale
+        ? `Its source anchors have drifted (changed: ${entry.changedFiles.slice(0, 6).join(', ')}${entry.changedFiles.length > 6 ? ', …' : ''}).`
+        : 'The user asked for a rewrite even though it is not stale.',
+      `Re-answer that question against the CURRENT code: re-read the relevant files, verify every line anchor, and rewrite the tour via sly-atlas write-tour (same id '${tour.id}', keep the prompt field). If the subject no longer exists, delete-tour and say so.`,
+    ].join('\n');
+    await askAtlas(prompt, `Refreshing "${tour.title}" — watch the Atlas terminal`);
+  }, [snapshot, askAtlas]);
 
   // ---------- render ----------
   const atlasStats = snapshot?.exists && snapshot.root
@@ -321,7 +439,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
           {!railCollapsed && (
             <>
               <div className="flex border-b border-(--cm-line)">
-                {(['files', 'symbols', 'search', 'git'] as RailTab[]).map(tab => (
+                {(RAIL_TABS as readonly RailTab[]).map(tab => (
                   <button
                     key={tab}
                     onClick={() => setRailTab(tab)}
@@ -352,6 +470,12 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                     onShowDiff={path => pushScene({ kind: 'diff', path })}
                     onShowLog={path => pushScene({ kind: 'log', path })}
                     onOpenFile={openFile}
+                  />
+                )}
+                {railTab === 'db' && (
+                  <DbRail
+                    projectId={projectId}
+                    onOpenTable={table => pushScene({ kind: 'db', focusTable: table })}
                   />
                 )}
               </div>
@@ -427,11 +551,16 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                 selection={selection}
                 onEnterArea={areaId => { setSelection({ kind: 'area', areaId }); setMapDrawerExpanded(false); pushScene({ kind: 'area', areaId }); }}
                 onSelectArea={areaId => setSelection(areaId ? { kind: 'area', areaId } : { kind: 'overview' })}
-                onOpenFile={path => openFile({ path })}
+                onOpenFile={(path, line) => openFile({ path, line })}
                 onRunFirstScan={runRefresh}
                 firstScanBusy={refreshBusy}
                 drawerExpanded={mapDrawerExpanded}
                 onToggleDrawer={() => setMapDrawerExpanded(e => !e)}
+                tours={snapshot?.tours}
+                onStartTour={startTour}
+                onRefreshTour={refreshTour}
+                onCreateTour={createTour}
+                onAckDigest={ackDigest}
               />
             )}
             {scene.kind === 'area' && snapshot && (
@@ -444,6 +573,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                 onAreaChanged={fetchSnapshot}
                 onRunRefresh={runRefresh}
                 refreshBusy={refreshBusy}
+                onStartTour={startTour}
               />
             )}
             {scene.kind === 'file' && (
@@ -464,6 +594,20 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                 projectId={projectId}
                 path={scene.path}
                 onShowCommit={(hash, subject) => pushScene({ kind: 'commit', hash, subject })}
+              />
+            )}
+            {scene.kind === 'db' && <DbSchemaView projectId={projectId} focusTable={scene.focusTable} />}
+
+            {/* Tour player — floats over whatever scene the current step opened */}
+            {activeTour && currentTour && (
+              <TourPlayer
+                tour={currentTour.tour}
+                stale={currentTour.stale}
+                stepIndex={activeTour.step}
+                onStep={goTourStep}
+                onAsk={askAboutStep}
+                onRefresh={refreshTour}
+                onExit={() => setActiveTour(null)}
               />
             )}
 
@@ -553,7 +697,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
               projectName={projectName}
               projectPath={projectPath}
               onClose={() => setTermOpen(false)}
-              onProviderChange={setTermProvider}
+              onProviderChange={() => {}}
             />
           </div>
         )}
@@ -644,5 +788,7 @@ function buildCrumbs(
       return [home, { label: 'history', action: goLog }, { label: `${scene.hash.slice(0, 8)}${scene.subject ? ` ${scene.subject}` : ''}` }];
     case 'log':
       return [home, { label: 'history' }, ...(scene.path ? [{ label: scene.path }] : [])];
+    case 'db':
+      return [home, { label: 'db schema' }, ...(scene.focusTable ? [{ label: scene.focusTable }] : [])];
   }
 }

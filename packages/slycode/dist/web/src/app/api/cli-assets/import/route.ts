@@ -16,6 +16,7 @@ import {
   getAssetPath,
 } from '@/lib/asset-scanner';
 import { appendEvent } from '@/lib/event-log';
+import { validateAssetName } from '@/lib/asset-path-guard';
 import type { AssetType } from '@/lib/types';
 import fs from 'fs';
 
@@ -40,6 +41,11 @@ export async function POST(request: NextRequest) {
         { error: 'assetType must be skill, agent, or mcp' },
         { status: 400 },
       );
+    }
+
+    // mcp ignores assetName (fixed .mcp.json); skill/agent embed it in a path.
+    if (assetType !== 'mcp' && !validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
     }
 
     const registry = await loadRegistry();

@@ -41,6 +41,7 @@ const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const workspace_1 = require("./workspace");
 const sync_1 = require("./sync");
+const symlinks_1 = require("../platform/symlinks");
 const service_detect_1 = require("../platform/service-detect");
 function isPortInUse(port, host = '127.0.0.1') {
     return new Promise((resolve) => {
@@ -99,6 +100,10 @@ async function start(_args) {
         console.log(`  Refreshed ${updateResult.refreshed} skill update(s)`);
         console.log('');
     }
+    // Self-heal CLI links (quiet no-op when correct): `slycode update` runs the
+    // OLD package's linking code, so tools introduced by the new release (e.g.
+    // sly-atlas) only converge here, where the NEW code runs.
+    (0, symlinks_1.ensureClis)(workspace);
     // Check for newer version on npm (non-blocking, 3-second timeout)
     try {
         const latest = (0, child_process_1.execSync)('npm view @slycode/slycode version', {

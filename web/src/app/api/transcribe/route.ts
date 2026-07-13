@@ -17,7 +17,7 @@ let openaiClient: OpenAI | null = null;
 let transcribeClient: TranscribeClient | null = null;
 let s3Client: S3Client | null = null;
 let envLoaded = false;
-let envCache: Record<string, string> = {};
+const envCache: Record<string, string> = {};
 
 async function loadEnv(): Promise<Record<string, string>> {
   if (envLoaded) return envCache;

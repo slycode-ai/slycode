@@ -1,8 +1,8 @@
 ---
 name: atlas
-version: 1.3.0
-updated: 2026-07-03
-description: "Build and maintain the Codebase Atlas for Code Mode: propose areas, write schema-validated explanation nodes via sly-atlas, declare collections for bulk file families, run staleness-driven refreshes PLUS a coverage crawl that enriches the thinnest area every run, and drive the Code Mode view with navigate/highlight/deck directives"
+version: 1.4.3
+updated: 2026-07-13
+description: "Build and maintain the Codebase Atlas for Code Mode: propose areas, write schema-validated explanation nodes via sly-atlas, declare collections for bulk file families, run staleness-driven refreshes PLUS a coverage crawl that enriches the thinnest area every run, generate the catch-up digest, author guided tours, annotate database schemas, serve atlas context to agents, and drive the Code Mode view with navigate/highlight/deck directives"
 provider: claude
 ---
 
@@ -34,6 +34,11 @@ write leaves the atlas untouched — fix the payload and retry.
    member as if it were special (see Collections rule below).
 6. **Explanations serve a human overseer**, not a compiler: what the area IS,
    how it fits the whole, what its key files do — plain, specific prose.
+7. **Ground yourself before analyzing.** If the project ships a
+   context-priming skill (`.claude/skills/context-priming/`), load its area
+   references for the areas you're about to touch — unless that context is
+   already fresh in your session. It's the human-curated map; your analysis
+   must build on it, not contradict or rediscover it.
 
 ## Commands
 
@@ -46,6 +51,12 @@ sly-atlas write-node <areaId> --file <node.json> --merge  # ENRICH an area node 
 sly-atlas navigate <file[:line[-end]]> [--note "..."]
 sly-atlas highlight <file:line[-end]> --note "..."
 sly-atlas deck --file <deck.json>
+sly-atlas write-digest --file <digest.json>   # catch-up digest (Workflow B step 7)
+sly-atlas write-tour --file <tour.json>       # guided tour (Workflow D)
+sly-atlas delete-tour <id>
+sly-atlas db [--json]                         # deterministic DB introspection (read)
+sly-atlas write-db --file <db.json>           # DB annotations (Workflow E)
+sly-atlas context [--area <id>] [--files a,b] [--json] [--budget <chars>]  # agent context (Workflow F)
 ```
 
 `status` reports per-area **coverage** (described files / total files, plus the
@@ -132,6 +143,38 @@ Run from anywhere inside the project (root found via `documentation/kanban.json`
 6. End with `sly-atlas status` — confirm 0 stale and that coverage moved.
    Report a one-paragraph summary: what changed in the codebase since last
    refresh AND what you enriched.
+7. **Catch-up digest (every run, after everything else):** `status --json`
+   includes a `digest` block — `anchorCommit` (the commit the user last
+   acknowledged in Code Mode), `commitsSince`, and `perArea` commit counts.
+   - `current: true` (digest already covers anchor..HEAD), `commitsSince`
+     0, or `anchorCommit` null → skip, done.
+   - Otherwise read `git log --stat <anchorCommit>..HEAD`, then write the
+     digest — plain-English "what changed since you last looked", per area:
+
+```json
+{
+  "headline": "One line: the gist of everything since the user last looked (≤300 chars).",
+  "areas": [
+    { "area": "web", "summary": "2-4 sentences of plain prose: what actually changed and why it matters.", "commits": 12, "files_changed": 9 }
+  ],
+  "notable": [
+    { "file": "web/src/lib/atlas/store.ts", "line": 40, "note": "New view-state engine — worth a skim." }
+  ]
+}
+```
+
+   `sly-atlas write-digest --file digest.json` — the CLI stamps the anchor,
+   dates, and HEAD itself. Only include areas that actually changed; order by
+   importance. The digest REPLACES the previous one and always covers
+   anchor..HEAD — regenerating daily while the user is away is correct (the
+   anchor doesn't move until they press Mark read). Stay honest: describe
+   the commits that exist, never pad. `stale tours` from `status --json`
+   should be refreshed in the same run (Workflow D).
+
+8. **Stale tours:** `status --json` lists tours with `stale: true` and which
+   files changed. Re-read those step anchors; if the code moved, rewrite the
+   tour (same id) with corrected lines/bodies via `write-tour`. If the tour's
+   subject no longer exists, `delete-tour <id>`.
 
 ## Collections rule
 
@@ -164,6 +207,11 @@ family shows as a room on the map. Never list one member of a large family as
 if it were the only one — that reads as arbitrary and wrong. Declare the
 family, or for pure noise declare it with a "no analysis needed" summary.
 
+**Overlapping area paths are fine** (e.g. one area's path subsumes part of
+another's). When files under your area actually belong to another area's
+story, declare a POINTER collection for that prefix ("owned by <area> — see
+its node") so coverage stays honest without duplicating analysis.
+
 ## Workflow C — driving the view (ask-the-codebase sessions)
 
 You may run in the **Atlas terminal**, side-by-side with the code panel.
@@ -190,6 +238,77 @@ These are one-shot directives: the UI renders them and the user clicks from
 there (breadcrumb ← always returns them). Use real line numbers you verified
 by reading the file — a wrong line number is worse than none. Keep decks ≤30
 items and put the most relevant first.
+
+## Workflow D — guided tours
+
+Tours are step-through walkthroughs the UI plays back fully client-side.
+Author one when the user asks ("give me a tour of the messaging pipeline"),
+or refresh stale ones during the nightly run (Workflow B step 8).
+
+```json
+{
+  "id": "messaging-pipeline",
+  "title": "How a Telegram message becomes a terminal prompt",
+  "prompt": "Explain how an inbound Telegram message ends up as a prompt in a card's terminal session.",
+  "description": "Follow one inbound message end to end.",
+  "area": "messaging",
+  "steps": [
+    { "file": "messaging/src/index.ts", "line": 42, "endLine": 80,
+      "title": "The webhook entry", "body": "1-3 short paragraphs explaining THIS anchor. The user sees the code next to it — explain, don't quote." }
+  ]
+}
+```
+
+`sly-atlas write-tour --file tour.json` — id is the filename slug; 2-30
+steps; every step file must exist (verified line numbers — read the file
+first; a wrong anchor is worse than none). Source hashes are stamped so the
+tour goes stale exactly like a node when its files change. Good tours follow
+one thread (a request's path, a subsystem's lifecycle) rather than listing
+files. Mid-tour user questions arrive in the Atlas terminal automatically —
+answer them with the step context in mind.
+
+**The `prompt` field is the tour's lifecycle anchor.** It records the QUESTION
+the tour answers, independent of any specific lines of code. Always set it
+when authoring (derive one from the user's request). When a tour goes stale
+or the user hits its ⟳ Refresh button (the request arrives in the Atlas
+terminal), regenerate by **re-answering the prompt against the current code**
+— re-read the relevant files, find the best anchors NOW, and `write-tour`
+with the same id and the same prompt. Never just bump line numbers to silence
+staleness: if the code changed enough that the old steps mislead, restructure
+the steps. If the subject no longer exists, `delete-tour` and tell the user
+why. Step bodies are disposable; the prompt is not.
+
+## Workflow E — DB schema annotations
+
+`sly-atlas status` reports detected database sources (SQLite files,
+schema.prisma, CREATE TABLE .sql). When sources exist and annotations are
+missing or the schema changed:
+
+1. `sly-atlas db --json` — the deterministic introspection (tables, columns,
+   pks, fks). This is exactly what the UI renders; you annotate MEANING.
+2. Write annotations — what tables represent, what non-obvious columns mean,
+   the relationships that matter:
+
+```json
+{
+  "summary": "1-2 paragraphs: what this database is for, how the pieces relate.",
+  "tables": { "users": { "summary": "One row per account.", "columns": { "anchor_commit": "last acknowledged git HEAD" } } },
+  "relations": [ { "from": "orders", "to": "users", "label": "buyer" } ]
+}
+```
+
+`sly-atlas write-db --file db.json`. Annotate what needs explaining, not
+every column — obvious columns (id, created_at) earn nothing.
+
+## Workflow F — atlas as agent context
+
+`sly-atlas context` assembles a deterministic, token-bounded brief from the
+atlas for OTHER agents (and yourself): project overview + areas
+(`--area <id>` for one area's explanation/key files/symbols; `--files a,b`
+for per-file context; `--json` for machine shape; `--budget <chars>`,
+default 6000). Point agents at it instead of pasting atlas JSON — it reads
+the same artifacts the UI renders, so it is always current. It complements
+context-priming (curated notes); the atlas brief is the generated map.
 
 ## Failure handling
 

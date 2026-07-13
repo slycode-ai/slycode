@@ -3,7 +3,7 @@ import { loadRegistry, saveRegistry } from '@/lib/registry';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import { getSlycodeRoot, getPackageDir, expandTilde } from '@/lib/paths';
+import { getPackageDir, expandTilde } from '@/lib/paths';
 import { ensureProjectSessionKey } from '@/lib/session-keys';
 import type { Project } from '@/lib/types';
 

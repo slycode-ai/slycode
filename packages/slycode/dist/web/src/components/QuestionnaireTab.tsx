@@ -131,7 +131,7 @@ export function QuestionnaireTab({
         .then(async (res) => {
           if (res.status === 409) {
             // Schema mismatch — re-fetch
-            const data = await res.json().catch(() => ({}));
+            await res.json().catch(() => ({}));
             setSaveError('Schema changed — reloading');
             setTimeout(() => {
               setQuestionnaire(null);

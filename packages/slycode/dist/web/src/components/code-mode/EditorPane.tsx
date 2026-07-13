@@ -51,6 +51,8 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
   const [aiNote, setAiNote] = useState<string | null>(null);
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<MonacoEditorNS.IEditorDecorationsCollection | null>(null);
+  // Bumped in onMount so the reveal effect re-runs once the editor exists.
+  const [mountTick, setMountTick] = useState(0);
   const activePath = active?.path ?? openFiles[openFiles.length - 1];
 
   // Voice-into-the-file: the editor registers as a pseudo-terminal so the
@@ -112,29 +114,62 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
   }, [openFiles, projectId]);
 
   // Reveal requested line + apply AI highlight when the target carries them.
+  //
+  // FIRST-OPEN RACE (test-review fix, feature 079): on the first open of a
+  // file the editor may not be mounted yet, the model may still belong to the
+  // previous file, and the content may still be the '' loading placeholder —
+  // revealing line N of a 1-line model silently no-ops and the decoration
+  // clamps to line 1. That's why jumps/highlights only worked once a file had
+  // been opened before (back-then-forward). This effect therefore ALSO
+  // re-runs when the editor mounts (mountTick) and when the file's content
+  // lands (activeFileState identity), and it verifies the right model with
+  // real content is attached (rAF retry — model switches are async in
+  // @monaco-editor/react) before revealing.
+  const activeFileState = active ? files[active.path] : undefined;
   useEffect(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const line = active?.line ?? active?.highlight?.line;
-    if (line) {
-      ed.revealLineInCenter(line);
-      ed.setPosition({ lineNumber: line, column: 1 });
-      ed.focus();
-    }
     decorationsRef.current?.clear();
     setAiNote(null);
-    const hl = active?.highlight;
-    if (hl) {
-      const end = hl.endLine ?? hl.line;
-      decorationsRef.current = ed.createDecorationsCollection([
-        {
-          range: { startLineNumber: hl.line, startColumn: 1, endLineNumber: end, endColumn: 1 },
-          options: { isWholeLine: true, className: 'cm-ai-highlight', linesDecorationsClassName: 'cm-ai-highlight-gutter' },
-        },
-      ]);
-      if (hl.note) setAiNote(hl.note);
-    }
-  }, [active]);
+    const ed = editorRef.current;
+    if (!ed || !active) return;
+    const line = active.line ?? active.highlight?.line;
+    const hl = active.highlight;
+    if (!line && !hl) return;
+    const st = activeFileState;
+    const stillLoading = !st || (st.content === '' && st.mtimeMs === 0 && !st.error);
+    if (stillLoading) return; // content fetch will update activeFileState and re-run us
+    let cancelled = false;
+    let tries = 0;
+    const apply = () => {
+      if (cancelled) return;
+      const model = ed.getModel();
+      const modelPath = model ? decodeURIComponent(model.uri.path).replace(/^\//, '') : '';
+      const modelReady = model && modelPath === active.path && (model.getValueLength() > 0 || st.content === '');
+      if (!modelReady && tries++ < 30) {
+        requestAnimationFrame(apply);
+        return;
+      }
+      const lineCount = model?.getLineCount() ?? 1;
+      if (line) {
+        const target = Math.min(line, lineCount);
+        ed.revealLineInCenter(target);
+        ed.setPosition({ lineNumber: target, column: 1 });
+        ed.focus();
+      }
+      if (hl) {
+        const start = Math.min(hl.line, lineCount);
+        const end = Math.min(hl.endLine ?? hl.line, lineCount);
+        decorationsRef.current = ed.createDecorationsCollection([
+          {
+            range: { startLineNumber: start, startColumn: 1, endLineNumber: end, endColumn: 1 },
+            options: { isWholeLine: true, className: 'cm-ai-highlight', linesDecorationsClassName: 'cm-ai-highlight-gutter' },
+          },
+        ]);
+        if (hl.note) setAiNote(hl.note);
+      }
+    };
+    apply();
+    return () => { cancelled = true; };
+  }, [active, activeFileState, mountTick]);
 
   const save = useCallback(async (path: string) => {
     const model = editorRef.current?.getModel();
@@ -185,6 +220,28 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
     }
   }, [activePath, blameOn, projectId]);
 
+  // Explain works from ANY cursor position: the selection when there is one,
+  // otherwise the word under the cursor with its line as context, otherwise
+  // just the line. Kept in a ref so the once-only Monaco context-menu action
+  // (registered in onMount) always calls the current version.
+  const triggerExplain = useCallback(() => {
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model || !onExplain || !activePath) return;
+    const sel = ed.getSelection();
+    if (sel && !sel.isEmpty()) {
+      onExplain(activePath, sel.startLineNumber, sel.endLineNumber, model.getValueInRange(sel));
+      return;
+    }
+    const pos = ed.getPosition();
+    if (!pos) return;
+    const word = model.getWordAtPosition(pos);
+    const line = model.getLineContent(pos.lineNumber);
+    onExplain(activePath, pos.lineNumber, pos.lineNumber, word ? `${line}\n// ← explain \`${word.word}\` here` : line);
+  }, [onExplain, activePath]);
+  const triggerExplainRef = useRef(triggerExplain);
+  useEffect(() => { triggerExplainRef.current = triggerExplain; }, [triggerExplain]);
+
   const current = activePath ? files[activePath] : undefined;
   const blameForLine = useMemo(() => {
     if (!blameOn || !blame || blame.path !== activePath) return null;
@@ -195,8 +252,10 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
 
   return (
     <div className="flex h-full flex-col bg-(--cm-code-bg)">
-      {/* Tabs */}
-      <div className="flex items-center overflow-x-auto border-b border-(--cm-line) bg-(--cm-panel)">
+      {/* Tabs — the tab strip scrolls in its own container so the controls
+          (Explain/Blame/Save) stay pinned and visible with many tabs open. */}
+      <div className="flex items-center border-b border-(--cm-line) bg-(--cm-panel)">
+        <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
         {openFiles.map(path => {
           const st = files[path];
           const isActive = path === activePath;
@@ -229,21 +288,16 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
             </span>
           );
         })}
+        </div>
         <span className="ml-auto flex shrink-0 items-center gap-1.5 px-2">
           {notice && <span className="font-mono text-[10.5px] text-(--cm-atlas)">{notice}</span>}
-          {hasSelection && onExplain && (
+          {onExplain && (
             <button
-              onClick={() => {
-                const ed = editorRef.current;
-                const sel = ed?.getSelection();
-                const model = ed?.getModel();
-                if (!ed || !sel || !model || sel.isEmpty()) return;
-                onExplain(activePath, sel.startLineNumber, sel.endLineNumber, model.getValueInRange(sel));
-              }}
+              onClick={triggerExplain}
               className="rounded-full border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] text-(--cm-atlas) hover:brightness-110"
-              title="Explain the selected code in the Atlas terminal"
+              title={hasSelection ? 'Explain the selected code in the Atlas terminal' : 'Explain the word/line at the cursor in the Atlas terminal'}
             >
-              ✦ Explain selection
+              {hasSelection ? '✦ Explain selection' : '✦ Explain'}
             </button>
           )}
           <button
@@ -288,15 +342,21 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
               editorRef.current = editor;
               editor.onDidChangeCursorPosition(e => setCursorLine(e.position.lineNumber));
               editor.onDidChangeCursorSelection(e => setHasSelection(!e.selection.isEmpty()));
+              editor.addAction({
+                id: 'slycode.explainWithAtlas',
+                label: '✦ Explain with Atlas',
+                contextMenuGroupId: 'navigation',
+                contextMenuOrder: 0,
+                run: () => triggerExplainRef.current(),
+              });
               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                 const uri = editor.getModel()?.uri.toString() ?? '';
                 const path = uri.split(`slycode://${projectId}/`)[1];
                 if (path) save(decodeURIComponent(path).replace(/^\//, ''));
               });
-              if (active?.line) {
-                editor.revealLineInCenter(active.line);
-                editor.setPosition({ lineNumber: active.line, column: 1 });
-              }
+              // Reveal/highlight is handled by the mount-and-load-aware effect
+              // (mountTick re-runs it now that the editor exists).
+              setMountTick(t => t + 1);
             }}
             onChange={value => {
               if (value === undefined) return;

@@ -33,12 +33,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.CLI_TOOLS = void 0;
 exports.linkClis = linkClis;
+exports.ensureClis = ensureClis;
 exports.unlinkClis = unlinkClis;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
-const CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
+exports.CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
 function getTargetBinDir() {
     if (process.platform === 'win32') {
         // Windows: use a directory in LOCALAPPDATA
@@ -72,7 +74,7 @@ function linkClis(workspace) {
     console.log(`Linking CLI tools to ${binDir}...`);
     if (process.platform === 'win32') {
         // Windows: create .cmd shim files
-        for (const tool of CLI_TOOLS) {
+        for (const tool of exports.CLI_TOOLS) {
             const target = resolvePackageBin(workspace, tool);
             const shimPath = path.join(binDir, `${tool}.cmd`);
             const content = `@echo off\r\n"${process.execPath}" "${target}" %*\r\n`;
@@ -92,7 +94,7 @@ function linkClis(workspace) {
     }
     else {
         // Unix: create symlinks
-        for (const tool of CLI_TOOLS) {
+        for (const tool of exports.CLI_TOOLS) {
             const target = resolvePackageBin(workspace, tool);
             const linkPath = path.join(binDir, tool);
             // Remove existing symlink or file
@@ -127,12 +129,74 @@ function linkClis(workspace) {
     console.log('CLI tools linked.');
 }
 /**
+ * Quiet, idempotent self-heal of the CLI links — run on `slycode start`.
+ *
+ * Why this exists: `slycode update` re-links, but the update command RUNS the
+ * OLD package's code (loaded before npm swaps it), so a CLI tool introduced in
+ * the new release isn't in the old CLI_TOOLS list and never gets linked (this
+ * is exactly how sly-atlas ended up missing on upgraded installs). start runs
+ * the NEW code, so healing here converges after any update path — including a
+ * plain `npm install` that bypasses linkClis entirely. Silent when everything
+ * is already correct; never throws.
+ */
+function ensureClis(workspace) {
+    try {
+        const binDir = getTargetBinDir();
+        if (!fs.existsSync(binDir))
+            fs.mkdirSync(binDir, { recursive: true });
+        for (const tool of exports.CLI_TOOLS) {
+            const target = resolvePackageBin(workspace, tool);
+            if (!fs.existsSync(target))
+                continue; // tool not shipped in this install
+            if (process.platform === 'win32') {
+                const shimPath = path.join(binDir, `${tool}.cmd`);
+                const content = `@echo off\r\n"${process.execPath}" "${target}" %*\r\n`;
+                let current = null;
+                try {
+                    current = fs.readFileSync(shimPath, 'utf-8');
+                }
+                catch { /* missing */ }
+                if (current !== content) {
+                    fs.writeFileSync(shimPath, content);
+                    console.log(`  ✓ Linked CLI tool: ${tool}`);
+                }
+            }
+            else {
+                const linkPath = path.join(binDir, tool);
+                let currentTarget = null;
+                try {
+                    currentTarget = fs.readlinkSync(linkPath);
+                }
+                catch { /* missing or not a symlink */ }
+                if (currentTarget === target)
+                    continue;
+                try {
+                    try {
+                        fs.unlinkSync(linkPath);
+                    }
+                    catch { /* didn't exist */ }
+                    fs.symlinkSync(target, linkPath);
+                    try {
+                        fs.chmodSync(target, 0o755);
+                    }
+                    catch { /* node_modules perms */ }
+                    console.log(`  ✓ Linked CLI tool: ${tool}`);
+                }
+                catch { /* best effort — a broken link heals on the next run */ }
+            }
+        }
+    }
+    catch {
+        // Self-heal must never block start.
+    }
+}
+/**
  * Remove global CLI symlinks/shims.
  */
 function unlinkClis() {
     const binDir = getTargetBinDir();
     console.log('Removing CLI tool links...');
-    for (const tool of CLI_TOOLS) {
+    for (const tool of exports.CLI_TOOLS) {
         if (process.platform === 'win32') {
             const shimPath = path.join(binDir, `${tool}.cmd`);
             if (fs.existsSync(shimPath)) {

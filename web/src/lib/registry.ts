@@ -20,10 +20,7 @@ import type {
 } from './types';
 import {
   scanProjectAssets,
-  scanMasterAssets,
-  buildAssetMatrix,
   detectPlatforms,
-  countOutdatedAssets,
   buildStoreAssetMatrix,
   scanProviderAssets,
 } from './asset-scanner';

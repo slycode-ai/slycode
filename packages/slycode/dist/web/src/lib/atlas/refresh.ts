@@ -41,13 +41,9 @@ export async function writeAtlasConfig(projectRoot: string, config: AtlasConfig)
   await fs.rename(tmp, file);
 }
 
-export async function kickoffAtlasRefresh(
-  projectId: string,
-  projectRoot: string,
-  trigger: 'manual' | 'scheduled',
-): Promise<{ ok: true; sessionName: string } | { ok: false; error: string }> {
-  // Resolve provider + model: atlas config override → global default
-  // (feature 073, INCLUDING its model) → provider CLI default.
+/** Resolve the Atlas session identity + provider/model/permissions:
+ *  atlas config override → global default (feature 073) → provider default. */
+async function resolveAtlasSession(projectId: string, projectRoot: string) {
   const config = await readAtlasConfig(projectRoot);
   let provider = config.provider ?? null;
   let model: string | undefined = config.model ?? undefined;
@@ -71,24 +67,22 @@ export async function kickoffAtlasRefresh(
   const registry = await loadRegistry();
   const regProject = registry.projects.find(p => p.id === projectId);
   const sessionKey = regProject?.sessionKey ?? computeSessionKey(projectRoot);
-  const sessionName = `${sessionKey}:${provider}:atlas`;
+  return { config, provider, model, skipPermissions, sessionName: `${sessionKey}:${provider}:atlas` };
+}
 
-  const hasAtlas = await fs.access(atlasPath(projectRoot, 'atlas.json')).then(() => true, () => false);
-  // Timestamp in the injected prompt (server-local time, [DD-MM-YYYY HH:mm:ss]
-  // like the sly-actions convention) so terminal scrollback shows at a glance
-  // WHICH run this was — e.g. "last night's 3am" vs a manual click.
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const stamp = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  const prompt = [
-    `=== ATLAS REFRESH · ${trigger === 'scheduled' ? 'SCHEDULED (nightly)' : 'MANUAL'} · [${stamp}] ===`,
-    `Load the atlas skill now (read .claude/skills/atlas/SKILL.md — or the store copy at store/skills/atlas/SKILL.md in the SlyCode master repo) and follow it exactly.`,
-    hasAtlas
-      ? `An atlas exists. Run the incremental refresh: \`sly-atlas status --json\` to list stale areas, re-analyze ONLY those, and write each updated node via \`sly-atlas write-node\`.`
-      : `No atlas exists yet. Run the FIRST SCAN: explore the codebase, propose 4-8 top-level areas via \`sly-atlas propose-areas\`, then write a node for each area via \`sly-atlas write-node\`.`,
-    `All writes are schema-validated by the CLI — on rejection, fix the JSON and retry. Do not edit documentation/atlas/ files directly.`,
-  ].join('\n');
-
+/**
+ * Deliver a prompt to the project's Atlas session in ANY state — the bridge
+ * create endpoint creates a missing session, resumes a stopped one, and
+ * routes the prompt into a running/detached one via verified submit. Shared
+ * by the refresh kickoff and /api/atlas/ask (tour create/refresh, ask-step,
+ * explain — the flows that previously failed when no session was live).
+ */
+export async function deliverAtlasPrompt(
+  projectId: string,
+  projectRoot: string,
+  prompt: string,
+): Promise<{ ok: true; sessionName: string } | { ok: false; error: string }> {
+  const { provider, model, skipPermissions, sessionName } = await resolveAtlasSession(projectId, projectRoot);
   try {
     const res = await fetch(`${getBridgeUrl()}/sessions`, {
       method: 'POST',
@@ -113,10 +107,39 @@ export async function kickoffAtlasRefresh(
     if (data.delivery && data.delivery.outcome !== 'delivered') {
       return { ok: false, error: `delivery ${data.delivery.outcome}: ${data.delivery.reason ?? 'unknown'}` };
     }
-    config.last_run = new Date().toISOString();
-    await writeAtlasConfig(projectRoot, config);
     return { ok: true, sessionName };
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) };
   }
+}
+
+export async function kickoffAtlasRefresh(
+  projectId: string,
+  projectRoot: string,
+  trigger: 'manual' | 'scheduled',
+): Promise<{ ok: true; sessionName: string } | { ok: false; error: string }> {
+  const hasAtlas = await fs.access(atlasPath(projectRoot, 'atlas.json')).then(() => true, () => false);
+  // Timestamp in the injected prompt (server-local time, [DD-MM-YYYY HH:mm:ss]
+  // like the sly-actions convention) so terminal scrollback shows at a glance
+  // WHICH run this was — e.g. "last night's 3am" vs a manual click.
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const prompt = [
+    `=== ATLAS REFRESH · ${trigger === 'scheduled' ? 'SCHEDULED (nightly)' : 'MANUAL'} · [${stamp}] ===`,
+    `Load the atlas skill now (read .claude/skills/atlas/SKILL.md — or the store copy at store/skills/atlas/SKILL.md in the SlyCode master repo) and follow it exactly.`,
+    `Ground yourself first: if the project ships a context-priming skill (.claude/skills/context-priming/), load its area references for the areas you'll analyze — unless you already have that context fresh in this session. Curated context beats rediscovery; the atlas must not contradict it.`,
+    hasAtlas
+      ? `An atlas exists. Run the incremental refresh: \`sly-atlas status --json\` to list stale areas, re-analyze ONLY those, and write each updated node via \`sly-atlas write-node\`.`
+      : `No atlas exists yet. Run the FIRST SCAN: explore the codebase, propose 4-8 top-level areas via \`sly-atlas propose-areas\`, then write a node for each area via \`sly-atlas write-node\`.`,
+    `All writes are schema-validated by the CLI — on rejection, fix the JSON and retry. Do not edit documentation/atlas/ files directly.`,
+  ].join('\n');
+
+  const result = await deliverAtlasPrompt(projectId, projectRoot, prompt);
+  if (result.ok) {
+    const config = await readAtlasConfig(projectRoot);
+    config.last_run = new Date().toISOString();
+    await writeAtlasConfig(projectRoot, config);
+  }
+  return result;
 }

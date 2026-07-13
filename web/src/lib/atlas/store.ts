@@ -15,7 +15,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
   AtlasRoot, AtlasNode, AtlasConfig, NavEvent,
-  validateAtlasRoot, validateAtlasNode,
+  AtlasDigest, AtlasTour, AtlasViewState,
+  validateAtlasRoot, validateAtlasNode, validateDigest, validateTour,
 } from './schema';
 import { containedPath } from './fs-utils';
 import { gitChurn } from './git';
@@ -51,6 +52,21 @@ export interface AreaFreshness {
   churn: number; // commits touching the area's paths in the churn window
 }
 
+export interface TourWithFreshness {
+  tour: AtlasTour;
+  stale: boolean;
+  changedFiles: string[];
+}
+
+/** Per-area comprehension debt (feature 079): digest-scoped churn weighted by
+ *  how rarely the user has viewed the area. Deterministic; the UI badges it. */
+export interface AreaDebt {
+  areaId: string;
+  commits: number;   // from the digest entry (anchor..HEAD, agent-reported)
+  views: number;     // from view-state
+  score: number;     // commits / (1 + views)
+}
+
 export interface AtlasSnapshot {
   exists: boolean;
   root?: AtlasRoot;
@@ -59,6 +75,11 @@ export interface AtlasSnapshot {
   nodeErrors: Record<string, string[]>;
   freshness: Record<string, AreaFreshness>;
   config?: AtlasConfig | null;
+  // Stretch artifacts (feature 079)
+  digest?: AtlasDigest | null;
+  viewState?: AtlasViewState | null;
+  tours?: TourWithFreshness[];
+  debt?: AreaDebt[];
 }
 
 /** Load everything the Code Mode UI needs in one pass. */
@@ -107,7 +128,100 @@ export async function loadAtlasSnapshot(projectRoot: string): Promise<AtlasSnaps
     }
     snapshot.freshness[area.id] = fresh;
   }
+
+  // ---- Stretch artifacts (feature 079) ----
+  const digestDoc = await readJson<AtlasDigest>(atlasPath(projectRoot, 'digest.json'));
+  snapshot.digest = digestDoc && validateDigest(digestDoc, areaIds).length === 0 ? digestDoc : null;
+  snapshot.viewState = (await readJson<AtlasViewState>(atlasPath(projectRoot, 'view-state.json'))) ?? null;
+  snapshot.tours = await loadTours(projectRoot);
+  snapshot.debt = computeDebt(snapshot.digest, snapshot.viewState);
+
   return snapshot;
+}
+
+/** Load tour artifacts with per-tour staleness (source hash checks). */
+async function loadTours(projectRoot: string): Promise<TourWithFreshness[]> {
+  let entries: string[] = [];
+  try {
+    entries = (await fs.readdir(atlasPath(projectRoot, 'tours'))).filter(f => f.endsWith('.json')).sort();
+  } catch {
+    return [];
+  }
+  const tours: TourWithFreshness[] = [];
+  for (const file of entries) {
+    const doc = await readJson<AtlasTour>(atlasPath(projectRoot, 'tours', file));
+    if (!doc || validateTour(doc).length > 0) continue; // invalid — skip quietly (CLI is the write guard)
+    const { changed } = await checkSourceHashes(projectRoot, doc.source_hashes ?? {});
+    tours.push({ tour: doc, stale: changed.length > 0, changedFiles: changed });
+  }
+  return tours;
+}
+
+/** Comprehension debt: digest-scoped commit counts weighted against how often
+ *  the user has actually looked at each area. Exported for unit tests. */
+export function computeDebt(digest: AtlasDigest | null | undefined, viewState: AtlasViewState | null | undefined): AreaDebt[] {
+  if (!digest) return [];
+  const views = viewState?.area_views ?? {};
+  return digest.areas
+    .map(a => {
+      const commits = a.commits ?? 0;
+      const v = views[a.area] ?? 0;
+      return { areaId: a.area, commits, views: v, score: commits / (1 + v) };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+// ---------------------------------------------------------------------------
+// View state (feature 079) — the UI-owned deterministic side of the digest:
+// which commit the user last acknowledged + how often each area gets viewed.
+// ---------------------------------------------------------------------------
+
+async function gitHead(projectRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot, windowsHide: true, timeout: 10000,
+    });
+    const head = stdout.trim();
+    return /^[0-9a-f]{4,40}$/.test(head) ? head : null;
+  } catch {
+    return null;
+  }
+}
+
+export type ViewStateAction =
+  | { action: 'enter' }                         // Code Mode opened — seed anchor if missing
+  | { action: 'visit-area'; areaId: string }    // area scene viewed
+  | { action: 'digest-read' }                   // Mark read — advance anchor to digest head
+  | { action: 'digest-dismiss' };               // hide banner without advancing the anchor
+
+export async function updateViewState(
+  projectRoot: string,
+  act: ViewStateAction,
+): Promise<AtlasViewState> {
+  const file = atlasPath(projectRoot, 'view-state.json');
+  const state: AtlasViewState = (await readJson<AtlasViewState>(file)) ?? {};
+  state.last_visit = new Date().toISOString();
+  if (act.action === 'enter') {
+    if (!state.anchor_commit) {
+      const head = await gitHead(projectRoot);
+      if (head) state.anchor_commit = head;
+    }
+  } else if (act.action === 'visit-area') {
+    const views = state.area_views ?? {};
+    views[act.areaId] = (views[act.areaId] ?? 0) + 1;
+    state.area_views = views;
+  } else if (act.action === 'digest-read') {
+    const digest = await readJson<AtlasDigest>(atlasPath(projectRoot, 'digest.json'));
+    if (digest?.head_commit) state.anchor_commit = digest.head_commit;
+    state.digest_seen = new Date().toISOString();
+  } else if (act.action === 'digest-dismiss') {
+    state.digest_seen = new Date().toISOString();
+  }
+  await fs.mkdir(atlasPath(projectRoot), { recursive: true });
+  const tmp = file + `.tmp-${process.pid}`;
+  await fs.writeFile(tmp, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+  await fs.rename(tmp, file);
+  return state;
 }
 
 // Churn (14-day git log) is the slow part of the snapshot and the UI polls

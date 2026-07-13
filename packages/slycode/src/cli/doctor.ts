@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import { execSync } from 'child_process';
 import { resolveWorkspace, resolveConfig, getStateDir } from './workspace';
+import { CLI_TOOLS } from '../platform/symlinks';
 
 type CheckResult = 'ok' | 'warn' | 'fail';
 
@@ -169,14 +170,15 @@ export async function doctor(_args: string[]): Promise<void> {
     }
   }
 
-  // 6. Global CLIs
-  const cliTools = ['sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
+  // 6. Global CLIs — canonical list from symlinks.ts so new tools can't drift
+  // out of this check ('slycode' itself excluded: doctor running proves it).
+  const cliTools = CLI_TOOLS.filter(t => t !== 'slycode');
   for (const tool of cliTools) {
     try {
       execSync(`command -v ${tool}`, { stdio: 'pipe', windowsHide: true });
       checks.push({ name: tool, result: 'ok', message: 'Found in PATH' });
     } catch {
-      checks.push({ name: tool, result: 'warn', message: 'Not in PATH (run: slycode service install)' });
+      checks.push({ name: tool, result: 'warn', message: 'Not in PATH (run: slycode start — it self-heals CLI links)' });
     }
   }
 

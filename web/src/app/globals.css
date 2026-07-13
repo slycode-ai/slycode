@@ -895,6 +895,19 @@ body {
   border-left: 3px solid var(--cm-atlas);
 }
 
+/* Code Mode — DB schema table focus flash (feature 079): FK chip / relations
+   strip click scrolls to the referenced table card and flashes it once. */
+.code-mode .db-flash {
+  animation: db-table-flash 1.6s ease-out 1;
+}
+@keyframes db-table-flash {
+  0% { box-shadow: inset 3px 0 0 var(--cm-atlas), 0 0 0 2px var(--cm-atlas), 0 0 26px -4px var(--cm-atlas); }
+  100% { box-shadow: inset 3px 0 0 var(--cm-atlas); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-mode .db-flash { animation: none; box-shadow: inset 3px 0 0 var(--cm-atlas), 0 0 0 2px var(--cm-atlas); }
+}
+
 /* Code Mode — Board toggle glow while board-side sessions are busy (feature 076) */
 .active-glow-board-btn {
   animation: neon-pulse-board-btn 2s ease-in-out infinite;

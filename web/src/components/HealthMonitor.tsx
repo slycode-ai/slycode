@@ -101,12 +101,13 @@ function ExpandedBar({ value, label, detail }: ExpandedBarProps) {
 interface StopAllModalProps {
   isOpen: boolean;
   terminalCount: number;
+  nonResumableCount: number;
   onConfirm: () => void;
   onCancel: () => void;
   isLoading: boolean;
 }
 
-function StopAllModal({ isOpen, terminalCount, onConfirm, onCancel, isLoading }: StopAllModalProps) {
+function StopAllModal({ isOpen, terminalCount, nonResumableCount, onConfirm, onCancel, isLoading }: StopAllModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -119,6 +120,12 @@ function StopAllModal({ isOpen, terminalCount, onConfirm, onCancel, isLoading }:
           This will stop all {terminalCount} running terminal{terminalCount !== 1 ? 's' : ''}.
           Any active sessions will be terminated.
         </p>
+        {nonResumableCount > 0 && (
+          <p className="mb-4 rounded-md border border-amber-700/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+            {nonResumableCount} session{nonResumableCount !== 1 ? 's have' : ' has'} no captured
+            conversation id and won&apos;t be resumable after stopping.
+          </p>
+        )}
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
@@ -146,6 +153,28 @@ export function HealthMonitor() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showStopModal, setShowStopModal] = useState(false);
   const [isStoppingAll, setIsStoppingAll] = useState(false);
+  const [nonResumableCount, setNonResumableCount] = useState(0);
+
+  // When the Stop All confirm opens, count live sessions with no captured
+  // conversation id — they stop as non-resumable and deserve a warning (080)
+  useEffect(() => {
+    if (!showStopModal) {
+      setNonResumableCount(0);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/bridge/sessions')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (cancelled || !data?.sessions) return;
+        const count = (data.sessions as Array<{ status?: string; hasHistory?: boolean }>).filter(
+          s => (s.status === 'running' || s.status === 'detached') && !s.hasHistory
+        ).length;
+        setNonResumableCount(count);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [showStopModal]);
   const [bridgeError, setBridgeError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -371,6 +400,7 @@ export function HealthMonitor() {
       <StopAllModal
         isOpen={showStopModal}
         terminalCount={bridgeTerminals}
+        nonResumableCount={nonResumableCount}
         onConfirm={handleStopAll}
         onCancel={() => setShowStopModal(false)}
         isLoading={isStoppingAll}

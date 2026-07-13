@@ -9,7 +9,6 @@ import { NextResponse } from 'next/server';
 import {
   getActionsConfig,
   writeActionsFromConfig,
-  invalidateActionsCache,
 } from '@/lib/action-scanner';
 
 export async function GET() {

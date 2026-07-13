@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-13
+
+### Added
+- Codebase Atlas catch-up digest — a nightly summary of what changed in each area, surfaced as a drawer tab with debt-ordered items and mark-read tracking. New unseen items pulse a dot on the tab.
+- Guided tours in Code Mode — docked step player with segmented progress, keyboard paging, a stale banner when the code has drifted, an ask-the-Atlas escalation, and a "+ new tour" card users can author from the UI.
+- Tour Refresh — one-click regeneration of a tour against the current code, with an optional prompt anchor field that lets tour steps trigger a session prompt when opened.
+- Database schema introspection in Code Mode — table cards with foreign-key chips that jump-and-flash between related tables, surfaced as a new rail tab.
+- Atlas rollup on the dashboard — new Atlas tab that aggregates per-project Atlas summaries in one place.
+- Gitignored files are visible in the Code Mode tree again — files like `.env` show dimmed/italic with a "gitignored (editable)" tooltip. `node_modules` and `dist` stay hidden.
+- Atlas skill v1.4.3 — covers tours, digests, DB introspection, view-state, and the ask/deck workflow.
+
+### Fixed
+- Sessions no longer silently vanish when the provider writes its session file late — detection now re-arms on every input event and takes a final shot at PTY exit, so late-typed prompts still get linked to their transcript.
+- Ended sessions surface as a distinct "ended — not resumable" panel with Retry and Dismiss actions instead of quietly disappearing.
+- Retention warning — a toast appears when the AI provider's transcript retention setting would age transcripts out from under Resume.
+- Closed a path traversal issue in the CLI-assets store routes; asset names are now validated as single-segment identifiers and every resolved path is verified inside its intended base.
+- Editor first-open no longer scrolls to the wrong anchor — reveal/highlight now waits for the editor and file model to be fully attached before positioning.
+- Telegram voice/photo downloads retry on network timeouts so an intermittent metadata-call ETIMEDOUT no longer drops your message.
+- Bridge submit-verify accepts viewport-window matches, so medium pastes whose prefix scrolls out of view still verify and submit reliably.
+- `slycode start` now self-heals CLI symlinks on every start, so new tools added by an update (like `sly-atlas`) land even when the update itself ran under old code.
+
+### Changed
+- Atlas prompts (tour create/refresh, ask-about-step, Explain) all route through a start-or-resume endpoint so they no longer 404 when the Atlas session is stopped.
+- Code Mode light-mode polish — CLI-body chrome stops reading as an unthemed iframe; digest headline reflows cleanly; atlas drawer grown to a comfortable 340px collapsed with clearer tabs.
+- "Explain" in the editor works from selection or word-under-cursor with surrounding line context; tab strip scrolls independently so Explain/Blame/Save stay pinned.
+- Web lint runs cleanly again — generated worker bundles are ignored, sensible allowances for scripts, and unused imports/vars swept across the codebase.
+
 ## [0.4.0] - 2026-07-09
 
 ### Added

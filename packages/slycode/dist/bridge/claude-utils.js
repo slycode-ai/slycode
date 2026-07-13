@@ -326,6 +326,75 @@ export async function getMostRecentProviderSessionId(providerId, cwd) {
     }
 }
 /**
+ * Parse the local-time timestamp embedded in a Codex rollout filename
+ * (rollout-YYYY-MM-DDTHH-mm-ss-<uuid>.jsonl). Returns epoch ms or null.
+ * Codex names files with the session's mint time in SERVER LOCAL time, so we
+ * parse with the local Date constructor (same machine writes and reads).
+ */
+export function parseCodexRolloutTimestamp(filename) {
+    const m = filename.match(/rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-/);
+    if (!m)
+        return null;
+    const [, y, mo, d, h, mi, s] = m;
+    const t = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)).getTime();
+    return Number.isNaN(t) ? null : t;
+}
+/**
+ * List all session-file candidates for a provider+cwd, newest-first (feature 080).
+ * Used by relink so it can walk candidates instead of blindly taking the newest
+ * file — Codex multi-agent runs put sub-agent rollouts in the same directory.
+ */
+export async function listProviderSessionCandidates(providerId, cwd) {
+    const dir = getProviderSessionDir(providerId, cwd);
+    if (!dir)
+        return [];
+    const statMs = async (file) => {
+        try {
+            const st = await fs.stat(path.join(dir, file));
+            return st.mtimeMs;
+        }
+        catch {
+            return null;
+        }
+    };
+    const candidates = [];
+    switch (providerId) {
+        case 'claude': {
+            // listSessionFiles returns bare GUIDs (filename minus .jsonl)
+            for (const guid of await listSessionFiles(dir)) {
+                candidates.push({ sessionId: guid, timestampMs: await statMs(`${guid}.jsonl`) });
+            }
+            break;
+        }
+        case 'codex': {
+            for (const file of await listCodexSessionFiles(dir)) {
+                const sessionId = extractCodexSessionId(file);
+                if (!sessionId)
+                    continue;
+                candidates.push({
+                    sessionId,
+                    timestampMs: parseCodexRolloutTimestamp(file) ?? (await statMs(file)),
+                });
+            }
+            break;
+        }
+        case 'gemini': {
+            for (const file of await listGeminiSessionFiles(dir)) {
+                const sessionId = await extractGeminiSessionId(path.join(dir, file));
+                if (!sessionId)
+                    continue;
+                candidates.push({ sessionId, timestampMs: await statMs(file) });
+            }
+            break;
+        }
+        default:
+            return [];
+    }
+    // Newest-first; unknown timestamps sort last
+    candidates.sort((a, b) => (b.timestampMs ?? -Infinity) - (a.timestampMs ?? -Infinity));
+    return candidates;
+}
+/**
  * Get the session directory for a provider.
  */
 export function getProviderSessionDir(providerId, cwd) {

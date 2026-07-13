@@ -19,6 +19,7 @@ import {
 } from '@/lib/asset-scanner';
 import { getStoreAssets } from '@/lib/store-scanner';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
+import { validateAssetName } from '@/lib/asset-path-guard';
 import { parseMcpFromStore, activateMcp, deactivateMcp } from '@/lib/mcp-common';
 import { getSlycodeRoot } from '@/lib/paths';
 import { appendEvent } from '@/lib/event-log';
@@ -49,6 +50,14 @@ export async function POST(request: NextRequest) {
       const project = projectMap.get(change.projectId);
       if (!project) {
         results.push({ change, success: false, error: `Project ${change.projectId} not found` });
+        continue;
+      }
+
+      // Traversal guard: every change's assetName feeds copyAsset / removeAsset
+      // / getProviderAssetFilePath / a store path.join. mcp names also index a
+      // `${assetName}.json` store file, so guard all types.
+      if (!validateAssetName(change.assetName)) {
+        results.push({ change, success: false, error: `Invalid asset name: ${String(change.assetName)}` });
         continue;
       }
 

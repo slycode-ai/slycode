@@ -126,7 +126,6 @@ export function ClaudeTerminalPanel({
   sessionName: baseSessionName,
   sessionNameAliases = [],
   cwd,
-  actionsConfig,
   actions,
   context,
   bridgeUrl = BRIDGE_API,

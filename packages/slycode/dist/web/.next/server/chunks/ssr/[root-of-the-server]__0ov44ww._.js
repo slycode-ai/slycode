@@ -1,3 +1,0 @@
-module.exports=[50227,(a,b,c)=>{b.exports=a.x("node:path",()=>require("node:path"))},59639,(a,b,c)=>{b.exports=a.x("node:process",()=>require("node:process"))},33354,(a,b,c)=>{"use strict";c._=function(a){return a&&a.__esModule?a:{default:a}}},10123,a=>{"use strict";let b="slycode:terminal-prompt";a.s(["onTerminalPrompt",0,function(a){let c=b=>{a(b.detail)};return window.addEventListener(b,c),()=>window.removeEventListener(b,c)},"pushToTerminal",0,function(a,c=!0){let d=new CustomEvent(b,{detail:{prompt:a,autoSubmit:c}});window.dispatchEvent(d)}])},53903,a=>{a.v(a=>Promise.resolve().then(()=>a(10123)))}];
-
-//# sourceMappingURL=%5Broot-of-the-server%5D__0ov44ww._.js.map

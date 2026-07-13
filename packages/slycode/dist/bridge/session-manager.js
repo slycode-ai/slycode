@@ -1,6 +1,7 @@
 import os from 'os';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
-import { getProviderSessionDir, listProviderSessionFiles, detectNewProviderSessionId, getMostRecentProviderSessionId, } from './claude-utils.js';
+import { getProviderSessionDir, listProviderSessionFiles, detectNewProviderSessionId, listProviderSessionCandidates, } from './claude-utils.js';
+import { shouldArmDetection, filterRelinkCandidates, GUID_REARM_COOLDOWN_MS } from './session-detection.js';
 import { getProvider, buildProviderCommand, supportsSessionDetection, ensureInstructionFile, } from './provider-utils.js';
 import { classifyInputRegion, extractInputRegion, decideNextAction, } from './submit-verify.js';
 import { constants as fsConstants } from 'fs';
@@ -13,6 +14,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { Terminal: HeadlessTerminal } = require('@xterm/headless');
 const { SerializeAddon } = require('@xterm/addon-serialize');
+// Default terminal size for HEADLESS sessions (no UI client attached).
+// Was 80x24 — on a 24-row screen a medium-length pasted message overflows the
+// TUI's input-box viewport, so delivery verification could only see a tail
+// window of it (live incident 2026-07-09; opening the UI resizes the PTY and
+// re-renders, which is why the problem was invisible to inspection). A UI
+// client that connects later still resizes to its own viewport as before.
+const DEFAULT_PTY_COLS = 200;
+const DEFAULT_PTY_ROWS = 50;
 const DEFAULT_CONFIG = {
     port: parseInt(process.env.BRIDGE_PORT || '7592', 10),
     host: 'localhost',
@@ -409,7 +418,7 @@ export class SessionManager {
             sseClients: new Set(),
             headlessTerminal: null,
             serializeAddon: null,
-            terminalDimensions: { cols: 80, rows: 24 },
+            terminalDimensions: { cols: DEFAULT_PTY_COLS, rows: DEFAULT_PTY_ROWS },
             activityTransitions: [],
         };
         this.sessions.set(name, creatingPlaceholder);
@@ -456,8 +465,8 @@ export class SessionManager {
             }
             // Create headless terminal for state management
             const headlessTerminal = new HeadlessTerminal({
-                cols: 80,
-                rows: 24,
+                cols: DEFAULT_PTY_COLS,
+                rows: DEFAULT_PTY_ROWS,
                 scrollback: 10000,
                 allowProposedApi: true,
             });
@@ -487,7 +496,7 @@ export class SessionManager {
                 sseClients: new Set(),
                 headlessTerminal,
                 serializeAddon,
-                terminalDimensions: { cols: 80, rows: 24 },
+                terminalDimensions: { cols: DEFAULT_PTY_COLS, rows: DEFAULT_PTY_ROWS },
                 claudeDir: claudeDir || undefined,
                 claudeBeforeFiles: (providerConfig && supportsSessionDetection(providerConfig)) ? beforeSessionFiles : undefined,
                 activityTransitions: [],
@@ -513,6 +522,8 @@ export class SessionManager {
                 command,
                 args,
                 cwd,
+                cols: DEFAULT_PTY_COLS,
+                rows: DEFAULT_PTY_ROWS,
                 extraEnv: { SLYCODE_SESSION: name },
                 onData: (data) => this.handlePtyOutput(name, data),
                 onExit: (code) => this.handlePtyExit(name, code, session.createdAt),
@@ -568,29 +579,71 @@ export class SessionManager {
         // Gemini CLI takes ~30s to create session files; Claude is ~5s. Use 60s to be safe.
         const sessionId = await this.watchForUnclaimedSession(name, providerId, sessionDir, beforeFiles, 60000);
         if (sessionId) {
-            const session = this.sessions.get(name);
-            if (session && !session.guidDetectionCancelled) {
-                // Atomic claim: check and assign in the same synchronous tick
-                if (!this.getClaimedGuids().has(sessionId)) {
-                    session.claudeSessionId = sessionId;
-                    // Update persisted state
-                    if (this.persistedState.sessions[name]) {
-                        this.persistedState.sessions[name].claudeSessionId = sessionId;
-                        await this.savePersistedState();
-                    }
-                }
-            }
-            else if (!session && this.persistedState.sessions[name]) {
-                // Session already exited and was removed from the map, but GUID detection
-                // completed after exit. Still link the GUID in persisted state so the UI
-                // shows the session attached to the card (resumable for manual inspection).
-                if (!this.getClaimedGuids().has(sessionId)) {
-                    this.persistedState.sessions[name].claudeSessionId = sessionId;
-                    await this.savePersistedState();
-                    console.log(`[detection] Linked session ID ${sessionId} to exited session ${name}`);
+            await this.claimDetectedSessionId(name, sessionId);
+        }
+    }
+    /**
+     * Exit-time last-chance session-id detection (feature 080). Single-shot
+     * before/after diff against the spawn-time snapshot — no polling watch.
+     * Called from handlePtyExit AFTER guidDetectionCancelled is set, so it
+     * claims via allowCancelled.
+     */
+    async detectSessionIdAtExit(name) {
+        const session = this.sessions.get(name);
+        if (!session || session.claudeSessionId)
+            return;
+        const providerId = session.provider || 'claude';
+        const providerConfig = await getProvider(providerId);
+        if (!providerConfig || !supportsSessionDetection(providerConfig))
+            return;
+        const sessionDir = session.claudeDir || getProviderSessionDir(providerId, session.cwd);
+        if (!sessionDir)
+            return;
+        try {
+            const sessionId = await detectNewProviderSessionId(providerId, sessionDir, session.claudeBeforeFiles || []);
+            if (sessionId) {
+                const claimed = await this.claimDetectedSessionId(name, sessionId, true);
+                if (claimed) {
+                    console.log(`[detection] Exit-time link: ${sessionId} → ${name}`);
                 }
             }
         }
+        catch (err) {
+            console.warn(`[detection] Exit-time detection failed for ${name}:`, err);
+        }
+    }
+    /**
+     * Atomically claim a detected session id for a session (feature 080 —
+     * shared by spawn-time watch, re-armed watches, and exit-time detection).
+     * `allowCancelled` lets the exit-time check link a session whose watch
+     * cancellation flag was just set by handlePtyExit.
+     */
+    async claimDetectedSessionId(name, sessionId, allowCancelled = false) {
+        const session = this.sessions.get(name);
+        if (session && (allowCancelled || !session.guidDetectionCancelled)) {
+            // Atomic claim: check and assign in the same synchronous tick
+            if (!this.getClaimedGuids().has(sessionId)) {
+                session.claudeSessionId = sessionId;
+                // Update persisted state
+                if (this.persistedState.sessions[name]) {
+                    this.persistedState.sessions[name].claudeSessionId = sessionId;
+                    await this.savePersistedState();
+                }
+                return true;
+            }
+        }
+        else if (!session && this.persistedState.sessions[name]) {
+            // Session already exited and was removed from the map, but GUID detection
+            // completed after exit. Still link the GUID in persisted state so the UI
+            // shows the session attached to the card (resumable for manual inspection).
+            if (!this.getClaimedGuids().has(sessionId)) {
+                this.persistedState.sessions[name].claudeSessionId = sessionId;
+                await this.savePersistedState();
+                console.log(`[detection] Linked session ID ${sessionId} to exited session ${name}`);
+                return true;
+            }
+        }
+        return false;
     }
     handlePtyOutput(name, data) {
         const session = this.sessions.get(name);
@@ -732,6 +785,14 @@ export class SessionManager {
         session.pendingPrompt = undefined;
         // Cancel any in-flight GUID detection — prevent ghost claims on stopped sessions
         session.guidDetectionCancelled = true;
+        // Last-chance session-id detection (feature 080): the provider file exists
+        // by now or never will, so run ONE synchronous-ish check (no watch). Runs
+        // despite the cancellation flag above — that flag exists to stop the
+        // polling watch from stomping stopped sessions; this final check is the
+        // authoritative closer that keeps stopped records resumable.
+        if (!session.claudeSessionId) {
+            void this.detectSessionIdAtExit(name);
+        }
         // Resolve any pending stopSession promise (event-driven approach)
         if (session.exitResolver) {
             session.exitResolver();
@@ -1076,7 +1137,19 @@ export class SessionManager {
             throw new Error('Session has no CWD');
         }
         const previous = session?.claudeSessionId || persisted?.claudeSessionId || null;
-        const newId = await getMostRecentProviderSessionId(provider, cwd);
+        // Walk candidates newest-first with two cheap guards (feature 080):
+        // skip ids claimed by OTHER sessions, and skip files that predate this
+        // session — Codex multi-agent runs drop sub-agent rollouts in the same
+        // directory, so "newest file" alone can pick the wrong conversation.
+        const createdAtIso = session?.createdAt || persisted?.createdAt || null;
+        const createdAtMs = createdAtIso ? Date.parse(createdAtIso) : null;
+        const candidates = await listProviderSessionCandidates(provider, cwd);
+        const viable = filterRelinkCandidates(candidates, {
+            claimed: this.getClaimedGuids(),
+            ownPrevious: previous,
+            createdAtMs: Number.isNaN(createdAtMs) ? null : createdAtMs,
+        });
+        const newId = viable[0]?.sessionId ?? null;
         if (!newId) {
             throw new Error('No session files found for this provider');
         }
@@ -1108,6 +1181,10 @@ export class SessionManager {
             return false;
         session.clients.add(ws);
         this.updateClientCount(session);
+        // Client attach is a detection re-arm event (feature 080)
+        if (!session.claudeSessionId) {
+            void this.ensureSessionIdDetection(this.resolveSessionName(name));
+        }
         // If session was detached, mark as running again
         if (session.status === 'detached' && session.pty) {
             session.status = 'running';
@@ -1158,6 +1235,10 @@ export class SessionManager {
         // If session was detached, mark as running again
         if (session.status === 'detached' && session.pty) {
             session.status = 'running';
+        }
+        // Client attach is a detection re-arm event (feature 080)
+        if (!session.claudeSessionId) {
+            void this.ensureSessionIdDetection(this.resolveSessionName(name));
         }
         // Send dimensions event first
         try {
@@ -1246,9 +1327,10 @@ export class SessionManager {
         else {
             await writeChunkedToPty(session.pty, data);
         }
-        // If this session doesn't have a GUID yet, try to detect it (any provider)
+        // If this session doesn't have a GUID yet, (re-)arm detection — input is
+        // the event that makes lazily-created provider session files appear (080)
         if (!session.claudeSessionId) {
-            this.retryGuidDetection(resolvedName);
+            void this.ensureSessionIdDetection(resolvedName);
         }
         return true;
     }
@@ -1305,33 +1387,48 @@ export class SessionManager {
         return claimed;
     }
     /**
-     * Retry GUID detection for sessions that didn't capture it initially.
-     * Uses the before-files list AND excludes GUIDs already claimed by other sessions.
+     * Event-anchored session-id detection (feature 080). Idempotent: no-ops when
+     * the id is captured, detection was cancelled (session stopped), a watch is
+     * already in flight, or one was armed within the cooldown. Otherwise starts
+     * a fresh 60s watch with the spawn-time before-files snapshot — providers
+     * like Codex create their session file lazily on FIRST PROMPT, so input
+     * delivery (not spawn) is the event that makes detection succeed.
      */
-    async retryGuidDetection(name) {
+    async ensureSessionIdDetection(name) {
         const session = this.sessions.get(name);
-        if (!session || session.claudeSessionId || session.guidDetectionCancelled)
+        if (!session)
             return;
-        // Debounce - only retry once per session
-        if (session.guidRetryAttempted)
+        const arm = shouldArmDetection({
+            hasId: !!session.claudeSessionId,
+            cancelled: !!session.guidDetectionCancelled,
+            inFlight: !!session.guidDetectionInFlight,
+            lastArmedAt: session.guidDetectionLastArmedAt ?? null,
+            now: Date.now(),
+            cooldownMs: GUID_REARM_COOLDOWN_MS,
+        });
+        if (!arm)
             return;
-        session.guidRetryAttempted = true;
         const providerId = session.provider || 'claude';
+        const providerConfig = await getProvider(providerId);
+        if (!providerConfig || !supportsSessionDetection(providerConfig))
+            return;
         // Use the stored claudeDir and beforeFiles from session creation
         const sessionDir = session.claudeDir || getProviderSessionDir(providerId, session.cwd);
         if (!sessionDir)
             return;
         const beforeFiles = session.claudeBeforeFiles || [];
-        // Detect new session ID using provider-specific logic
-        const sessionId = await detectNewProviderSessionId(providerId, sessionDir, beforeFiles);
-        // Live check against claimed GUIDs (not a stale snapshot) — atomic check-then-claim
-        if (sessionId && !this.getClaimedGuids().has(sessionId) && !session.guidDetectionCancelled) {
-            session.claudeSessionId = sessionId;
-            // Update persisted state
-            if (this.persistedState.sessions[name]) {
-                this.persistedState.sessions[name].claudeSessionId = sessionId;
-                await this.savePersistedState();
+        session.guidDetectionInFlight = true;
+        session.guidDetectionLastArmedAt = Date.now();
+        try {
+            const sessionId = await this.watchForUnclaimedSession(name, providerId, sessionDir, beforeFiles, 60000);
+            if (sessionId) {
+                await this.claimDetectedSessionId(name, sessionId);
             }
+        }
+        finally {
+            const live = this.sessions.get(name);
+            if (live)
+                live.guidDetectionInFlight = false;
         }
     }
     resizeSession(name, cols, rows) {
@@ -1499,6 +1596,9 @@ export class SessionManager {
                 // Raw (non-bracketed) write — rare compat path. Without paste markers
                 // framing the content there is nothing to verify against; legacy
                 // fixed-delay behavior is preserved.
+                if (!session.claudeSessionId) {
+                    void this.ensureSessionIdDetection(resolvedName);
+                }
                 await writeChunkedToPty(session.pty, prompt);
                 const submitDelay = parseInt(process.env.PROMPT_SUBMIT_DELAY_MS || '600', 10);
                 await new Promise(r => setTimeout(r, submitDelay));
@@ -1614,6 +1714,11 @@ export class SessionManager {
                         error: `Session is currently active (output ${Math.round(outputAge / 1000)}s ago). The AI may be mid-response. Use force to send anyway.`,
                     };
                 }
+            }
+            // Prompt delivery is a detection re-arm event (feature 080) — verified
+            // submits write straight to the PTY, bypassing writeToSession's hook
+            if (!session.claudeSessionId) {
+                void this.ensureSessionIdDetection(resolvedName);
             }
             const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
             return { success: delivery.outcome === 'delivered', sessionStatus: session.status, delivery };

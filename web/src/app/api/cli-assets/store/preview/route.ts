@@ -15,6 +15,7 @@ import path from 'path';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
 import { buildStoreImportManifest } from '@/lib/asset-scanner';
 import { loadRegistry } from '@/lib/registry';
+import { validateAssetName } from '@/lib/asset-path-guard';
 import type { ProviderId, AssetType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,10 @@ export async function GET(request: NextRequest) {
         { error: 'provider, assetType, assetName, and sourceProjectId are required' },
         { status: 400 },
       );
+    }
+
+    if (!validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
     }
 
     const registry = await loadRegistry();

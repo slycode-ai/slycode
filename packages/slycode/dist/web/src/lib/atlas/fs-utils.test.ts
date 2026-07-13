@@ -56,3 +56,12 @@ test('looksBinary detects NUL bytes, passes text', () => {
   assert.equal(looksBinary(Buffer.from([0x68, 0x00, 0x69])), true);
   assert.equal(looksBinary(Buffer.from('')), false);
 });
+
+test('foldTree marks ignored files (feature 079 — .env reachable in the tree)', () => {
+  const tree = foldTree(['src/app.ts', '.env', 'src/local.json'], new Set(['.env', 'src/local.json']));
+  const env = tree.find(n => n.name === '.env')!;
+  assert.equal(env.ignored, true);
+  const src = tree.find(n => n.name === 'src')!;
+  assert.equal(src.children!.find(c => c.name === 'local.json')!.ignored, true);
+  assert.equal(src.children!.find(c => c.name === 'app.ts')!.ignored, undefined);
+});

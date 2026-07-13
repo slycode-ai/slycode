@@ -9,6 +9,7 @@
 
 import path from 'path';
 import type { ProviderId, AssetType, ProviderAssetPaths } from './types';
+import { validateAssetName, assertInside } from './asset-path-guard';
 
 // ============================================================================
 // Provider Directory Conventions
@@ -72,12 +73,14 @@ export function getProviderAssetFilePath(
   const dir = getProviderAssetDir(projectPath, provider, assetType);
   if (!dir) return null;
 
-  if (assetType === 'skill') {
-    return path.join(dir, assetName); // Skills are directories
-  }
+  // Traversal guard: assetName must be a plain identifier and the resolved
+  // path must stay inside the provider asset dir. Returns null (→ 404/400 at
+  // the callers, which already branch on null) on any escape attempt.
+  if (!validateAssetName(assetName)) return null;
+  const fileName = assetType === 'skill' ? assetName : `${assetName}.md`;
+  if (!assertInside(dir, fileName)) return null;
 
-  // Agents are .md files
-  return path.join(dir, `${assetName}.md`);
+  return path.join(dir, fileName);
 }
 
 /**

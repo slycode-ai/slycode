@@ -14,6 +14,7 @@ import { importAssetToStore } from '@/lib/asset-scanner';
 import { getSlycodeRoot } from '@/lib/paths';
 import { loadRegistry } from '@/lib/registry';
 import { appendEvent } from '@/lib/event-log';
+import { validateAssetName, safeAssetJoin } from '@/lib/asset-path-guard';
 import type { ProviderId, AssetType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -34,8 +35,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { projectPath, provider, assetType, assetName, sourceProjectId, skillMainOnly } = body as {
-      projectPath?: string;
+    const { provider, assetType, assetName, sourceProjectId, skillMainOnly } = body as {
       provider: ProviderId;
       assetType: AssetType;
       assetName: string;
@@ -50,20 +50,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Resolve project path
-    let resolvedPath = projectPath;
-    if (!resolvedPath && sourceProjectId) {
-      const registry = await loadRegistry();
-      const project = registry.projects.find(p => p.id === sourceProjectId);
-      if (project) resolvedPath = project.path;
+    if (!validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
     }
 
-    if (!resolvedPath) {
+    // Resolve the source project via the registry ONLY. A body-supplied
+    // projectPath was previously trusted here — that let a caller read from any
+    // directory (arbitrary-file-copy). Source now must be a known project id.
+    if (!sourceProjectId) {
       return NextResponse.json(
-        { error: 'Either projectPath or sourceProjectId is required' },
+        { error: 'sourceProjectId is required' },
         { status: 400 },
       );
     }
+    const registry = await loadRegistry();
+    const project = registry.projects.find(p => p.id === sourceProjectId);
+    if (!project) {
+      return NextResponse.json(
+        { error: `Source project '${sourceProjectId}' not found` },
+        { status: 404 },
+      );
+    }
+    const resolvedPath = project.path;
 
     // Import to flat canonical store (provider only used for source project path)
     importAssetToStore(resolvedPath, provider, assetType, assetName, {
@@ -103,18 +111,34 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    if (!validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+    }
+
     const root = getSlycodeRoot();
 
+    // safeAssetJoin re-validates the name AND confirms the resolved path stays
+    // inside the store subtree — a null return means an escape attempt, so we
+    // reject before any fs.rmSync/unlinkSync can touch a sibling directory.
     if (assetType === 'skill') {
-      const assetPath = path.join(root, 'store', 'skills', assetName);
+      const assetPath = safeAssetJoin(path.join(root, 'store', 'skills'), assetName);
+      if (!assetPath) {
+        return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+      }
       if (fs.existsSync(assetPath)) {
         fs.rmSync(assetPath, { recursive: true, force: true });
       }
     } else if (assetType === 'mcp') {
-      const jsonPath = path.join(root, 'store', 'mcp', `${assetName}.json`);
+      const jsonPath = safeAssetJoin(path.join(root, 'store', 'mcp'), `${assetName}.json`);
+      if (!jsonPath) {
+        return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+      }
       if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath);
     } else {
-      const mdPath = path.join(root, 'store', 'agents', `${assetName}.md`);
+      const mdPath = safeAssetJoin(path.join(root, 'store', 'agents'), `${assetName}.md`);
+      if (!mdPath) {
+        return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+      }
       if (fs.existsSync(mdPath)) fs.unlinkSync(mdPath);
     }
 

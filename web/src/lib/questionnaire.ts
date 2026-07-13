@@ -522,7 +522,6 @@ export function stripControlChars(s: string): string {
   out = out.replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, ''); // OSC strings
   out = out.replace(/\x1B./g, ''); // any other ESC + char
   // Strip non-printable C0 (except \t \n \r) and DEL + C1
-  // eslint-disable-next-line no-control-regex
   out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
   return out;
 }

@@ -139,6 +139,18 @@
       "namedRegex": "^/api/atlas/artifacts(?:/)?$"
     },
     {
+      "page": "/api/atlas/ask",
+      "regex": "^/api/atlas/ask(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/ask(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/db",
+      "regex": "^/api/atlas/db(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/db(?:/)?$"
+    },
+    {
       "page": "/api/atlas/file",
       "regex": "^/api/atlas/file(?:/)?$",
       "routeKeys": {},
@@ -163,6 +175,12 @@
       "namedRegex": "^/api/atlas/refresh(?:/)?$"
     },
     {
+      "page": "/api/atlas/rollup",
+      "regex": "^/api/atlas/rollup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/rollup(?:/)?$"
+    },
+    {
       "page": "/api/atlas/search",
       "regex": "^/api/atlas/search(?:/)?$",
       "routeKeys": {},
@@ -179,6 +197,12 @@
       "regex": "^/api/atlas/tree(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/atlas/tree(?:/)?$"
+    },
+    {
+      "page": "/api/atlas/view-state",
+      "regex": "^/api/atlas/view\\-state(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/atlas/view\\-state(?:/)?$"
     },
     {
       "page": "/api/auth/login",
@@ -209,6 +233,12 @@
       "regex": "^/api/changelog(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/changelog(?:/)?$"
+    },
+    {
+      "page": "/api/claude-retention",
+      "regex": "^/api/claude\\-retention(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/claude\\-retention(?:/)?$"
     },
     {
       "page": "/api/cli-assets",

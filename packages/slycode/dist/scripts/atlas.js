@@ -48,6 +48,10 @@ const ATLAS_JSON = path.join(ATLAS_DIR, 'atlas.json');
 const NODES_DIR = path.join(ATLAS_DIR, 'nodes');
 const CONFIG_JSON = path.join(ATLAS_DIR, 'config.json');
 const NAV_EVENTS_JSON = path.join(ATLAS_DIR, 'nav-events.json');
+const DIGEST_JSON = path.join(ATLAS_DIR, 'digest.json');
+const VIEW_STATE_JSON = path.join(ATLAS_DIR, 'view-state.json');
+const TOURS_DIR = path.join(ATLAS_DIR, 'tours');
+const DB_JSON = path.join(ATLAS_DIR, 'db.json');
 
 // ---------------------------------------------------------------------------
 // Schema constants + validators — LOCKSTEP MIRROR of web/src/lib/atlas/schema.ts
@@ -63,6 +67,14 @@ const LIMITS = {
   maxRoleLen: 80, maxSymbolFiles: 60, maxSymbolsPerFile: 60, maxSymbolSummaryLen: 200,
   maxFlows: 12, maxFlowLabelLen: 60, maxDeckItems: 30, maxNoteLen: 500, maxNavEvents: 50,
   maxCollections: 20,
+  // Stretch artifacts (feature 079)
+  maxHeadlineLen: 300, maxDigestAreas: 16, maxDigestSummaryLen: 600,
+  maxNotable: 12, maxNotableNoteLen: 200,
+  maxTourTitleLen: 80, maxTourPromptLen: 300, maxTourDescLen: 500, maxTourSteps: 30, minTourSteps: 2,
+  maxStepTitleLen: 80, maxStepBodyLen: 1500,
+  maxDbSummaryLen: 2000, maxDbTables: 120, maxDbTableSummaryLen: 300,
+  maxDbColumnNoteLen: 160, maxDbColumnsPerTable: 80, maxDbRelations: 60,
+  maxDbRelationLabelLen: 60,
 };
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -215,6 +227,138 @@ function validateNavEvent(d) {
   return errs;
 }
 
+// --- Stretch validators (feature 079) — LOCKSTEP MIRROR of schema.ts --------
+
+function validateDigest(d, knownAreaIds) {
+  const errs = [];
+  if (!d || typeof d !== 'object') return ['digest: not an object'];
+  if (d.schema_version !== ATLAS_SCHEMA_VERSION) errs.push(`digest: schema_version must be ${ATLAS_SCHEMA_VERSION}`);
+  if (typeof d.headline !== 'string' || !d.headline.trim() || d.headline.length > LIMITS.maxHeadlineLen) {
+    errs.push(`digest: headline required (≤ ${LIMITS.maxHeadlineLen} chars)`);
+  }
+  if (!Array.isArray(d.areas) || d.areas.length === 0 || d.areas.length > LIMITS.maxDigestAreas) {
+    errs.push(`digest: areas must be 1-${LIMITS.maxDigestAreas} entries`);
+  } else {
+    d.areas.forEach((a, i) => {
+      const where = `digest.areas[${i}]`;
+      if (!a || typeof a !== 'object') { errs.push(`${where}: not an object`); return; }
+      if (typeof a.area !== 'string' || !SLUG_RE.test(a.area)) errs.push(`${where}: area must be a slug`);
+      else if (knownAreaIds && !knownAreaIds.has(a.area)) errs.push(`${where}: unknown area '${a.area}' — not in atlas.json`);
+      if (typeof a.summary !== 'string' || !a.summary.trim() || a.summary.length > LIMITS.maxDigestSummaryLen) {
+        errs.push(`${where}: summary required (≤ ${LIMITS.maxDigestSummaryLen} chars)`);
+      }
+      if (a.commits !== undefined && (!Number.isInteger(a.commits) || a.commits < 0)) errs.push(`${where}: commits must be a non-negative integer`);
+      if (a.files_changed !== undefined && (!Number.isInteger(a.files_changed) || a.files_changed < 0)) errs.push(`${where}: files_changed must be a non-negative integer`);
+    });
+  }
+  if (d.notable !== undefined) {
+    if (!Array.isArray(d.notable) || d.notable.length > LIMITS.maxNotable) {
+      errs.push(`digest: notable must be an array ≤ ${LIMITS.maxNotable}`);
+    } else {
+      d.notable.forEach((n, i) => {
+        if (!n || !isRelPath(n.file) ||
+            (n.line !== undefined && (!Number.isInteger(n.line) || n.line < 1)) ||
+            typeof n.note !== 'string' || !n.note.trim() || n.note.length > LIMITS.maxNotableNoteLen) {
+          errs.push(`digest.notable[${i}]: needs repo-relative file (+ optional line ≥1) + note ≤ ${LIMITS.maxNotableNoteLen} chars`);
+        }
+      });
+    }
+  }
+  if (d.generated_at !== undefined && (typeof d.generated_at !== 'string' || isNaN(Date.parse(d.generated_at)))) errs.push('digest: generated_at must be ISO date');
+  if (d.since_commit !== undefined && (typeof d.since_commit !== 'string' || !/^[0-9a-f]{4,40}$/.test(d.since_commit))) errs.push('digest: since_commit must be a hex ref');
+  if (d.head_commit !== undefined && (typeof d.head_commit !== 'string' || !/^[0-9a-f]{4,40}$/.test(d.head_commit))) errs.push('digest: head_commit must be a hex ref');
+  return errs;
+}
+
+function validateTour(d, knownAreaIds) {
+  const errs = [];
+  if (!d || typeof d !== 'object') return ['tour: not an object'];
+  if (d.schema_version !== ATLAS_SCHEMA_VERSION) errs.push(`tour: schema_version must be ${ATLAS_SCHEMA_VERSION}`);
+  if (typeof d.id !== 'string' || !SLUG_RE.test(d.id)) errs.push('tour: id must be a slug');
+  if (typeof d.title !== 'string' || !d.title.trim() || d.title.length > LIMITS.maxTourTitleLen) {
+    errs.push(`tour: title required (≤ ${LIMITS.maxTourTitleLen} chars)`);
+  }
+  if (d.prompt !== undefined && (typeof d.prompt !== 'string' || !d.prompt.trim() || d.prompt.length > LIMITS.maxTourPromptLen)) {
+    errs.push(`tour: prompt must be a non-empty string ≤ ${LIMITS.maxTourPromptLen} chars`);
+  }
+  if (d.description !== undefined && (typeof d.description !== 'string' || d.description.length > LIMITS.maxTourDescLen)) {
+    errs.push(`tour: description must be ≤ ${LIMITS.maxTourDescLen} chars`);
+  }
+  if (d.area !== undefined) {
+    if (typeof d.area !== 'string' || !SLUG_RE.test(d.area)) errs.push('tour: area must be a slug');
+    else if (knownAreaIds && !knownAreaIds.has(d.area)) errs.push(`tour: unknown area '${d.area}' — not in atlas.json`);
+  }
+  if (!Array.isArray(d.steps) || d.steps.length < LIMITS.minTourSteps || d.steps.length > LIMITS.maxTourSteps) {
+    errs.push(`tour: steps must be ${LIMITS.minTourSteps}-${LIMITS.maxTourSteps} entries`);
+  } else {
+    d.steps.forEach((s, i) => {
+      const where = `tour.steps[${i}]`;
+      if (!s || typeof s !== 'object') { errs.push(`${where}: not an object`); return; }
+      if (!isRelPath(s.file)) errs.push(`${where}: file must be repo-relative`);
+      if (s.line !== undefined && (!Number.isInteger(s.line) || s.line < 1)) errs.push(`${where}: line must be a positive integer`);
+      if (s.endLine !== undefined && (!Number.isInteger(s.endLine) || s.endLine < (s.line ?? 1))) errs.push(`${where}: endLine must be ≥ line`);
+      if (typeof s.title !== 'string' || !s.title.trim() || s.title.length > LIMITS.maxStepTitleLen) errs.push(`${where}: title required (≤ ${LIMITS.maxStepTitleLen} chars)`);
+      if (typeof s.body !== 'string' || !s.body.trim() || s.body.length > LIMITS.maxStepBodyLen) errs.push(`${where}: body required (≤ ${LIMITS.maxStepBodyLen} chars)`);
+    });
+  }
+  if (d.updated_at !== undefined && (typeof d.updated_at !== 'string' || isNaN(Date.parse(d.updated_at)))) errs.push('tour: updated_at must be ISO date');
+  return errs;
+}
+
+const DB_NAME_RE = /^[A-Za-z_][A-Za-z0-9_$-]{0,63}$/;
+
+function validateDbAnnotations(d) {
+  const errs = [];
+  if (!d || typeof d !== 'object') return ['db: not an object'];
+  if (d.schema_version !== ATLAS_SCHEMA_VERSION) errs.push(`db: schema_version must be ${ATLAS_SCHEMA_VERSION}`);
+  if (d.summary !== undefined && (typeof d.summary !== 'string' || d.summary.length > LIMITS.maxDbSummaryLen)) {
+    errs.push(`db: summary must be ≤ ${LIMITS.maxDbSummaryLen} chars`);
+  }
+  if (d.tables !== undefined) {
+    if (!d.tables || typeof d.tables !== 'object' || Array.isArray(d.tables)) {
+      errs.push('db: tables must be an object');
+    } else {
+      const names = Object.keys(d.tables);
+      if (names.length > LIMITS.maxDbTables) errs.push(`db: too many tables (max ${LIMITS.maxDbTables})`);
+      for (const t of names) {
+        if (!DB_NAME_RE.test(t)) { errs.push(`db.tables: bad table name '${t}'`); continue; }
+        const ann = d.tables[t];
+        if (!ann || typeof ann !== 'object' || Array.isArray(ann)) { errs.push(`db.tables[${t}]: must be an object`); continue; }
+        if (ann.summary !== undefined && (typeof ann.summary !== 'string' || ann.summary.length > LIMITS.maxDbTableSummaryLen)) {
+          errs.push(`db.tables[${t}]: summary must be ≤ ${LIMITS.maxDbTableSummaryLen} chars`);
+        }
+        if (ann.columns !== undefined) {
+          if (!ann.columns || typeof ann.columns !== 'object' || Array.isArray(ann.columns)) { errs.push(`db.tables[${t}].columns: must be an object`); continue; }
+          const cols = Object.keys(ann.columns);
+          if (cols.length > LIMITS.maxDbColumnsPerTable) errs.push(`db.tables[${t}]: too many columns (max ${LIMITS.maxDbColumnsPerTable})`);
+          for (const c of cols) {
+            if (!DB_NAME_RE.test(c)) errs.push(`db.tables[${t}].columns: bad column name '${c}'`);
+            else if (typeof ann.columns[c] !== 'string' || ann.columns[c].length > LIMITS.maxDbColumnNoteLen) {
+              errs.push(`db.tables[${t}].columns.${c}: note must be ≤ ${LIMITS.maxDbColumnNoteLen} chars`);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (d.relations !== undefined) {
+    if (!Array.isArray(d.relations) || d.relations.length > LIMITS.maxDbRelations) {
+      errs.push(`db: relations must be an array ≤ ${LIMITS.maxDbRelations}`);
+    } else {
+      d.relations.forEach((r, i) => {
+        if (!r || typeof r !== 'object' ||
+            typeof r.from !== 'string' || !DB_NAME_RE.test(r.from) ||
+            typeof r.to !== 'string' || !DB_NAME_RE.test(r.to) ||
+            (r.label !== undefined && (typeof r.label !== 'string' || r.label.length > LIMITS.maxDbRelationLabelLen))) {
+          errs.push(`db.relations[${i}]: needs from/to table names (+ label ≤ ${LIMITS.maxDbRelationLabelLen} chars)`);
+        }
+      });
+    }
+  }
+  if (d.updated_at !== undefined && (typeof d.updated_at !== 'string' || isNaN(Date.parse(d.updated_at)))) errs.push('db: updated_at must be ISO date');
+  return errs;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -270,6 +414,7 @@ function containedAbs(rel) {
 
 function cmdInit() {
   fs.mkdirSync(NODES_DIR, { recursive: true });
+  fs.mkdirSync(TOURS_DIR, { recursive: true });
   if (!fs.existsSync(CONFIG_JSON)) {
     writeJsonAtomic(CONFIG_JSON, { enabled: false, schedule: '0 3 * * *', provider: null, model: null, last_run: null });
   }
@@ -382,8 +527,56 @@ function cmdStatus(args) {
       coverage,
     });
   }
+  // Stretch info (feature 079): digest anchor, tours, db sources.
+  const anchor = digestAnchor();
+  const digestDoc = readJson(DIGEST_JSON);
+  const headNow = gitOut(['rev-parse', 'HEAD']);
+  const digest = {
+    anchorCommit: anchor,
+    anchorDate: null,
+    commitsSince: null,
+    perArea: {},
+    generatedAt: digestDoc ? digestDoc.generated_at : null,
+    // current = the existing digest already covers anchor..HEAD — regenerating
+    // would produce the same thing; the nightly run should skip.
+    current: Boolean(digestDoc && anchor && digestDoc.since_commit === anchor && headNow && digestDoc.head_commit === headNow),
+  };
+  if (anchor) {
+    const anchorDate = gitOut(['show', '-s', '--format=%cI', anchor]);
+    const countStr = gitOut(['rev-list', '--count', `${anchor}..HEAD`]);
+    digest.anchorDate = anchorDate;
+    digest.commitsSince = countStr === null ? null : parseInt(countStr, 10);
+    if (digest.commitsSince) {
+      // Per-area commit counts: one git log pass, commits separated by @@.
+      const log = gitOut(['log', '--name-only', '--pretty=format:@@', `${anchor}..HEAD`]);
+      if (log) {
+        for (const commitBlock of log.split('@@')) {
+          const files = commitBlock.split('\n').map(s => s.trim()).filter(Boolean);
+          if (!files.length) continue;
+          const hit = new Set();
+          for (const area of root.areas) {
+            if (files.some(f => underPaths(f, area.paths))) hit.add(area.id);
+          }
+          for (const id of hit) digest.perArea[id] = (digest.perArea[id] || 0) + 1;
+        }
+      }
+    }
+  }
+  const tours = readTours();
+  let dbSources = [];
+  try {
+    const { discoverSources } = require(path.join(__dirname, 'db-introspect.js'));
+    dbSources = discoverSources(PROJECT_ROOT, projectFiles());
+  } catch { /* introspection module unavailable — report none */ }
+
   if (asJson) {
-    console.log(JSON.stringify({ exists: true, areas: report }, null, 2));
+    console.log(JSON.stringify({
+      exists: true,
+      areas: report,
+      digest,
+      tours,
+      db: { sources: dbSources, annotated: fs.existsSync(DB_JSON) },
+    }, null, 2));
   } else {
     for (const r of report) {
       const flag = r.stale ? 'STALE' : 'fresh';
@@ -395,6 +588,18 @@ function cmdStatus(args) {
     if (thinnest && thinnest.coverage.pct < 100) {
       console.log(`Then ENRICH the thinnest area ('${thinnest.area}', ${thinnest.coverage.pct}%) with write-node --merge — see the atlas skill's coverage crawl.`);
     }
+    if (anchor) {
+      console.log(digest.current
+        ? `DIGEST: current (already covers ${anchor.slice(0, 8)}..HEAD) — skip.`
+        : digest.commitsSince
+          ? `DIGEST: ${digest.commitsSince} commits since anchor ${anchor.slice(0, 8)} — write-digest is due (areas: ${Object.entries(digest.perArea).map(([k, v]) => `${k}:${v}`).join(', ') || 'none mapped'}).`
+          : `DIGEST: no commits since anchor ${anchor.slice(0, 8)} — skip.`);
+    } else {
+      console.log('DIGEST: no anchor yet (Code Mode never opened) — skip.');
+    }
+    const staleTours = tours.filter(t => t.stale);
+    if (tours.length) console.log(`TOURS: ${tours.length} (${staleTours.length ? `${staleTours.length} STALE: ${staleTours.map(t => t.id).join(', ')}` : 'all fresh'}).`);
+    if (dbSources.length) console.log(`DB: ${dbSources.length} source(s) detected${fs.existsSync(DB_JSON) ? ', annotated' : ' — write-db annotations missing'} (see \`sly-atlas db\`).`);
   }
 }
 
@@ -580,6 +785,306 @@ function cmdWriteNode(args) {
   console.log(`${merge ? 'Merged into' : 'Wrote'} nodes/${areaId}.json — ${Object.keys(hashes).length} sources stamped, ${doc.key_files.length} key files${doc.symbol_summaries ? `, ${Object.keys(doc.symbol_summaries).length} files with symbol summaries` : ''}.`);
 }
 
+// --- Stretch commands (feature 079) ------------------------------------------
+
+function gitOut(args) {
+  try {
+    const { execFileSync } = require('child_process');
+    return execFileSync('git', args, {
+      cwd: PROJECT_ROOT, encoding: 'utf-8', windowsHide: true, timeout: 15000, maxBuffer: 32 * 1024 * 1024,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** The digest anchor: the commit the user last acknowledged (view-state),
+ *  falling back to the current digest's own anchor. Null = no anchor yet
+ *  (user has never entered Code Mode) → no digest should be generated. */
+function digestAnchor() {
+  const viewState = readJson(VIEW_STATE_JSON);
+  if (viewState && typeof viewState.anchor_commit === 'string' && /^[0-9a-f]{4,40}$/.test(viewState.anchor_commit)) {
+    return viewState.anchor_commit;
+  }
+  const digest = readJson(DIGEST_JSON);
+  if (digest && typeof digest.since_commit === 'string') return digest.since_commit;
+  return null;
+}
+
+function cmdWriteDigest(args) {
+  const root = readJson(ATLAS_JSON);
+  if (!root) fail(['no atlas.json — run the first scan before writing a digest']);
+  const knownIds = new Set(root.areas.map(a => a.id));
+  const payload = loadPayload(args);
+
+  const anchor = digestAnchor() || (typeof payload.since_commit === 'string' ? payload.since_commit : null);
+  if (!anchor) {
+    fail(['no digest anchor: view-state has no anchor_commit and no prior digest exists',
+      'The digest anchors to the user\'s last acknowledged visit. Until Code Mode has been opened once, skip the digest.']);
+  }
+
+  const doc = {
+    schema_version: ATLAS_SCHEMA_VERSION,
+    headline: payload.headline,
+    areas: payload.areas,
+    notable: payload.notable,
+  };
+  const errs = validateDigest(doc, knownIds);
+  if (errs.length) fail(errs);
+
+  // Hallucination guard: every notable file must exist.
+  const missing = (doc.notable || []).map(n => n.file).filter(f => !fs.existsSync(containedAbs(f)));
+  if (missing.length) fail(missing.map(f => `notable file does not exist: ${f}`));
+
+  const head = gitOut(['rev-parse', 'HEAD']);
+  if (!head) fail(['cannot resolve git HEAD — digest needs a git repository']);
+  doc.generated_at = new Date().toISOString();
+  doc.since_commit = anchor;
+  const sinceDate = gitOut(['show', '-s', '--format=%cI', anchor]);
+  if (sinceDate) doc.since_date = sinceDate;
+  doc.head_commit = head;
+
+  const finalErrs = validateDigest(doc, knownIds);
+  if (finalErrs.length) fail(finalErrs);
+  writeJsonAtomic(DIGEST_JSON, doc);
+  console.log(`Wrote digest.json — "${doc.headline.slice(0, 60)}${doc.headline.length > 60 ? '…' : ''}" covering ${anchor.slice(0, 8)}..${head.slice(0, 8)} (${doc.areas.length} areas${doc.notable ? `, ${doc.notable.length} notable` : ''}).`);
+}
+
+function cmdWriteTour(args) {
+  const root = readJson(ATLAS_JSON);
+  const knownIds = root ? new Set(root.areas.map(a => a.id)) : undefined;
+  const payload = loadPayload(args);
+
+  const doc = {
+    schema_version: ATLAS_SCHEMA_VERSION,
+    id: payload.id,
+    title: payload.title,
+    prompt: payload.prompt,
+    description: payload.description,
+    area: payload.area,
+    updated_at: new Date().toISOString(),
+    steps: payload.steps,
+  };
+  const errs = validateTour(doc, knownIds);
+  if (errs.length) fail(errs);
+
+  // Hallucination guard + staleness stamp over every step file.
+  const hashes = {};
+  const missing = [];
+  for (const s of doc.steps) {
+    const rel = s.file.replace(/\\/g, '/');
+    if (rel in hashes) continue;
+    try {
+      hashes[rel] = hashContent(fs.readFileSync(containedAbs(rel)));
+    } catch {
+      missing.push(rel);
+    }
+  }
+  if (missing.length) {
+    fail(missing.map(f => `step file does not exist: ${f}`),
+      'Every tour step must anchor to a real file. Check for typos or stale paths.');
+  }
+  doc.source_hashes = hashes;
+
+  fs.mkdirSync(TOURS_DIR, { recursive: true });
+  writeJsonAtomic(path.join(TOURS_DIR, `${doc.id}.json`), doc);
+  console.log(`Wrote tours/${doc.id}.json — "${doc.title}", ${doc.steps.length} steps over ${Object.keys(hashes).length} files.`);
+}
+
+function cmdDeleteTour(args) {
+  const id = args[0] && !args[0].startsWith('--') ? args[0] : null;
+  if (!id || !SLUG_RE.test(id)) fail(['usage: sly-atlas delete-tour <tour-id>']);
+  const file = path.join(TOURS_DIR, `${id}.json`);
+  if (!fs.existsSync(file)) fail([`no such tour: ${id}`]);
+  fs.unlinkSync(file);
+  console.log(`Deleted tours/${id}.json`);
+}
+
+function readTours() {
+  let entries = [];
+  try { entries = fs.readdirSync(TOURS_DIR).filter(f => f.endsWith('.json')); } catch { return []; }
+  const tours = [];
+  for (const f of entries.sort()) {
+    const doc = readJson(path.join(TOURS_DIR, f));
+    if (!doc || validateTour(doc).length) continue; // skip corrupt/invalid quietly
+    const changed = [];
+    for (const [rel, expected] of Object.entries(doc.source_hashes || {})) {
+      let actual = null;
+      try { actual = hashContent(fs.readFileSync(path.resolve(PROJECT_ROOT, rel))); } catch { /* deleted */ }
+      if (actual !== expected) changed.push(rel);
+    }
+    tours.push({ id: doc.id, title: doc.title, area: doc.area, steps: doc.steps.length, stale: changed.length > 0, changed });
+  }
+  return tours;
+}
+
+function cmdWriteDb(args) {
+  const payload = loadPayload(args);
+  const doc = {
+    schema_version: ATLAS_SCHEMA_VERSION,
+    updated_at: new Date().toISOString(),
+    summary: payload.summary,
+    tables: payload.tables,
+    relations: payload.relations,
+  };
+  const errs = validateDbAnnotations(doc);
+  if (errs.length) fail(errs);
+  writeJsonAtomic(DB_JSON, doc);
+  const tableCount = Object.keys(doc.tables || {}).length;
+  console.log(`Wrote db.json — ${tableCount} annotated tables${doc.relations ? `, ${doc.relations.length} relations` : ''}.`);
+}
+
+function cmdDb(args) {
+  const { introspect } = require(path.join(__dirname, 'db-introspect.js'));
+  const result = introspect(PROJECT_ROOT, projectFiles());
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (result.sources.length === 0) {
+    console.log('No database sources detected (SQLite files, schema.prisma, or CREATE TABLE .sql files).');
+    return;
+  }
+  for (const src of result.sources) {
+    console.log(`${src.kind.toUpperCase().padEnd(7)} ${src.path}${src.error ? ` — ERROR: ${src.error}` : ''}`);
+    for (const t of src.tables) {
+      const pk = t.columns.filter(c => c.pk).map(c => c.name).join(',');
+      console.log(`  ${t.name} (${t.columns.length} cols${pk ? `, pk: ${pk}` : ''}${t.fks.length ? `, ${t.fks.length} fks` : ''})`);
+    }
+  }
+  console.log('\nAnnotate with `sly-atlas write-db --file <db.json>` — see the atlas skill.');
+}
+
+// --- context: the atlas as machine context for agents ------------------------
+
+function firstParagraph(text) {
+  return String(text || '').split(/\n\s*\n/)[0].trim();
+}
+
+function buildContext(opts) {
+  const root = readJson(ATLAS_JSON);
+  if (!root || validateAtlasRoot(root).length) return { error: 'No valid atlas — run the first scan (see the atlas skill).' };
+  const nodes = {};
+  for (const a of root.areas) {
+    const n = readJson(path.join(NODES_DIR, `${a.id}.json`));
+    if (n && !validateAtlasNode(n).length) nodes[a.id] = n;
+  }
+
+  if (opts.area) {
+    const area = root.areas.find(a => a.id === opts.area);
+    if (!area) return { error: `Unknown area '${opts.area}'. Known: ${root.areas.map(a => a.id).join(', ')}` };
+    const node = nodes[area.id];
+    return {
+      kind: 'area',
+      area: { id: area.id, name: area.name, paths: area.paths, summary: area.summary },
+      explanation: node ? node.explanation : undefined,
+      key_files: node ? node.key_files : [],
+      modules: node ? node.modules || [] : [],
+      symbol_summaries: node ? node.symbol_summaries || {} : {},
+      analyzed_at: node ? node.updated_at : undefined,
+    };
+  }
+
+  if (opts.files && opts.files.length) {
+    const under = (file, prefixes) => prefixes.some(p => file === p || file.startsWith(p.endsWith('/') ? p : p + '/'));
+    const out = { kind: 'files', files: [] };
+    for (const f of opts.files) {
+      const rel = String(f).replace(/\\/g, '/');
+      const area = root.areas.find(a => under(rel, a.paths));
+      const node = area ? nodes[area.id] : undefined;
+      out.files.push({
+        path: rel,
+        area: area ? { id: area.id, name: area.name } : undefined,
+        area_gist: node ? firstParagraph(node.explanation) : undefined,
+        role: node ? (node.key_files || []).find(k => k.path === rel)?.role : undefined,
+        module_summary: node ? (node.modules || []).find(m => m.path === rel)?.summary : undefined,
+        symbols: node ? (node.symbol_summaries || {})[rel] : undefined,
+      });
+    }
+    return out;
+  }
+
+  // Project brief
+  return {
+    kind: 'project',
+    overview: root.project_overview,
+    updated_at: root.updated_at,
+    areas: root.areas.map(a => ({
+      id: a.id, name: a.name, paths: a.paths, summary: a.summary,
+      gist: nodes[a.id] ? firstParagraph(nodes[a.id].explanation) : undefined,
+      key_files: nodes[a.id] ? (nodes[a.id].key_files || []).slice(0, 6) : [],
+    })),
+    flows: root.flows || [],
+  };
+}
+
+function contextMarkdown(ctx, budget) {
+  const sections = [];
+  if (ctx.kind === 'project') {
+    sections.push(`# Codebase Atlas brief\n\n${ctx.overview || '(no overview)'}\n`);
+    sections.push('## Areas\n\n' + ctx.areas.map(a =>
+      `- **${a.name}** (\`${a.id}\`) — ${a.summary || ''}\n  paths: ${a.paths.join(', ')}${a.gist ? `\n  ${a.gist}` : ''}`,
+    ).join('\n'));
+    if (ctx.flows.length) sections.push('## Flows\n\n' + ctx.flows.map(f => `- ${f.from} → ${f.to}: ${f.label}`).join('\n'));
+    for (const a of ctx.areas) {
+      if (!a.key_files.length) continue;
+      sections.push(`## Key files — ${a.name}\n\n` + a.key_files.map(k => `- \`${k.path}\` — ${k.role}`).join('\n'));
+    }
+  } else if (ctx.kind === 'area') {
+    sections.push(`# Area brief: ${ctx.area.name} (\`${ctx.area.id}\`)\n\npaths: ${ctx.area.paths.join(', ')}${ctx.analyzed_at ? `\nanalyzed: ${ctx.analyzed_at}` : ''}\n`);
+    if (ctx.explanation) sections.push(ctx.explanation);
+    if (ctx.key_files.length) sections.push('## Key files\n\n' + ctx.key_files.map(k => `- \`${k.path}\` — ${k.role}`).join('\n'));
+    if (ctx.modules.length) sections.push('## Modules\n\n' + ctx.modules.map(m => `- **${m.name}** (\`${m.path}\`) — ${m.summary}`).join('\n'));
+    const symFiles = Object.entries(ctx.symbol_summaries);
+    for (const [file, syms] of symFiles) {
+      sections.push(`## Symbols — \`${file}\`\n\n` + Object.entries(syms).map(([n, s]) => `- \`${n}\` — ${s}`).join('\n'));
+    }
+  } else if (ctx.kind === 'files') {
+    sections.push('# File context brief\n');
+    for (const f of ctx.files) {
+      const lines = [`## \`${f.path}\``];
+      if (f.area) lines.push(`Area: **${f.area.name}** (\`${f.area.id}\`)`);
+      if (f.role) lines.push(`Role: ${f.role}`);
+      if (f.module_summary) lines.push(f.module_summary);
+      if (f.area_gist) lines.push(`\n${f.area_gist}`);
+      if (f.symbols) lines.push('\nSymbols:\n' + Object.entries(f.symbols).map(([n, s]) => `- \`${n}\` — ${s}`).join('\n'));
+      if (!f.area && !f.role && !f.module_summary) lines.push('(not described in the atlas)');
+      sections.push(lines.join('\n'));
+    }
+  }
+  // Budget: keep whole sections front-to-back; the tail sections (per-area key
+  // files / per-file symbols) are the lowest-value, so dropping from the end
+  // degrades gracefully. The output NEVER exceeds the budget — the trim note
+  // is only appended when it fits.
+  let out = '';
+  let trimmedFrom = -1;
+  for (let i = 0; i < sections.length; i++) {
+    const candidate = out ? out + '\n\n' + sections[i] : sections[i];
+    if (candidate.length > budget) { trimmedFrom = i; break; }
+    out = candidate;
+  }
+  if (!out) return sections.length ? sections[0].slice(0, Math.max(0, budget - 2)) + ' …' : '';
+  if (trimmedFrom >= 0) {
+    const note = `\n\n…(${sections.length - trimmedFrom} sections trimmed to fit budget)`;
+    if (out.length + note.length <= budget) out += note;
+  }
+  return out;
+}
+
+function cmdContext(args) {
+  const area = getFlag(args, '--area');
+  const filesArg = getFlag(args, '--files');
+  const budgetArg = getFlag(args, '--budget');
+  const budget = Math.max(500, Math.min(100000, parseInt(budgetArg || '6000', 10) || 6000));
+  const ctx = buildContext({ area, files: filesArg ? filesArg.split(',').map(s => s.trim()).filter(Boolean) : undefined });
+  if (ctx.error) fail([ctx.error]);
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(ctx, null, 2));
+    return;
+  }
+  console.log(contextMarkdown(ctx, budget));
+}
+
 // --- Navigation verbs (Phase 3) ---------------------------------------------
 
 function appendNavEvent(event) {
@@ -656,6 +1161,17 @@ Navigation verbs (one-shot directives rendered by the Code Mode UI):
   sly-atlas highlight <file:line[-end]> --note "..."
   sly-atlas deck --file <json>                   {title, items:[{file, line?, note?}]}
 
+Stretch artifacts (feature 079):
+  sly-atlas write-digest --file <json>           Catch-up digest: {headline, areas:[{area,summary,commits?,files_changed?}], notable?}
+                                                 Anchored to the user's last acknowledged visit (view-state); CLI stamps commits/dates.
+  sly-atlas write-tour --file <json>             Guided tour: {id, title, description?, area?, steps:[{file,line?,endLine?,title,body}]}
+                                                 Step files must exist; source hashes stamped (tours go stale like nodes).
+  sly-atlas delete-tour <id>                     Remove a tour artifact
+  sly-atlas db [--json]                          Deterministic DB introspection (SQLite/prisma/SQL DDL sources)
+  sly-atlas write-db --file <json>               DB annotations: {summary?, tables?:{name:{summary?,columns?}}, relations?}
+  sly-atlas context [--area <id>] [--files a,b] [--json] [--budget <chars>]
+                                                 Deterministic agent-context brief assembled from atlas artifacts
+
 All commands run relative to the enclosing SlyCode project (found via documentation/kanban.json).
 See the atlas skill (.claude/skills/atlas/SKILL.md) for the full workflow.`;
 
@@ -669,6 +1185,12 @@ if (require.main === module) {
     case 'navigate': cmdNavigate(rest); break;
     case 'highlight': cmdHighlight(rest); break;
     case 'deck': cmdDeck(rest); break;
+    case 'write-digest': cmdWriteDigest(rest); break;
+    case 'write-tour': cmdWriteTour(rest); break;
+    case 'delete-tour': cmdDeleteTour(rest); break;
+    case 'write-db': cmdWriteDb(rest); break;
+    case 'db': cmdDb(rest); break;
+    case 'context': cmdContext(rest); break;
     case 'help': case '--help': case undefined: console.log(HELP); break;
     default:
       console.error(`Unknown command: ${cmd}\n`);
@@ -677,5 +1199,11 @@ if (require.main === module) {
   }
 }
 
-// Exported for the web↔CLI lockstep parity test (schema.test.ts).
-module.exports = { validateAtlasRoot, validateAtlasNode, validateNavEvent, LIMITS, AREA_PALETTE };
+// Exported for the web↔CLI lockstep parity test (schema.test.ts) and the
+// context-builder unit tests (contextMarkdown is pure).
+module.exports = {
+  validateAtlasRoot, validateAtlasNode, validateNavEvent,
+  validateDigest, validateTour, validateDbAnnotations,
+  contextMarkdown,
+  LIMITS, AREA_PALETTE,
+};

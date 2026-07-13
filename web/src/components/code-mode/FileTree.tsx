@@ -132,9 +132,13 @@ function TreeRow({
         onClick={() => onOpenFile({ path: node.path })}
         style={pad}
         className={`block w-full truncate rounded px-1 py-[1px] text-left leading-[1.9] ${
-          active ? 'bg-(--cm-atlas-dim) text-(--cm-atlas)' : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
+          active
+            ? 'bg-(--cm-atlas-dim) text-(--cm-atlas)'
+            : node.ignored
+              ? 'text-(--cm-faint) italic hover:bg-(--cm-panel3) hover:text-(--cm-muted)'
+              : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
         }`}
-        title={node.path}
+        title={node.ignored ? `${node.path} · gitignored (editable)` : node.path}
       >
         {node.name}
       </button>

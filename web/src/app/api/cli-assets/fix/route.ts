@@ -11,6 +11,7 @@ import path from 'path';
 import { getSlycodeRoot } from '@/lib/paths';
 import { loadRegistry } from '@/lib/registry';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
+import { safeAssetJoin } from '@/lib/asset-path-guard';
 import type { ProviderId, AssetType } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
@@ -35,11 +36,18 @@ export async function POST(request: NextRequest) {
     // Resolve the file path
     let assetPath = '';
 
-    // First try the flat canonical store
+    // First try the flat canonical store. safeAssetJoin validates assetName
+    // and confirms containment inside store/<type> — reject traversal before
+    // any fs access.
     const typeDir = assetType === 'skill' ? 'skills' : 'agents';
+    const storeBase = path.join(root, 'store', typeDir);
+    const storeAsset = safeAssetJoin(storeBase, assetType === 'skill' ? assetName : `${assetName}.md`);
+    if (!storeAsset) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+    }
     const storeFile = assetType === 'skill'
-      ? path.join(root, 'store', typeDir, assetName, 'SKILL.md')
-      : path.join(root, 'store', typeDir, `${assetName}.md`);
+      ? path.join(storeAsset, 'SKILL.md')
+      : storeAsset;
 
     if (fs.existsSync(storeFile)) {
       assetPath = storeFile;

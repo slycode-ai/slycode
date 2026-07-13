@@ -34,7 +34,8 @@ export interface Session {
     terminalDimensions: TerminalDimensions;
     claudeBeforeFiles?: string[];
     claudeDir?: string;
-    guidRetryAttempted?: boolean;
+    guidDetectionInFlight?: boolean;
+    guidDetectionLastArmedAt?: number;
     guidDetectionCancelled?: boolean;
     lastClientDisconnect?: string;
     exitResolver?: () => void;

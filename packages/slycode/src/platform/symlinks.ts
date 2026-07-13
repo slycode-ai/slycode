@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 
-const CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'] as const;
+export const CLI_TOOLS = ['slycode', 'sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'] as const;
 
 function getTargetBinDir(): string {
   if (process.platform === 'win32') {
@@ -95,6 +95,53 @@ export function linkClis(workspace: string): void {
 
   console.log('');
   console.log('CLI tools linked.');
+}
+
+/**
+ * Quiet, idempotent self-heal of the CLI links — run on `slycode start`.
+ *
+ * Why this exists: `slycode update` re-links, but the update command RUNS the
+ * OLD package's code (loaded before npm swaps it), so a CLI tool introduced in
+ * the new release isn't in the old CLI_TOOLS list and never gets linked (this
+ * is exactly how sly-atlas ended up missing on upgraded installs). start runs
+ * the NEW code, so healing here converges after any update path — including a
+ * plain `npm install` that bypasses linkClis entirely. Silent when everything
+ * is already correct; never throws.
+ */
+export function ensureClis(workspace: string): void {
+  try {
+    const binDir = getTargetBinDir();
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+
+    for (const tool of CLI_TOOLS) {
+      const target = resolvePackageBin(workspace, tool);
+      if (!fs.existsSync(target)) continue; // tool not shipped in this install
+
+      if (process.platform === 'win32') {
+        const shimPath = path.join(binDir, `${tool}.cmd`);
+        const content = `@echo off\r\n"${process.execPath}" "${target}" %*\r\n`;
+        let current: string | null = null;
+        try { current = fs.readFileSync(shimPath, 'utf-8'); } catch { /* missing */ }
+        if (current !== content) {
+          fs.writeFileSync(shimPath, content);
+          console.log(`  ✓ Linked CLI tool: ${tool}`);
+        }
+      } else {
+        const linkPath = path.join(binDir, tool);
+        let currentTarget: string | null = null;
+        try { currentTarget = fs.readlinkSync(linkPath); } catch { /* missing or not a symlink */ }
+        if (currentTarget === target) continue;
+        try {
+          try { fs.unlinkSync(linkPath); } catch { /* didn't exist */ }
+          fs.symlinkSync(target, linkPath);
+          try { fs.chmodSync(target, 0o755); } catch { /* node_modules perms */ }
+          console.log(`  ✓ Linked CLI tool: ${tool}`);
+        } catch { /* best effort — a broken link heals on the next run */ }
+      }
+    }
+  } catch {
+    // Self-heal must never block start.
+  }
 }
 
 /**

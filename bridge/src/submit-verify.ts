@@ -173,6 +173,8 @@ export function parsePastePlaceholder(text: string): PastePlaceholder | null {
 
 /** How many normalized leading characters of the payload we try to find. */
 const PREFIX_LEN = 48;
+/** Minimum normalized region length for the viewport-window (region ⊂ payload) match — short generic text must not claim ownership. */
+const VIEWPORT_MIN_MATCH = 24;
 
 function payloadQueued(regionText: string, expected: string): boolean {
   const normRegion = normalizeForMatch(regionText);
@@ -204,7 +206,18 @@ function payloadQueued(regionText: string, expected: string): boolean {
     // Very short payloads must match fully to avoid false positives.
     return normRegion.includes(normExpected);
   }
-  return normRegion.includes(prefix);
+  if (normRegion.includes(prefix)) return true;
+
+  // Viewport-window branch — proven by live capture 2026-07-09: a medium-
+  // length paste (too short for a placeholder, taller than the input box)
+  // leaves the cursor at the END, so the box shows only a tail/middle window
+  // of the message and the prefix is scrolled out of view. If everything
+  // visible in the region is a substring of our payload (and long enough to
+  // be non-coincidental), it's ours.
+  if (normRegion.length >= VIEWPORT_MIN_MATCH && normExpected.includes(normRegion)) {
+    return true;
+  }
+  return false;
 }
 
 /**

@@ -64,6 +64,8 @@ export interface TreeNode {
   name: string;
   path: string; // repo-relative, posix separators
   type: 'dir' | 'file';
+  /** gitignored file surfaced for editing (.env & friends) — rendered dimmed */
+  ignored?: boolean;
   children?: TreeNode[];
 }
 
@@ -71,15 +73,28 @@ export interface TreeNode {
  * Build the project file tree.
  *
  * Prefers `git ls-files` (respects .gitignore, includes untracked) so the
- * tree matches what a developer thinks of as "the project". Falls back to an
- * fs walk with default ignores for non-git projects.
+ * tree matches what a developer thinks of as "the project" — PLUS
+ * individually-ignored files (.env, *.local.json, …), marked `ignored` and
+ * rendered dimmed: the editor explicitly supports editing them, so the tree
+ * must be able to reach them. Wholly-ignored DIRECTORIES (node_modules/,
+ * dist/, .next/ — deps and build output) stay hidden. Falls back to an fs
+ * walk with default ignores for non-git projects.
  */
 export async function buildTree(root: string): Promise<TreeNode[]> {
   const files = await listProjectFiles(root);
-  return foldTree(files);
+  if (files === null) {
+    // not a git repo — bounded walk (already includes dotfiles like .env)
+    const out: string[] = [];
+    await walk(root, '', out, 0);
+    return foldTree(out);
+  }
+  const ignored = await listIgnoredFiles(root);
+  const seen = new Set(files);
+  const merged = [...files, ...ignored.filter(f => !seen.has(f))];
+  return foldTree(merged, new Set(ignored));
 }
 
-async function listProjectFiles(root: string): Promise<string[]> {
+async function listProjectFiles(root: string): Promise<string[] | null> {
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -89,11 +104,24 @@ async function listProjectFiles(root: string): Promise<string[]> {
     const files = stdout.split('\n').filter(Boolean);
     if (files.length > 0) return files;
   } catch {
-    // not a git repo — fall through to walk
+    // not a git repo
   }
-  const out: string[] = [];
-  await walk(root, '', out, 0);
-  return out;
+  return null;
+}
+
+/** Individually-ignored FILES (`--directory` collapses wholly-ignored dirs to
+ *  one `dir/` entry, which we drop — deps/build output stay hidden). */
+async function listIgnoredFiles(root: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'],
+      { cwd: root, windowsHide: true, timeout: 15000, maxBuffer: 32 * 1024 * 1024 },
+    );
+    return stdout.split('\n').filter(f => f && !f.endsWith('/'));
+  } catch {
+    return [];
+  }
 }
 
 async function walk(root: string, rel: string, out: string[], depth: number): Promise<void> {
@@ -114,7 +142,7 @@ async function walk(root: string, rel: string, out: string[], depth: number): Pr
 }
 
 /** Fold a flat file list into a sorted tree (dirs first, then files, alpha). */
-export function foldTree(files: string[]): TreeNode[] {
+export function foldTree(files: string[], ignoredSet?: Set<string>): TreeNode[] {
   interface DirEntry { dirs: Map<string, DirEntry>; files: string[] }
   const rootDir: DirEntry = { dirs: new Map(), files: [] };
 
@@ -143,11 +171,15 @@ export function foldTree(files: string[]): TreeNode[] {
       }));
     const fileNodes = dir.files
       .sort((a, b) => a.localeCompare(b))
-      .map((name): TreeNode => ({
-        name,
-        path: prefix ? `${prefix}/${name}` : name,
-        type: 'file',
-      }));
+      .map((name): TreeNode => {
+        const p = prefix ? `${prefix}/${name}` : name;
+        return {
+          name,
+          path: p,
+          type: 'file',
+          ...(ignoredSet?.has(p) ? { ignored: true } : {}),
+        };
+      });
     return [...dirNodes, ...fileNodes];
   }
   return emit(rootDir, '');

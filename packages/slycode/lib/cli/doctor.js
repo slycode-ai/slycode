@@ -39,6 +39,7 @@ const fs = __importStar(require("fs"));
 const net = __importStar(require("net"));
 const child_process_1 = require("child_process");
 const workspace_1 = require("./workspace");
+const symlinks_1 = require("../platform/symlinks");
 function icon(result) {
     switch (result) {
         case 'ok': return '\u2713';
@@ -195,15 +196,16 @@ async function doctor(_args) {
             checks.push({ name: `Port ${p.port} (${p.name})`, result: 'ok', message: 'Available' });
         }
     }
-    // 6. Global CLIs
-    const cliTools = ['sly-atlas', 'sly-kanban', 'sly-messaging', 'sly-scaffold'];
+    // 6. Global CLIs — canonical list from symlinks.ts so new tools can't drift
+    // out of this check ('slycode' itself excluded: doctor running proves it).
+    const cliTools = symlinks_1.CLI_TOOLS.filter(t => t !== 'slycode');
     for (const tool of cliTools) {
         try {
             (0, child_process_1.execSync)(`command -v ${tool}`, { stdio: 'pipe', windowsHide: true });
             checks.push({ name: tool, result: 'ok', message: 'Found in PATH' });
         }
         catch {
-            checks.push({ name: tool, result: 'warn', message: 'Not in PATH (run: slycode service install)' });
+            checks.push({ name: tool, result: 'warn', message: 'Not in PATH (run: slycode start — it self-heals CLI links)' });
         }
     }
     // 7. AI coding agents
