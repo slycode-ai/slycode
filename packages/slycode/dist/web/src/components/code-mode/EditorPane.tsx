@@ -49,11 +49,25 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
   const [isDark, setIsDark] = useState(true);
   const [hasSelection, setHasSelection] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  // Disk/buffer divergence needing a user decision — never resolved silently.
+  // 'save': a save was refused (409, stale baseMtimeMs). 'external': disk
+  // changed under a dirty buffer (found by a focus/nav refresh).
+  const [conflict, setConflict] = useState<{ path: string; source: 'save' | 'external' } | null>(null);
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<MonacoEditorNS.IEditorDecorationsCollection | null>(null);
   // Bumped in onMount so the reveal effect re-runs once the editor exists.
   const [mountTick, setMountTick] = useState(0);
   const activePath = active?.path ?? openFiles[openFiles.length - 1];
+
+  // Render-current refs so async callbacks (refresh, save) read live state
+  // without re-registering listeners on every change.
+  const filesRef = useRef(files);
+  useEffect(() => { filesRef.current = files; }, [files]);
+  const activePathRef = useRef(activePath);
+  useEffect(() => { activePathRef.current = activePath; }, [activePath]);
+  const openFilesRef = useRef(openFiles);
+  useEffect(() => { openFilesRef.current = openFiles; }, [openFiles]);
+  const refreshInFlight = useRef<Set<string>>(new Set());
 
   // Voice-into-the-file: the editor registers as a pseudo-terminal so the
   // voice hotkey (focus inside the data-terminal-id wrapper) inserts the
@@ -113,6 +127,64 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFiles, projectId]);
 
+  // Re-read a file from disk and refresh the buffer (agents rewrite files
+  // while the editor is open — a one-shot cache shows stale content and
+  // highlights land on wrong lines). Non-dirty buffers refresh silently;
+  // a dirty buffer over a changed file surfaces the conflict banner instead
+  // — the buffer itself is NEVER replaced without an explicit user choice
+  // (`discardDirty`, the banner's "Reload from disk" action).
+  const refreshFile = useCallback(async (path: string, discardDirty = false) => {
+    if (refreshInFlight.current.has(path)) return;
+    const st = filesRef.current[path];
+    const stillLoading = !st || (st.content === '' && st.mtimeMs === 0 && !st.error);
+    if (stillLoading && !discardDirty) return; // initial-load effect owns this fetch
+    refreshInFlight.current.add(path);
+    try {
+      const res = await fetch(`/api/atlas/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      if (!res.ok) return; // best-effort — keep the buffer we have
+      const cur = filesRef.current[path];
+      if (!cur) return; // closed while fetching
+      if (data.mtimeMs === cur.mtimeMs && !discardDirty) return; // unchanged on disk
+      if (cur.dirty && !discardDirty) {
+        setConflict({ path, source: 'external' });
+        return;
+      }
+      const ed = editorRef.current;
+      const viewState = path === activePathRef.current && ed ? ed.saveViewState() : null;
+      setFiles(prev => {
+        const p = prev[path];
+        if (!p) return prev;
+        if (p.dirty && !discardDirty) return prev; // went dirty mid-fetch — keep edits
+        return { ...prev, [path]: { content: data.content, language: data.language, mtimeMs: data.mtimeMs, dirty: false } };
+      });
+      setConflict(c => (c?.path === path ? null : c));
+      if (viewState && ed) requestAnimationFrame(() => ed.restoreViewState(viewState));
+    } catch { /* best-effort — next trigger retries */ }
+    finally { refreshInFlight.current.delete(path); }
+  }, [projectId]);
+
+  // Refresh all open files when the window regains focus/visibility — the
+  // classic "agent edited while I was watching the terminal" moment.
+  useEffect(() => {
+    const refreshAll = () => { for (const p of openFilesRef.current) void refreshFile(p); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshAll(); };
+    window.addEventListener('focus', refreshAll);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', refreshAll);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refreshFile]);
+
+  // Refresh when a target lands on a file (nav-events reopen already-open
+  // files with a fresh target identity; tab selects also pass through here).
+  // Runs before/alongside the reveal effect — when fresh content lands, the
+  // reveal effect re-runs against it, so highlights hit the right lines.
+  useEffect(() => {
+    if (active?.path) void refreshFile(active.path);
+  }, [active, refreshFile]);
+
   // Reveal requested line + apply AI highlight when the target carries them.
   //
   // FIRST-OPEN RACE (test-review fix, feature 079): on the first open of a
@@ -171,7 +243,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
     return () => { cancelled = true; };
   }, [active, activeFileState, mountTick]);
 
-  const save = useCallback(async (path: string) => {
+  const save = useCallback(async (path: string, opts?: { force?: boolean }) => {
     const model = editorRef.current?.getModel();
     if (!model || saving) return;
     const content = model.getValue();
@@ -180,14 +252,26 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
       const res = await fetch('/api/atlas/file', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, path, content }),
+        body: JSON.stringify({
+          projectId, path, content,
+          // The mtime this buffer was loaded/saved at — the server refuses the
+          // write (409) if disk has moved on, so a stale Ctrl+S can't clobber
+          // an agent's concurrent edit. `force` is the banner's Overwrite.
+          baseMtimeMs: filesRef.current[path]?.mtimeMs,
+          ...(opts?.force ? { force: true } : {}),
+        }),
       });
       const data = await res.json();
+      if (res.status === 409 && data.error === 'conflict') {
+        setConflict({ path, source: 'save' });
+        return;
+      }
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setFiles(prev => ({
         ...prev,
         [path]: { ...prev[path], content, dirty: false, mtimeMs: data.mtimeMs },
       }));
+      setConflict(c => (c?.path === path ? null : c));
       flashNotice(`saved ${path.split('/').pop()}`);
     } catch (e) {
       flashNotice(`save failed: ${String((e as Error).message ?? e)}`);
@@ -324,6 +408,42 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
           <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-(--cm-atlas)">✦ atlas</span>
           <p className="min-w-0 flex-1 text-[12px] leading-snug text-(--cm-text)">{aiNote}</p>
           <button onClick={() => { setAiNote(null); decorationsRef.current?.clear(); }} className="font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)">✕</button>
+        </div>
+      )}
+
+      {/* Disk/buffer conflict — always a user decision, never a silent pick */}
+      {conflict && conflict.path === activePath && (
+        <div className="flex items-center gap-2 border-b border-(--cm-stale) bg-(--cm-stale-dim) px-3 py-1.5">
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.15em] text-(--cm-stale)">⚠ conflict</span>
+          <p className="min-w-0 flex-1 text-[12px] leading-snug text-(--cm-text)">
+            {conflict.source === 'save'
+              ? 'This file changed on disk after you loaded it — saving would overwrite those changes.'
+              : 'This file changed on disk while you have unsaved edits.'}
+          </p>
+          <button
+            onClick={() => refreshFile(conflict.path, true)}
+            className="shrink-0 rounded border border-(--cm-stale) px-2 py-0.5 font-mono text-[10px] text-(--cm-stale) hover:brightness-110"
+            title="Replace your buffer with the disk version (discards your edits)"
+          >
+            Reload from disk
+          </button>
+          {conflict.source === 'save' ? (
+            <button
+              onClick={() => save(conflict.path, { force: true })}
+              className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+              title="Write your buffer over the disk version"
+            >
+              Overwrite
+            </button>
+          ) : (
+            <button
+              onClick={() => setConflict(null)}
+              className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+              title="Keep editing your version — saving will ask again if disk still differs"
+            >
+              Keep my version
+            </button>
+          )}
         </div>
       )}
 

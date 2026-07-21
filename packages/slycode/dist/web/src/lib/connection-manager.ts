@@ -44,6 +44,10 @@ const JITTER_FACTOR = 0.2; // ±20%
 const HEALTH_CHECK_INTERVAL_MS = 20000; // Check connection health every 20s
 const HEALTH_CHECK_TIMEOUT_MS = 3000; // Timeout for health check fetch
 const STATUS_DOWNGRADE_GRACE_MS = 3000; // Grace period before downgrading from 'connected'
+// An OPEN EventSource that hasn't received data or a heartbeat for this long is
+// treated as a zombie (socket died during sleep but readyState never changed).
+// The bridge heartbeats every 15s, so 3 missed beats = stale.
+const STALE_CONNECTION_MS = 45000;
 
 // Diagnostic logging — enabled via localStorage.setItem('cm-debug', '1')
 function cmLog(...args: unknown[]): void {
@@ -184,8 +188,14 @@ class ConnectionManagerImpl {
   }
 
   private handleTabWake(): void {
-    cmLog('TAB_WAKE — force-reconnecting all connections');
-    this.reconnectAll(true);
+    // Reconnect only broken or stale connections — healthy OPEN streams must
+    // not be churned (every new SSE attach makes the bridge resend the full
+    // restore snapshot). The staleness arm covers zombie sockets that died
+    // during sleep while readyState stayed OPEN.
+    cmLog('TAB_WAKE — reconnecting broken/stale connections');
+    this.reconnectBroken(STALE_CONNECTION_MS);
+    // Kick a health check so overall status recovers promptly.
+    void this.doHealthCheck();
   }
 
   /**
@@ -350,16 +360,24 @@ class ConnectionManagerImpl {
   /**
    * Reconnect only broken connections (not OPEN ones).
    * Used after health check recovery to avoid disrupting healthy streams.
+   * When `staleMs` is given, an OPEN connection with no data/heartbeat for
+   * that long counts as broken too (zombie socket after sleep).
    */
-  private reconnectBroken(): void {
-    let reconnected = false;
+  private reconnectBroken(staleMs?: number): void {
+    const now = Date.now();
+    let reconnected = 0;
     this.connections.forEach((conn, id) => {
-      if (conn.eventSource?.readyState !== EventSource.OPEN) {
-        reconnected = true;
+      const isOpen = conn.eventSource?.readyState === EventSource.OPEN;
+      const isStale =
+        staleMs !== undefined &&
+        (!conn.lastConnected || now - conn.lastConnected > staleMs);
+      if (!isOpen || isStale) {
+        reconnected++;
         this.reconnect(id, true);
       }
     });
-    if (!reconnected) {
+    cmLog(`RECONNECT_BROKEN — ${reconnected}/${this.connections.size} reconnected${staleMs !== undefined ? ` (staleMs=${staleMs})` : ''}`);
+    if (reconnected === 0) {
       // All connections are healthy — just update status
       this.updateOverallStatus();
     }

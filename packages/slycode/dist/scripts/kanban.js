@@ -296,6 +296,7 @@ Commands:
   questionnaire Inspect / patch questionnaires attached to a card
   prompt        Send a prompt to another card's session (cross-card execution)
   respond       Reply to a cross-card prompt (callback for --wait mode)
+  session       Manage a card's terminal sessions (list/relink/link/dismiss/stop)
   areas         List available areas from context-priming
 
 Run 'kanban <command> --help' for command-specific options.
@@ -592,6 +593,41 @@ Modes:
   Fresh session:     kanban prompt <card-id> "review" --fresh --provider codex --wait
 
 When using --wait, the called card must run 'kanban respond <id> "response"' to return data.
+`;
+
+const SESSION_HELP = `
+Usage: kanban session <subcommand> <card-id> [options]
+
+Manage the terminal sessions attached to a card (bridge session records).
+
+Subcommands:
+  list <card-id>                      List all provider sessions on the card
+  relink <card-id> [--provider <id>]  Re-detect and bind the newest conversation
+  link <card-id> --guid <uuid> [--provider <id>]
+                                      Bind a SPECIFIC conversation id (manual override)
+  dismiss <card-id> [--provider <id>] Remove the session record from the card
+                                      (never deletes conversation files on disk)
+  stop <card-id> [--provider <id>]    Stop the session's terminal process
+
+Options:
+  --provider <id>   Target provider (claude|codex|gemini). Default: the card's
+                    only session if unambiguous, else the project default.
+  --guid <uuid>     Conversation id to bind (link subcommand only). Find
+                    candidates in the provider's session dir, e.g. Claude:
+                    ~/.claude/projects/<cwd-slug>/*.jsonl
+
+Notes:
+  - relink always binds the newest plausible conversation when any file exists;
+    conversation ids may be shared by multiple cards (that's allowed).
+  - link binds whatever you give it. If no matching file exists on disk you get
+    a warning (likely typo) but the bind still happens.
+  - dismiss removes the bridge's record only — transcripts stay on disk.
+
+Examples:
+  kanban session list card-123
+  kanban session relink card-123 --provider codex
+  kanban session link card-123 --guid ffa6d3c4-3d59-4693-bd6a-3e3b17919d86
+  kanban session dismiss card-123 --provider codex
 `;
 
 const RESPOND_HELP = `
@@ -4006,6 +4042,169 @@ function cmdRespond(args) {
 }
 
 // ============================================================================
+// Session management (feature 080 rev 2)
+// ============================================================================
+
+/**
+ * Resolve the provider for a card session op: --provider flag > the card's only
+ * live session record > project default > global default > 'claude'.
+ */
+async function resolveSessionProvider(opts, card, bridgeUrl) {
+  if (opts.provider) return opts.provider;
+
+  // If the card has exactly one session on the bridge, target it
+  try {
+    const res = await fetch(`${bridgeUrl}/sessions`);
+    if (res.ok) {
+      const data = await res.json();
+      const matches = (data.sessions || []).filter((s) =>
+        s.name && s.name.endsWith(`:card:${card.id}`) && s.name.startsWith(`${PROJECT_NAME}:`)
+      );
+      if (matches.length === 1) {
+        const parts = matches[0].name.split(':');
+        if (parts.indexOf('card') === 2) return parts[1];
+        return matches[0].provider || 'claude';
+      }
+      if (matches.length > 1) {
+        console.error(`Error: Card has ${matches.length} sessions — specify --provider (${matches.map(m => m.provider || m.name.split(':')[1]).join(', ')})`);
+        process.exit(1);
+      }
+    }
+  } catch { /* fall through to defaults */ }
+
+  // Project default > global default (feature 073 resolution rule)
+  try {
+    const providers = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'data', 'providers.json'), 'utf-8'));
+    let registryProjectId = null;
+    try {
+      const registry = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'projects', 'registry.json'), 'utf-8'));
+      const entries = Array.isArray(registry) ? registry : (registry.projects || []);
+      const match = entries.find((p) => p && p.path && path.resolve(p.path) === PROJECT_ROOT);
+      if (match) registryProjectId = match.id;
+    } catch { /* registry optional */ }
+    const def = (registryProjectId && providers?.defaults?.projects?.[registryProjectId]) || providers?.defaults?.global;
+    if (def?.provider) return def.provider;
+  } catch { /* providers.json optional */ }
+
+  return 'claude';
+}
+
+function cmdSession(args) {
+  const opts = parseArgs(args);
+
+  const sub = opts._[0];
+  const cardId = opts._[1];
+  const SUBCOMMANDS = new Set(['list', 'relink', 'link', 'dismiss', 'stop']);
+
+  if (opts.help || !sub || !SUBCOMMANDS.has(sub) || !cardId) {
+    console.log(SESSION_HELP);
+    if (sub && !SUBCOMMANDS.has(sub)) process.exit(1);
+    return;
+  }
+
+  const kanban = readKanban();
+  const result = findCard(kanban, cardId);
+  if (!result) {
+    console.error(`Error: Card '${cardId}' not found`);
+    process.exit(1);
+  }
+  const { card } = result;
+
+  const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
+  const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
+
+  const run = async () => {
+    try {
+      if (sub === 'list') {
+        const res = await fetch(`${bridgeUrl}/sessions`);
+        if (!res.ok) throw new Error(`Bridge returned ${res.status}`);
+        const data = await res.json();
+        const matches = (data.sessions || []).filter((s) =>
+          s.name && s.name.endsWith(`:card:${card.id}`) && s.name.startsWith(`${PROJECT_NAME}:`)
+        );
+        if (matches.length === 0) {
+          console.log(`No sessions on card ${card.id} ('${card.title}')`);
+          return;
+        }
+        console.log(`Sessions on card ${card.id} ('${card.title}'):\n`);
+        for (const s of matches) {
+          const parts = s.name.split(':');
+          const provider = parts.indexOf('card') === 2 ? parts[1] : (s.provider || 'claude');
+          const resumable = s.status !== 'stopped' || s.hasHistory;
+          console.log(`  ${provider}`);
+          console.log(`    status:       ${s.status}${resumable ? '' : '  (not resumable)'}`);
+          console.log(`    conversation: ${s.claudeSessionId || '(none captured)'}`);
+          console.log(`    last active:  ${s.lastActive || 'unknown'}`);
+          console.log(`    session name: ${s.name}`);
+        }
+        return;
+      }
+
+      const provider = await resolveSessionProvider(opts, card, bridgeUrl);
+      const sessionName = `${PROJECT_NAME}:${provider}:card:${card.id}`;
+      const encoded = encodeURIComponent(sessionName);
+
+      if (sub === 'relink') {
+        const res = await fetch(`${bridgeUrl}/sessions/${encoded}/relink`, { method: 'POST' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
+          process.exit(1);
+        }
+        console.log(`Relinked ${provider} session on card ${card.id}`);
+        console.log(`  conversation: ${body.sessionId}${body.previous && body.previous !== body.sessionId ? ` (was: ${body.previous})` : ''}`);
+      } else if (sub === 'link') {
+        const guid = opts.guid;
+        if (!guid) {
+          console.error('Error: --guid <uuid> required for link');
+          process.exit(1);
+        }
+        const res = await fetch(`${bridgeUrl}/sessions/${encoded}/link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: guid }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
+          process.exit(1);
+        }
+        console.log(`Linked ${provider} session on card ${card.id}`);
+        console.log(`  conversation: ${body.sessionId}${body.previous && body.previous !== body.sessionId ? ` (was: ${body.previous})` : ''}`);
+        if (!body.fileFound) {
+          console.log('  Warning: no matching conversation file found on disk — check the id if resume fails.');
+        }
+      } else if (sub === 'dismiss') {
+        const res = await fetch(`${bridgeUrl}/sessions/${encoded}?action=delete`, { method: 'DELETE' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
+          process.exit(1);
+        }
+        console.log(`Dismissed ${provider} session record on card ${card.id} (conversation files on disk are untouched)`);
+      } else if (sub === 'stop') {
+        const res = await fetch(`${bridgeUrl}/sessions/${encoded}?action=stop`, { method: 'DELETE' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
+          process.exit(1);
+        }
+        console.log(`Stopped ${provider} session on card ${card.id}`);
+      }
+    } catch (err) {
+      if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
+        console.error('Error: Bridge is not running.');
+      } else {
+        console.error('Error:', err.message);
+      }
+      process.exit(1);
+    }
+  };
+
+  run();
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -4080,6 +4279,9 @@ function main() {
       break;
     case 'respond':
       cmdRespond(commandArgs);
+      break;
+    case 'session':
+      cmdSession(commandArgs);
       break;
     case 'areas':
       cmdAreas(commandArgs);

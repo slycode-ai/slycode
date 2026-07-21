@@ -5,6 +5,11 @@
  * events; the Code Mode UI polls with a timestamp cursor and renders new
  * ones (navigate / highlight / result deck). One-shot by design — the agent
  * is never in the interaction loop.
+ *
+ * The response carries `serverNow` so the client can seed its cursor from
+ * the SERVER clock — events are stamped server-side (makeEvent in
+ * scripts/atlas.js), and a browser clock running ahead would otherwise
+ * silently drop every directive fired in the first N seconds of skew.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -18,7 +23,7 @@ export async function GET(request: NextRequest) {
   try {
     const project = await resolveProject(searchParams.get('projectId'));
     const events = await readNavEvents(project.root, searchParams.get('after') ?? undefined);
-    return NextResponse.json({ events });
+    return NextResponse.json({ events, serverNow: new Date().toISOString() });
   } catch (error) {
     if (error instanceof AtlasPathError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

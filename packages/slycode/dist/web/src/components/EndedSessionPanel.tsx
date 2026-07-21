@@ -57,7 +57,9 @@ export default function EndedSessionPanel({
     setBusy('dismiss');
     setError(null);
     try {
-      const res = await fetch(`/api/bridge/sessions/${encoded}`, { method: 'DELETE' });
+      // action=delete removes the persisted record; the endpoint's default
+      // (action=stop) 404s on an already-stopped session
+      const res = await fetch(`/api/bridge/sessions/${encoded}?action=delete`, { method: 'DELETE' });
       if (res.ok) {
         onDismissed();
         return;

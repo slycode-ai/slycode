@@ -124,6 +124,18 @@ export declare class SessionManager {
      * Re-detect the session ID from the provider's session directory.
      * Finds the most recently modified session file and updates persisted state.
      */
+    /**
+     * Explicitly bind a specific conversation id to a session record (feature
+     * 080 rev 2). The user chose the id; we bind it — no claim veto, no file
+     * requirement (a missing file simply fails at resume, visibly). `fileFound`
+     * tells the caller whether a matching session file exists right now so the
+     * CLI can warn on likely typos without blocking.
+     */
+    linkSession(name: string, sessionId: string): Promise<{
+        sessionId: string;
+        previous: string | null;
+        fileFound: boolean;
+    }>;
     relinkSession(name: string): Promise<{
         sessionId: string | null;
         previous: string | null;
@@ -214,6 +226,20 @@ export declare class SessionManager {
     /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
     private static readonly VERIFY_SNAPSHOT_LINES;
     private verifySnapshotClassify;
+    /**
+     * Clear the input bar after an interrupt Escape (Claude only).
+     *
+     * Claude Code's interrupt Escape returns the interrupted/queued prompt text
+     * to the input bar, where it would be prepended to the next verified submit
+     * (submitVerified warns-but-proceeds on non-empty input). Fixed delays are
+     * fragile — cancel time varies — so this OBSERVES the screen instead:
+     * polls the input region until the requeued text actually lands (or a
+     * deadline passes), clears it with a double-Escape (Claude shows "press esc
+     * again to clear" on the first), and verifies the region reads empty.
+     * Never sends a key unless text is visibly present — an empty bar means no
+     * keystrokes at all, so it can't trigger Claude's Esc-Esc rewind menu.
+     */
+    clearInputAfterInterrupt(name: string): Promise<'cleared' | 'nothing_to_clear' | 'gave_up'>;
     /**
      * Self-verifying prompt submit (feature 070).
      *

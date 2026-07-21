@@ -27,16 +27,19 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const config = await request.json();
+    const body = await request.json();
 
-    if (!config.commands || typeof config.commands !== 'object') {
+    if (!body.commands || typeof body.commands !== 'object') {
       return NextResponse.json(
         { error: 'Invalid format: commands object required' },
         { status: 400 }
       );
     }
 
-    writeActionsFromConfig(config);
+    // Intent fields ride alongside the snapshot; the snapshot alone (legacy
+    // clients) diff-writes and never deletes.
+    const { changedIds, deletedIds, changedClasses, ...config } = body;
+    writeActionsFromConfig(config, { changedIds, deletedIds, changedClasses });
 
     return NextResponse.json({ success: true });
   } catch (err) {

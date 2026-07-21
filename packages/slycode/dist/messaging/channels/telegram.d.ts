@@ -21,7 +21,7 @@ export declare class TelegramChannel implements Channel {
     start(): Promise<void>;
     stop(): void;
     onText(handler: (text: string) => void): void;
-    onVoice(handler: (filePath: string) => void): void;
+    onVoice(handler: (filePath: string, messageId?: number) => void): void;
     onPhoto(handler: (photos: {
         filePath: string;
         caption?: string;
@@ -30,6 +30,7 @@ export declare class TelegramChannel implements Channel {
     onCallback(prefix: string, handler: (data: string) => void): void;
     sendText(text: string): Promise<void>;
     sendTextRaw(text: string): Promise<void>;
+    sendReply(text: string, replyToMessageId: number): Promise<void>;
     sendVoice(audio: Buffer): Promise<{
         messageId: number;
     }>;

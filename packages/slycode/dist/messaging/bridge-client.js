@@ -196,7 +196,7 @@ export class BridgeClient {
             throw err;
         }
     }
-    async stopSession(name, aliases = []) {
+    async stopSession(name, aliases = [], opts = {}) {
         // Resolve to the actual stored name so we stop the right session even
         // when it lives under a legacy alias form.
         const resolved = await this.resolveExistingSession(name, aliases);
@@ -205,6 +205,7 @@ export class BridgeClient {
             const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(targetName)}/stop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clearInput: opts.clearInput === true }),
             });
             if (res.status === 404) {
                 return { stopped: false, reason: 'not_found' };

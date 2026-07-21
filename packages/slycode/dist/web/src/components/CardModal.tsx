@@ -31,6 +31,8 @@ interface VoiceFocusTarget {
   type: 'input' | 'terminal';
   element?: HTMLElement;
   sendInput?: (data: string) => void;
+  // Bridge session name — enables verified-submit routing for auto-submit
+  sessionName?: string;
 }
 
 interface SessionInfo {
@@ -463,7 +465,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const voiceSettingsClosedAtRef = useRef(0);
   const voiceAnchorRef = useRef<HTMLDivElement>(null);
   const voiceFocusRef = useRef<VoiceFocusTarget | null>(null);
-  const terminalSendInputRef = useRef<((data: string) => void) | null>(null);
+  const terminalHandleRef = useRef<{ sendInput: (data: string) => void; sessionName?: string } | null>(null);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
@@ -481,10 +483,25 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       document.execCommand('insertText', false, text);
     } else if (target.type === 'terminal' && target.sendInput) {
       const shouldAutoSubmit = voice.submitModeRef.current === 'auto' && voice.settings.voice.autoSubmitTerminal;
-      const send = target.sendInput;
-      send(text);
-      if (shouldAutoSubmit) {
-        setTimeout(() => send('\r'), 300);
+      if (shouldAutoSubmit && target.sessionName) {
+        // Verified submit (feature 070): the bridge owns paste + Enter,
+        // detects blocking dialogs, and reports the typed delivery outcome.
+        const sessionName = target.sessionName;
+        submitVerified(sessionName, text)
+          .then((delivery) => {
+            if (delivery && delivery.outcome !== 'delivered') notifyDeliveryFailure(sessionName, delivery);
+          })
+          .catch(() => {
+            notifyDeliveryFailure(sessionName, { outcome: 'failed', reason: 'request failed' });
+          });
+      } else {
+        const send = target.sendInput;
+        send(text);
+        if (shouldAutoSubmit) {
+          // Defensive fallback for session-less handles only — real terminal
+          // handles carry a sessionName via ClaudeTerminalPanel enrichment
+          setTimeout(() => send('\r'), 300);
+        }
       }
     }
     voice.submitModeRef.current = 'auto';
@@ -499,8 +516,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         const active = document.activeElement as HTMLElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.closest('[data-voice-target]')) {
           voiceFocusRef.current = { type: 'input', element: active };
-        } else if (activeTabRef.current === 'terminal' && terminalSendInputRef.current) {
-          voiceFocusRef.current = { type: 'terminal', sendInput: terminalSendInputRef.current };
+        } else if (activeTabRef.current === 'terminal' && terminalHandleRef.current) {
+          const handle = terminalHandleRef.current;
+          voiceFocusRef.current = { type: 'terminal', sendInput: handle.sendInput, sessionName: handle.sessionName };
         } else {
           voiceFocusRef.current = null;
         }
@@ -2403,7 +2421,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 onProviderChange={(provider) => setSelectedProvider(provider)}
                 voiceTerminalId="card-modal"
                 onTerminalReady={(handle) => {
-                  terminalSendInputRef.current = handle?.sendInput ?? null;
+                  terminalHandleRef.current = handle ?? null;
                   if (handle) { voice.registerTerminal('card-modal', handle); }
                   else { voice.unregisterTerminal('card-modal'); }
                 }}

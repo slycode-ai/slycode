@@ -62,7 +62,7 @@ export class TelegramChannel implements Channel {
   private onChatIdChanged?: (chatId: number) => void;
 
   private textHandler?: (text: string) => void;
-  private voiceHandler?: (filePath: string) => void;
+  private voiceHandler?: (filePath: string, messageId?: number) => void;
   private photoHandler?: (photos: { filePath: string; caption?: string }[]) => void;
   private voiceSelectHandler?: (voiceId: string, voiceName: string) => void;
   private callbackHandlers: Map<string, (data: string) => void> = new Map();
@@ -109,7 +109,7 @@ export class TelegramChannel implements Channel {
     this.textHandler = handler;
   }
 
-  onVoice(handler: (filePath: string) => void): void {
+  onVoice(handler: (filePath: string, messageId?: number) => void): void {
     this.voiceHandler = handler;
   }
 
@@ -146,6 +146,20 @@ export class TelegramChannel implements Channel {
     const chunks = this.splitMessage(text);
     for (const chunk of chunks) {
       await this.apiSendMessage(this.chatId, chunk, this.keyboardMarkup());
+    }
+  }
+
+  async sendReply(text: string, replyToMessageId: number): Promise<void> {
+    if (!this.chatId) throw new Error('No active chat. Send a message from Telegram first.');
+
+    // Raw send (no parse_mode) — transcripts routinely contain
+    // Markdown-breaking characters. Only the first chunk is threaded;
+    // overflow chunks follow as plain messages.
+    const chunks = this.splitMessage(text);
+    for (let i = 0; i < chunks.length; i++) {
+      const opts: Record<string, any> = { ...this.keyboardMarkup() };
+      if (i === 0) opts.reply_to_message_id = replyToMessageId;
+      await this.apiSendMessage(this.chatId, chunks[i], opts);
     }
   }
 
@@ -465,7 +479,7 @@ export class TelegramChannel implements Channel {
         const tempPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
         const buffer = await this.downloadFileWithRetry(fileLink, 'voice');
         fs.writeFileSync(tempPath, buffer);
-        this.voiceHandler(tempPath);
+        this.voiceHandler(tempPath, msg.message_id);
       } catch (err) {
         console.error('Error downloading voice message:', err);
         await this.sendText(`Error processing voice message: ${(err as Error).message}`);

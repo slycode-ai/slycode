@@ -826,6 +826,7 @@ body {
   --cm-atlas: #0c7f73;
   --cm-atlas-dim: rgba(13, 148, 136, 0.12);
   --cm-stale: #b8770f;
+  --cm-stale-dim: rgba(184, 119, 15, 0.10);
   --cm-fresh: #1f9d5f;
   --cm-code-bg: #fdfdfe;
   /* Grid gets its own alpha — at --cm-line strength it competes with the
@@ -852,6 +853,7 @@ body {
   --cm-atlas: #46d7c2;
   --cm-atlas-dim: rgba(70, 215, 194, 0.14);
   --cm-stale: #e8a13d;
+  --cm-stale-dim: rgba(232, 161, 61, 0.12);
   --cm-fresh: #52c98b;
   --cm-code-bg: #0c0f16;
   --cm-grid: rgba(148, 163, 184, 0.14);

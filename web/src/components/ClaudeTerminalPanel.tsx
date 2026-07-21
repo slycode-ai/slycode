@@ -117,7 +117,9 @@ interface ClaudeTerminalPanelProps {
   // Callbacks
   onSessionChange?: (info: SessionInfo | null) => void;
   onProviderChange?: (provider: string) => void;
-  onTerminalReady?: (handle: { sendInput: (data: string) => void } | null) => void;
+  // Handle includes sessionName so voice auto-submit can route through the
+  // bridge's verified submit (feature 070) instead of blind raw input.
+  onTerminalReady?: (handle: { sendInput: (data: string) => void; sessionName?: string } | null) => void;
 }
 
 const BRIDGE_API = '/api/bridge';
@@ -710,7 +712,7 @@ export function ClaudeTerminalPanel({
                 // Notify BEFORE focusing: the voice system's focusin listener
                 // checks the terminal-handle registry, so registration must
                 // exist when focus lands or the voice shortcut never arms.
-                onTerminalReady?.(handle);
+                onTerminalReady?.({ ...handle, sessionName: activeSessionName });
                 handle.focus();
               }}
               onImagePaste={handleImagePaste}

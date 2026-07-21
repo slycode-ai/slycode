@@ -213,6 +213,7 @@ export class BridgeClient {
   async stopSession(
     name: string,
     aliases: string[] = [],
+    opts: { clearInput?: boolean } = {},
   ): Promise<{ stopped: boolean; reason?: string }> {
     // Resolve to the actual stored name so we stop the right session even
     // when it lives under a legacy alias form.
@@ -222,6 +223,7 @@ export class BridgeClient {
       const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(targetName)}/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearInput: opts.clearInput === true }),
       });
 
       if (res.status === 404) {

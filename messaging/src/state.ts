@@ -26,6 +26,8 @@ export class StateManager {
   private voiceName: string | null = null;
   private responseMode: ResponseMode = 'text';
   private voiceTone: string | null = null;
+  // Global toggle for echoing voice-note transcripts back as threaded replies.
+  private voiceEchoEnabled: boolean = true;
   private selectedProvider: string = 'claude';
   private selectedModel: string = '';  // '' = Default (no flag)
   private providerOverrides: Record<string, string> = {};  // per-target provider overrides (sticky)
@@ -111,6 +113,9 @@ export class StateManager {
       if (data.voiceTone) {
         this.voiceTone = data.voiceTone;
       }
+      if (typeof data.voiceEchoEnabled === 'boolean') {
+        this.voiceEchoEnabled = data.voiceEchoEnabled;
+      }
       if (data.selectedProvider) {
         this.selectedProvider = data.selectedProvider;
       }
@@ -149,6 +154,7 @@ export class StateManager {
         voiceName: this.voiceName,
         responseMode: this.responseMode,
         voiceTone: this.voiceTone,
+        voiceEchoEnabled: this.voiceEchoEnabled,
         selectedProvider: this.selectedProvider,
         selectedModel: this.selectedModel,
         providerOverrides: this.providerOverrides,
@@ -508,6 +514,15 @@ export class StateManager {
       this.writePref(projectId, 'responseMode', mode);
     }
     this.responseMode = mode;
+    this.saveState();
+  }
+
+  getVoiceEcho(): boolean {
+    return this.voiceEchoEnabled;
+  }
+
+  setVoiceEcho(enabled: boolean): void {
+    this.voiceEchoEnabled = enabled;
     this.saveState();
   }
 

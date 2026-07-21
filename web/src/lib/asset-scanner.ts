@@ -24,6 +24,7 @@ import type {
 import { getSlycodeRoot } from './paths';
 import { getProviderAssetDir, getProviderAssetFilePath } from './provider-paths';
 import { validateAssetName, assertInside } from './asset-path-guard';
+import { hashSkillDir, diffSkillDirs } from './skill-dir-digest';
 
 // SlyCode root path — derived, not hardcoded
 const MASTER_PATH = getSlycodeRoot();
@@ -911,39 +912,9 @@ export function scanUpdatesFolder(): AssetInfo[] {
 }
 
 /**
- * List all files in an updates skill directory (relative to the skill root).
- */
-function listUpdateFiles(skillName: string): string[] {
-  const skillDir = path.join(getSlycodeRoot(), 'updates', 'skills', skillName);
-  const files: string[] = [];
-
-  function walk(dir: string, prefix: string) {
-    if (!fs.existsSync(dir)) return;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walk(path.join(dir, entry.name), relPath);
-      } else {
-        files.push(relPath);
-      }
-    }
-  }
-
-  walk(skillDir, '');
-  return files;
-}
-
-/**
- * Hash file content for comparison. Uses SHA-256 truncated to 12 hex chars.
- */
-function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
-}
-
-/**
  * Build the updates matrix comparing flat updates/skills/ against flat store/skills/.
- * Uses content hashing — if upstream SKILL.md differs from store SKILL.md, it's an update.
+ * Uses whole-directory content digests (skill-dir-digest.ts) — a change to ANY
+ * file in the skill (SKILL.md, references, scripts) makes it an update.
  * Versions are preserved for display but not used for comparison.
  */
 export function buildUpdatesMatrix(
@@ -958,36 +929,31 @@ export function buildUpdatesMatrix(
   for (const updateAsset of updatesAssets) {
     const availableVersion = updateAsset.frontmatter?.version as string | undefined;
 
-    // Read upstream SKILL.md and hash it
-    const upstreamSkillPath = path.join(root, 'updates', 'skills', updateAsset.name, 'SKILL.md');
-    let upstreamContent: string;
-    try {
-      upstreamContent = fs.readFileSync(upstreamSkillPath, 'utf-8');
-    } catch {
-      continue;
-    }
-    const upstreamHash = hashContent(upstreamContent);
+    // A skill without SKILL.md isn't a valid update package
+    const upstreamDir = path.join(root, 'updates', 'skills', updateAsset.name);
+    if (!fs.existsSync(path.join(upstreamDir, 'SKILL.md'))) continue;
+
+    const upstream = hashSkillDir(upstreamDir);
+    const upstreamHash = upstream.digest;
 
     const storeAsset = findAsset(storeAssets, updateAsset.name);
     const ignoreKey = `skills/${updateAsset.name}`;
 
-    // Skip if this hash has been dismissed or accepted
+    // Skip if this digest has been dismissed or accepted
     if (ignoredUpdates[ignoreKey] === upstreamHash) continue;
 
-    if (storeAsset) {
-      // Read store SKILL.md and hash it
-      const storeSkillPath = path.join(root, 'store', 'skills', updateAsset.name, 'SKILL.md');
-      let storeContent: string;
-      try {
-        storeContent = fs.readFileSync(storeSkillPath, 'utf-8');
-      } catch {
-        storeContent = '';
-      }
-      const storeHash = hashContent(storeContent);
+    const filesAffected = Object.keys(upstream.fileHashes).sort((a, b) => {
+      if (a === 'SKILL.md') return -1;
+      if (b === 'SKILL.md') return 1;
+      return a.localeCompare(b);
+    });
 
-      // Same content — no update needed. Lazy-init: record hash so future user
+    if (storeAsset) {
+      const store = hashSkillDir(path.join(root, 'store', 'skills', updateAsset.name));
+
+      // Same content — no update needed. Lazy-init: record digest so future user
       // edits to store/ don't trigger false updates from unchanged upstream.
-      if (upstreamHash === storeHash) {
+      if (upstreamHash === store.digest) {
         if (!ignoredUpdates[ignoreKey]) {
           ignoredUpdates[ignoreKey] = upstreamHash;
           needsSaveIgnored = true;
@@ -996,7 +962,6 @@ export function buildUpdatesMatrix(
       }
 
       const currentVersion = storeAsset.frontmatter?.version as string | undefined;
-      const filesAffected = listUpdateFiles(updateAsset.name);
 
       entries.push({
         name: updateAsset.name,
@@ -1009,11 +974,10 @@ export function buildUpdatesMatrix(
         updatesPath: `skills/${updateAsset.name}`,
         storePath: `skills/${updateAsset.name}`,
         filesAffected,
+        changedFiles: diffSkillDirs(upstream, store),
         skillMdOnly: filesAffected.length === 1 && filesAffected[0] === 'SKILL.md',
       });
     } else {
-      const filesAffected = listUpdateFiles(updateAsset.name);
-
       entries.push({
         name: updateAsset.name,
         assetType: 'skill',
@@ -1024,6 +988,7 @@ export function buildUpdatesMatrix(
         updatesPath: `skills/${updateAsset.name}`,
         storePath: `skills/${updateAsset.name}`,
         filesAffected,
+        changedFiles: filesAffected,
         skillMdOnly: filesAffected.length === 1 && filesAffected[0] === 'SKILL.md',
       });
     }
@@ -1098,18 +1063,11 @@ export function acceptUpdate(
   fs.mkdirSync(storePath, { recursive: true });
   copyDirRecursive(updatesPath, storePath);
 
-  // Record upstream content hash as accepted — prevents resurface if store
+  // Record upstream directory digest as accepted — prevents resurface if store
   // content diverges slightly from upstream. Clears automatically when upstream changes.
   const ignored = getIgnoredUpdates();
   const ignoreKey = `${typeDir}/${assetName}`;
-  const upstreamSkillMdPath = path.join(root, 'updates', typeDir, assetName, 'SKILL.md');
-  if (fs.existsSync(upstreamSkillMdPath)) {
-    const upstreamContent = fs.readFileSync(upstreamSkillMdPath, 'utf-8');
-    ignored[ignoreKey] = hashContent(upstreamContent);
-  } else {
-    // Fallback: remove ignore entry if upstream SKILL.md doesn't exist
-    delete ignored[ignoreKey];
-  }
+  ignored[ignoreKey] = hashSkillDir(updatesPath).digest;
   saveIgnoredUpdates(ignored);
 
   return backupPath;

@@ -267,6 +267,28 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
     res.json({ success: true, action });
   });
 
+  // Manually bind a specific conversation id to a session record (feature 080
+  // rev 2 — the all-else-fails escape hatch: user picks the transcript, we
+  // bind it; no claim veto, per "explicit actions execute")
+  router.post('/sessions/:name/link', async (req, res) => {
+    const name = decodeURIComponent(req.params.name);
+    const sessionId = req.body?.sessionId;
+    if (typeof sessionId !== 'string' || !/^[0-9a-f][0-9a-f-]{7,40}[0-9a-f]$/i.test(sessionId.trim())) {
+      return res.status(400).json({ error: 'sessionId (UUID) required in body' });
+    }
+    try {
+      const result = await sessionManager.linkSession(name, sessionId.trim());
+      res.json(result);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.includes('not found')) {
+        return res.status(404).json({ error: message });
+      }
+      console.error('Error linking session:', err);
+      res.status(500).json({ error: 'Failed to link session' });
+    }
+  });
+
   // Relink session — re-detect session ID from most recent session file
   router.post('/sessions/:name/relink', async (req, res) => {
     const name = decodeURIComponent(req.params.name);
@@ -300,6 +322,14 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
     const success = await sessionManager.writeToSession(name, '\x1b');
     if (!success) {
       return res.status(500).json({ error: 'Failed to send escape to session' });
+    }
+
+    // Optional post-interrupt input-bar cleanup (Claude only — the manager
+    // gates on provider). Runs in background; the stop response stays fast.
+    if (req.body?.clearInput === true) {
+      void sessionManager.clearInputAfterInterrupt(name)
+        .then(outcome => console.log(`[stop-clear] ${name}: ${outcome}`))
+        .catch(err => console.warn(`[stop-clear] ${name}: error — ${(err as Error).message}`));
     }
 
     res.json({ stopped: true });

@@ -238,6 +238,28 @@ export function UpdatesView({
                       {entry.description}
                     </p>
                   )}
+                  {/* Changed files — content detection covers the whole skill
+                      directory, so reference/script edits show up here even
+                      without a SKILL.md change */}
+                  {entry.status === 'update' && (entry.changedFiles?.length ?? 0) > 0 && (
+                    <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-void-400 dark:text-void-500">
+                        Changed
+                      </span>
+                      {entry.changedFiles.map(file => (
+                        <span
+                          key={file}
+                          className={`font-mono text-[11px] ${
+                            file === 'SKILL.md'
+                              ? 'text-void-500 dark:text-void-400'
+                              : 'text-amber-600 dark:text-amber-400/90'
+                          }`}
+                        >
+                          {file}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}

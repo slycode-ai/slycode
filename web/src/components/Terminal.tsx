@@ -3,6 +3,7 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { connectionManager } from '@/lib/connection-manager';
 import { InputQueue } from '@/lib/input-queue';
@@ -147,6 +148,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     fitAddonRef.current = fitAddon;
     terminal.loadAddon(fitAddon);
 
+    // OSC 52 clipboard support. Claude Code CLI (2.1.2xx+) owns the mouse for
+    // its native drag-selection UI and "copies" by emitting OSC 52 — without
+    // this addon that sequence is ignored and copy silently does nothing in
+    // the browser. With it, Claude's native copy lands in the real clipboard
+    // and all its mouse behavior (click-to-position, wheel scroll) stays.
+    terminal.loadAddon(new ClipboardAddon());
+
     // Add web links addon with an explicit click handler. xterm renders OSC 8
     // hyperlinks from PTY output, where the visible text and the underlying URL
     // can diverge (a prompt-injected provider session could spoof a safe-looking
@@ -161,6 +169,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }),
     );
 
+    // Claude Code CLI (2.1.2xx+) enables terminal mouse tracking for its own
+    // click-to-position, drag-selection, and wheel-scroll UI. We deliberately
+    // let it keep the mouse: swallowing the tracking modes client-side broke
+    // wheel scroll (alt-screen wheel degrades to arrow keys → input-history
+    // cycling). Local selection instead uses xterm's built-in convention for
+    // mouse-owning apps: SHIFT+drag bypasses app reporting and creates a real
+    // xterm selection, which the Ctrl+C handler below copies.
     // Open terminal in container
     terminal.open(containerRef.current);
 
@@ -186,6 +201,41 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       inputQueue.enqueue(bytes);
     };
 
+    // Copy helper for Ctrl+C: navigator.clipboard can reject even in secure
+    // contexts (focus/permission edge cases) — fall back to the legacy
+    // execCommand path, and only clear the selection once a copy actually
+    // succeeded so a failed copy isn't mistaken for a successful one.
+    const copySelection = (text: string) => {
+      const fallbackCopy = (): boolean => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+          ok = document.execCommand('copy');
+        } catch {
+          ok = false;
+        }
+        ta.remove();
+        terminal.focus();
+        return ok;
+      };
+      navigator.clipboard.writeText(text).then(
+        () => terminal.clearSelection(),
+        (err) => {
+          console.warn('[terminal] clipboard.writeText failed, trying fallback:', err);
+          if (fallbackCopy()) {
+            terminal.clearSelection();
+          } else {
+            console.warn('[terminal] execCommand copy fallback also failed — selection kept');
+          }
+        },
+      );
+    };
+
     terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       // Shift+Enter → send CSI u escape sequence for "insert newline" instead
       // of xterm's default \r (which submits). CLI tools like Claude Code,
@@ -209,8 +259,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey) {
         const selection = terminal.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection).catch(() => {});
-          terminal.clearSelection();
+          copySelection(selection);
           e.preventDefault();
           return false;
         }
@@ -397,6 +446,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         try {
           const { state } = JSON.parse(event.data);
           if (state) {
+            // Clear existing content first — SerializeAddon output carries no
+            // clear sequence, so without a reset each reconnect's snapshot
+            // APPENDS and scrollback duplicates compound on every tab wake.
+            terminal.reset();
             // Resize to original dimensions first (state was captured at these dimensions)
             terminal.resize(originalDimsRef.current.cols, originalDimsRef.current.rows);
             // Write the serialized state

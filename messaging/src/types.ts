@@ -13,8 +13,10 @@ export interface Channel {
   /** Register handler for incoming text messages */
   onText(handler: (text: string) => void): void;
 
-  /** Register handler for incoming voice messages */
-  onVoice(handler: (filePath: string) => void): void;
+  /** Register handler for incoming voice messages. `messageId` is the
+   *  channel-native id of the incoming voice message when available, so
+   *  handlers can thread replies back to the original bubble. */
+  onVoice(handler: (filePath: string, messageId?: number) => void): void;
 
   /** Register handler for incoming photo messages (batched for albums) */
   onPhoto(handler: (photos: { filePath: string; caption?: string }[]) => void): void;
@@ -41,6 +43,13 @@ export interface Channel {
     kind: 'voice' | 'audio' | 'video' | 'document';
     caption?: string;
   }): Promise<{ messageId: number }>;
+
+  /**
+   * Send a raw text message as a reply threaded to an earlier message.
+   * Optional — channels without reply threading omit it and callers skip
+   * the threaded echo.
+   */
+  sendReply?(text: string, replyToMessageId: number): Promise<void>;
 
   /** Send an inline keyboard with breadcrumb and optional message */
   sendInlineKeyboard(text: string, buttons: InlineButton[][]): Promise<void>;

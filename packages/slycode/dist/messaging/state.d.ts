@@ -5,6 +5,7 @@ export declare class StateManager {
     private voiceName;
     private responseMode;
     private voiceTone;
+    private voiceEchoEnabled;
     private selectedProvider;
     private selectedModel;
     private providerOverrides;
@@ -95,6 +96,8 @@ export declare class StateManager {
     clearVoice(): void;
     getResponseMode(): ResponseMode;
     setResponseMode(mode: ResponseMode): void;
+    getVoiceEcho(): boolean;
+    setVoiceEcho(enabled: boolean): void;
     getVoiceTone(): string | null;
     setVoiceTone(tone: string | null): void;
     getSelectedProvider(): string;

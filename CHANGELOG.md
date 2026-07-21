@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-21
+
+### Added
+- Explicit session relink — new `sly-kanban session` subcommands (`list`, `relink`, `link`, `dismiss`, `stop`) let you rebind a card to any conversation UUID. Surfaced in the dashboard via the Ended Session panel.
+- Bridge relink logic now picks the newest candidate within the session's lifetime instead of vetoing on other-session claims, so relinking succeeds where it used to silently fail.
+- Store update notifications now detect changes to a skill's reference files or scripts, not just the SKILL.md version. Notifications also list which files changed.
+- Newer-copy guard on Update Store — if a project copy is newer than the store, deploying prompts for confirmation instead of silently overwriting.
+- Voice transcript echo — a new toggle threads the raw transcript back to the voice bubble so you can see what was actually heard.
+- Terminal clipboard support — OSC-52 copy works with Claude Code 2.1.2xx+ and other TUIs that emit it.
+- Kanban skill v1.14.0 — documents the new `sly-kanban session` subcommands.
+
+### Fixed
+- Code Mode editor re-reads open files on window focus and when a nav event targets them, so you no longer edit a stale buffer after switching away and back.
+- `Ctrl+S` in Code Mode round-trips a modification timestamp; if the file changed on disk while you were away, save is refused with a conflict banner instead of silently clobbering an agent's edits.
+- Code Mode nav-event cursor seeded from the server clock so browser-clock skew stops silently dropping navigate/highlight/deck directives.
+- Terminal no longer duplicates its scrollback on tab wake — the terminal is reset before the reconnect snapshot is replayed.
+- Voice "stop" spoken during a session now reliably interrupts — STT punctuation and case are normalized in a shared intercept.
+- Voice auto-submit routes through the verified-delivery path, so the AI reliably sees the whole prompt before Enter is pressed.
+- Actions Save no longer treats an unparseable action file as a user deletion — parse failures are surfaced and preserved. Saves now diff-write from an explicit intent set instead of replacing the whole list.
+- MCP file import merges server-by-server, never overwrites existing entries, and errors (instead of clobbering) on a corrupt destination file.
+- `create-slycode` handles relative target paths correctly, surfaces npm-install failure tails so you can see why an install failed, and sets the `sly-atlas` executable bit.
+
+### Changed
+- `Ctrl+C` copy in the terminal now falls back to `execCommand` when the modern Clipboard API is unavailable.
+
 ## [0.4.1] - 2026-07-13
 
 ### Added

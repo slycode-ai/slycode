@@ -1,7 +1,7 @@
 var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/atlas/ask/route.js")
 R.c("server/chunks/[root-of-the-server]__0r15bv_._.js")
 R.c("server/chunks/src_lib_atlas_store_ts_0flh0s~._.js")
-R.c("server/chunks/[root-of-the-server]__08fgntf._.js")
+R.c("server/chunks/[root-of-the-server]__0yqsckv._.js")
 R.c("server/chunks/[root-of-the-server]__11j~5mn._.js")
 R.c("server/chunks/node_modules_next_04~_e52._.js")
 R.c("server/chunks/src_lib_asset-scanner_ts_0x-_bqz._.js")

@@ -1143,6 +1143,9 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
                 { label: '🔊 Voice', callbackData: 'mode_voice' },
                 { label: '📝+🔊 Both', callbackData: 'mode_both' },
             ],
+            [
+                { label: `🎤 Transcript echo: ${state.getVoiceEcho() ? 'On ✓' : 'Off'}`, callbackData: 'mode_echo' },
+            ],
         ]);
     });
     // --- /tone ---
@@ -1179,6 +1182,14 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
     });
     // --- Mode Callbacks (mode_ prefix) ---
     channel.onCallback('mode_', async (data) => {
+        if (data === 'mode_echo') {
+            const next = !state.getVoiceEcho();
+            state.setVoiceEcho(next);
+            await channel.sendText(next
+                ? 'Voice transcript echo: ON — transcripts reply to your voice notes.'
+                : 'Voice transcript echo: OFF — voice notes forward silently.');
+            return;
+        }
         const mode = data.replace('mode_', '');
         if (!['text', 'voice', 'both'].includes(mode))
             return;
@@ -1463,29 +1474,42 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         await executeQuickCommand(commandKey, channel, state, bridge, kanban, actionFilter);
     });
     // --- Text Messages ---
-    channel.onText(async (text) => {
-        // Intercept "stop" command — exact match, case-insensitive
-        if (text.trim().toLowerCase() === 'stop') {
-            const target = state.getTarget();
-            if (!target) {
-                await channel.sendText('No active session to interrupt.');
-                return;
-            }
-            try {
-                const sessionName = state.getSessionName();
-                const result = await bridge.stopSession(sessionName, state.getSessionNameAliases());
-                if (result.stopped) {
-                    await channel.sendText('Interrupted active session.');
-                }
-                else {
-                    await channel.sendText('Already stopped.');
-                }
-            }
-            catch (err) {
-                await channel.sendText(`Error: ${err.message}`);
-            }
-            return;
+    // Shared "stop" intercept for text and voice. Normalized exact match —
+    // casing and surrounding punctuation are tolerated so STT output like
+    // "Stop." or "STOP!" qualifies, but anything with more words ("please
+    // stop") still forwards as a prompt. Returns true when the message was
+    // handled as a stop and must NOT be forwarded to the session.
+    const tryStopIntercept = async (text) => {
+        const normalized = text.trim().toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+        if (normalized !== 'stop')
+            return false;
+        const target = state.getTarget();
+        if (!target) {
+            await channel.sendText('No active session to interrupt.');
+            return true;
         }
+        try {
+            const sessionName = state.getSessionName();
+            const aliases = state.getSessionNameAliases();
+            // clearInput: the bridge watches the input region after the interrupt
+            // and double-Escapes the requeued prompt text away once it appears
+            // (Claude sessions only — the bridge gates on provider).
+            const result = await bridge.stopSession(sessionName, aliases, { clearInput: true });
+            if (result.stopped) {
+                await channel.sendText('Interrupted active session.');
+            }
+            else {
+                await channel.sendText('Already stopped.');
+            }
+        }
+        catch (err) {
+            await channel.sendText(`Error: ${err.message}`);
+        }
+        return true;
+    };
+    channel.onText(async (text) => {
+        if (await tryStopIntercept(text))
+            return;
         const sessionName = state.getSessionName();
         const cwd = state.getSessionCwd();
         const provider = state.getSelectedProvider();
@@ -1511,7 +1535,7 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         }
     });
     // --- Voice Messages ---
-    channel.onVoice(async (filePath) => {
+    channel.onVoice(async (filePath, messageId) => {
         const sttConfig = {
             backend: voiceConfig.sttBackend,
             openaiApiKey: voiceConfig.openaiApiKey,
@@ -1532,6 +1556,19 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         try {
             await channel.sendChatAction('record_voice');
             const transcription = await transcribeAudio(filePath, sttConfig);
+            // Echo the raw transcript as a reply threaded to the voice bubble so
+            // mishears are visible immediately. Echo failure must never block the
+            // stop intercept or forwarding.
+            if (messageId != null && channel.sendReply && state.getVoiceEcho()) {
+                try {
+                    await channel.sendReply(transcription, messageId);
+                }
+                catch (echoErr) {
+                    console.warn(`[voice] transcript echo failed: ${echoErr.message}`);
+                }
+            }
+            if (await tryStopIntercept(transcription))
+                return;
             const formatted = `[${channel.name}/Voice] ${withTimestamp(transcription)} (${buildFooter(state)})`;
             // Pre-flight: check instruction file before creating a new session
             const proceed = await checkInstructionFilePreFlight(channel, state, bridge, sessionName, cwd, provider, formatted);

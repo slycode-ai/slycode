@@ -9,6 +9,8 @@ import { StoreView } from './StoreView';
 import { UpdatesView } from './UpdatesView';
 import { AssetAssistant } from './AssetAssistant';
 import { StoreImportDiffViewer } from './StoreImportDiffViewer';
+import { PushOverwriteWarning, conflictKey, type OverwriteConflict } from './PushOverwriteWarning';
+import { compareVersions } from '@/lib/version-compare';
 
 interface ProjectInfo {
   id: string;
@@ -76,6 +78,13 @@ export function CliAssetsTab() {
   const [assistantTarget, setAssistantTarget] = useState<AssistantTarget | null>(null);
   const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
   const [updatesData, setUpdatesData] = useState<UpdatesData | null>(null);
+  // Push-to-all overwrite warning: set when some targets hold a newer copy
+  const [pushWarning, setPushWarning] = useState<{
+    skillName: string;
+    fullSkillFolder: boolean;
+    safeChanges: PendingChange[];
+    conflicts: (OverwriteConflict & { change: PendingChange })[];
+  } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
     skills: true,
     agents: true,
@@ -479,21 +488,47 @@ export function CliAssetsTab() {
               })
             );
 
+            const projectNames = new Map((data?.projects ?? []).map(p => [p.id, p.name]));
+            const conflicts: (OverwriteConflict & { change: PendingChange })[] = [];
+
             for (const { provider, rows } of matrices) {
               const matchingRow = rows.find(r => r.name === entry.name && r.type === entry.assetType);
               if (!matchingRow) continue;
               for (const cell of matchingRow.cells) {
-                if (cell.status !== 'missing') {
-                  changes.push({
-                    assetName: entry.name,
-                    assetType: entry.assetType,
+                if (cell.status === 'missing') continue;
+                const change: PendingChange = {
+                  assetName: entry.name,
+                  assetType: entry.assetType,
+                  projectId: cell.projectId,
+                  action: 'deploy' as const,
+                  provider,
+                  source: 'store' as const,
+                };
+                // Project copy newer than store — needs explicit opt-in to overwrite
+                if (compareVersions(cell.projectVersion, cell.masterVersion) > 0) {
+                  conflicts.push({
+                    change,
                     projectId: cell.projectId,
-                    action: 'deploy' as const,
+                    projectName: projectNames.get(cell.projectId) ?? cell.projectId,
                     provider,
-                    source: 'store' as const,
+                    projectVersion: cell.projectVersion,
+                    storeVersion: cell.masterVersion,
                   });
+                } else {
+                  changes.push(change);
                 }
               }
+            }
+
+            if (conflicts.length > 0) {
+              // Pause the push — the user decides per project in the warning dialog
+              setPushWarning({
+                skillName: entry.name,
+                fullSkillFolder,
+                safeChanges: changes,
+                conflicts,
+              });
+              return;
             }
 
             if (changes.length > 0) {
@@ -687,6 +722,35 @@ export function CliAssetsTab() {
             await doImportToStore(assetName, assetType, sourceProjectId, fullFolder);
           }}
           onClose={() => setImportTarget(null)}
+        />
+      )}
+
+      {/* Push-to-all overwrite warning — some projects hold newer copies */}
+      {pushWarning && (
+        <PushOverwriteWarning
+          skillName={pushWarning.skillName}
+          conflicts={pushWarning.conflicts}
+          safeCount={pushWarning.safeChanges.length}
+          onConfirm={async (includedKeys) => {
+            const { safeChanges, conflicts, fullSkillFolder: pushFullFolder } = pushWarning;
+            setPushWarning(null);
+            const overwrites = conflicts
+              .filter(c => includedKeys.has(conflictKey(c)))
+              .map(c => ({ ...c.change, overwriteNewer: true }));
+            const allChanges = [...safeChanges, ...overwrites];
+            if (allChanges.length > 0) {
+              await fetch('/api/cli-assets/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ changes: allChanges, fullSkillFolder: pushFullFolder }),
+              });
+            }
+            refreshCliAssets();
+          }}
+          onCancel={() => {
+            setPushWarning(null);
+            refreshCliAssets();
+          }}
         />
       )}
     </div>

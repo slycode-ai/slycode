@@ -2,7 +2,14 @@
  * Code Mode file access — the editor escape hatch (feature 076).
  *
  * GET  /api/atlas/file?projectId=<id>&path=<repo-relative>   → content
- * PUT  /api/atlas/file  { projectId, path, content }          → save
+ * PUT  /api/atlas/file  { projectId, path, content,
+ *                         baseMtimeMs?, force? }              → save
+ *
+ * Conflict guard: when the client sends `baseMtimeMs` (the mtime it loaded)
+ * and the file on disk has a different mtime, the save is refused with 409
+ * `{ error: 'conflict', mtimeMs }` unless `force: true` — the editor prompts
+ * reload-or-overwrite instead of silently clobbering a concurrent agent
+ * write. Omitting `baseMtimeMs` keeps the old unconditional-write behavior.
  *
  * Deliberately broader than /api/file (which serves whitelisted doc types):
  * ANY file inside the project root is readable/writable — dotfiles and .env
@@ -74,6 +81,11 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
     if (!st.isFile()) return NextResponse.json({ error: 'Not a file' }, { status: 400 });
+
+    const baseMtimeMs = typeof body.baseMtimeMs === 'number' ? body.baseMtimeMs : undefined;
+    if (baseMtimeMs !== undefined && body.force !== true && st.mtimeMs !== baseMtimeMs) {
+      return NextResponse.json({ error: 'conflict', mtimeMs: st.mtimeMs }, { status: 409 });
+    }
 
     // Atomic-ish: temp + rename in the same directory.
     const tmp = abs + `.slycode-tmp-${process.pid}`;

@@ -11,6 +11,9 @@ interface Props {
 const POLL_INTERVAL = 15 * 60 * 1000; // 15 minutes
 const DISMISS_MS = 60 * 60 * 1000;     // 1 hour cool-off
 const DISMISS_KEY_PREFIX = 'slycode-skill-update-dismissed';
+// The watch list covers every shipped skill; cap the panel so a big release
+// doesn't fill the corner — overflow collapses into one summary row.
+const MAX_ROWS = 4;
 
 function dismissKey(projectId: string, skill: WatchedSkillName, latestVersion: string | null): string {
   return `${DISMISS_KEY_PREFIX}:${projectId}:${skill}:${latestVersion ?? 'unknown'}`;
@@ -120,6 +123,9 @@ export function SkillUpdateToast({ projectId }: Props) {
 
   if (visible.length === 0) return null;
 
+  const shown = visible.slice(0, MAX_ROWS);
+  const overflow = visible.slice(MAX_ROWS);
+
   return (
     <div
       className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-lg border border-amber-400/40 bg-void-50 px-3 py-2.5 shadow-(--shadow-card) dark:border-amber-400/30 dark:bg-void-900 sm:max-w-md"
@@ -130,9 +136,17 @@ export function SkillUpdateToast({ projectId }: Props) {
     >
       <div className="flex items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {visible.map(s => (
+          {shown.map(s => (
             <SkillRow key={s.name} status={s} onClick={() => handleClick(s)} />
           ))}
+          {overflow.length > 0 && (
+            <button
+              onClick={() => handleClick(overflow[0])}
+              className="text-left text-[11px] text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200"
+            >
+              +{overflow.length} more skill {overflow.length === 1 ? 'update' : 'updates'}
+            </button>
+          )}
         </div>
         <button
           onClick={handleDismiss}

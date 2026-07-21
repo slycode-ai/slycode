@@ -8,7 +8,7 @@ import {
   detectNewProviderSessionId,
   listProviderSessionCandidates,
 } from './claude-utils.js';
-import { shouldArmDetection, filterRelinkCandidates, GUID_REARM_COOLDOWN_MS } from './session-detection.js';
+import { shouldArmDetection, chooseRelinkCandidate, GUID_REARM_COOLDOWN_MS } from './session-detection.js';
 import {
   loadProviders,
   getProvider,
@@ -1273,6 +1273,55 @@ export class SessionManager {
    * Re-detect the session ID from the provider's session directory.
    * Finds the most recently modified session file and updates persisted state.
    */
+  /**
+   * Explicitly bind a specific conversation id to a session record (feature
+   * 080 rev 2). The user chose the id; we bind it — no claim veto, no file
+   * requirement (a missing file simply fails at resume, visibly). `fileFound`
+   * tells the caller whether a matching session file exists right now so the
+   * CLI can warn on likely typos without blocking.
+   */
+  async linkSession(name: string, sessionId: string): Promise<{ sessionId: string; previous: string | null; fileFound: boolean }> {
+    const resolvedName = this.resolveSessionName(name);
+    const session = this.sessions.get(resolvedName);
+    const persisted = this.persistedState.sessions[resolvedName];
+
+    if (!session && !persisted) {
+      throw new Error('Session not found');
+    }
+
+    const provider = session?.provider || persisted?.provider || 'claude';
+    const cwd = session?.cwd || persisted?.cwd;
+    const previous = session?.claudeSessionId || persisted?.claudeSessionId || null;
+
+    let fileFound = false;
+    if (cwd) {
+      try {
+        const candidates = await listProviderSessionCandidates(provider, cwd);
+        fileFound = candidates.some(c => c.sessionId === sessionId);
+      } catch { /* advisory only */ }
+    }
+
+    if (session) {
+      session.claudeSessionId = sessionId;
+    }
+    if (persisted) {
+      persisted.claudeSessionId = sessionId;
+    } else if (cwd) {
+      this.persistedState.sessions[resolvedName] = {
+        claudeSessionId: sessionId,
+        cwd,
+        createdAt: session?.createdAt || new Date().toISOString(),
+        lastActive: session?.lastActive || new Date().toISOString(),
+        provider,
+        skipPermissions: session?.skipPermissions ?? true,
+      };
+    }
+    await this.savePersistedState();
+    console.log(`[link] Manual bind: ${sessionId} → ${resolvedName}${fileFound ? '' : ' (no matching file on disk)'}`);
+
+    return { sessionId, previous, fileFound };
+  }
+
   async relinkSession(name: string): Promise<{ sessionId: string | null; previous: string | null }> {
     const resolvedName = this.resolveSessionName(name);
     const session = this.sessions.get(resolvedName);
@@ -1290,19 +1339,23 @@ export class SessionManager {
 
     const previous = session?.claudeSessionId || persisted?.claudeSessionId || null;
 
-    // Walk candidates newest-first with two cheap guards (feature 080):
-    // skip ids claimed by OTHER sessions, and skip files that predate this
-    // session — Codex multi-agent runs drop sub-agent rollouts in the same
-    // directory, so "newest file" alone can pick the wrong conversation.
+    // Explicit relink is authoritative (feature 080 rev 2, user directive:
+    // "if I say relink, I want it to relink"). Pick the newest plausible
+    // candidate — preferring files within this session's lifetime so Codex
+    // sub-agent rollouts / ancient conversations lose to a live one. Claims
+    // held by other session records do NOT veto the bind, and are left
+    // untouched — the user may deliberately point two cards at the same
+    // conversation. Only genuinely-zero files is an error now. (Automatic
+    // background detection keeps its claimed-guid exclusion — that guard
+    // prevents concurrent-session cross-linking; this authority applies to
+    // the explicit user action only.)
     const createdAtIso = session?.createdAt || persisted?.createdAt || null;
     const createdAtMs = createdAtIso ? Date.parse(createdAtIso) : null;
     const candidates = await listProviderSessionCandidates(provider, cwd);
-    const viable = filterRelinkCandidates(candidates, {
-      claimed: this.getClaimedGuids(),
-      ownPrevious: previous,
+    const chosen = chooseRelinkCandidate(candidates, {
       createdAtMs: Number.isNaN(createdAtMs as number) ? null : createdAtMs,
     });
-    const newId = viable[0]?.sessionId ?? null;
+    const newId = chosen?.sessionId ?? null;
 
     if (!newId) {
       throw new Error('No session files found for this provider');
@@ -1856,6 +1909,56 @@ export class SessionManager {
     const snap = this.getSnapshot(name, SessionManager.VERIFY_SNAPSHOT_LINES);
     if (!snap) return null;
     return classifyInputRegion(provider as SubmitProvider, snap.content, expected);
+  }
+
+  /**
+   * Clear the input bar after an interrupt Escape (Claude only).
+   *
+   * Claude Code's interrupt Escape returns the interrupted/queued prompt text
+   * to the input bar, where it would be prepended to the next verified submit
+   * (submitVerified warns-but-proceeds on non-empty input). Fixed delays are
+   * fragile — cancel time varies — so this OBSERVES the screen instead:
+   * polls the input region until the requeued text actually lands (or a
+   * deadline passes), clears it with a double-Escape (Claude shows "press esc
+   * again to clear" on the first), and verifies the region reads empty.
+   * Never sends a key unless text is visibly present — an empty bar means no
+   * keystrokes at all, so it can't trigger Claude's Esc-Esc rewind menu.
+   */
+  async clearInputAfterInterrupt(name: string): Promise<'cleared' | 'nothing_to_clear' | 'gave_up'> {
+    const resolvedName = this.resolveSessionName(name);
+    const session = this.sessions.get(resolvedName);
+    if (!session || session.provider !== 'claude' || !session.pty) return 'nothing_to_clear';
+
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    const readRegion = () => extractInputRegion(
+      'claude',
+      this.getSnapshot(resolvedName, SessionManager.VERIFY_SNAPSHOT_LINES)?.content || '',
+    );
+    const hasText = () => {
+      const region = readRegion();
+      return region.found && region.text.trim().length > 0;
+    };
+
+    // Phase 1: wait for the requeued prompt text to appear. Cancel/repaint
+    // time varies, so poll rather than guess.
+    const deadline = Date.now() + 6000;
+    while (!hasText()) {
+      if (Date.now() >= deadline) return 'nothing_to_clear';
+      await sleep(250);
+    }
+
+    // Phase 2: double-Escape, verify empty, one retry.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.writeToSession(resolvedName, '\x1b');
+      await sleep(200);
+      await this.writeToSession(resolvedName, '\x1b');
+      for (const settleMs of [300, 600, 1000]) {
+        await sleep(settleMs);
+        const region = readRegion();
+        if (region.found && region.text.trim().length === 0) return 'cleared';
+      }
+    }
+    return 'gave_up';
   }
 
   /**

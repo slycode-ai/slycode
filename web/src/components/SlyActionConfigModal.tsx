@@ -89,6 +89,11 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
   // Track editing state to avoid reloading while user is typing
   const isEditingRef = useRef(false);
 
+  // True only while a mouse press that STARTED on the backdrop is in flight —
+  // gates the click-outside close so drags released over the backdrop don't
+  // dismiss the modal.
+  const backdropPressRef = useRef(false);
+
   // Command Assistant is global — always runs in the SlyCode workspace root,
   // where everything it manages lives (store/actions/, documentation/
   // terminal-classes.json). The project path is only a fallback for the
@@ -172,14 +177,19 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
     isEditingRef.current = editing;
   }, []);
 
-  // Save commands config
-  const saveCommandsConfig = useCallback(async (config: CommandsConfig) => {
+  // Save commands config. `intent` names exactly what changed — the server
+  // only writes/deletes what it lists, so a stale snapshot can't clobber
+  // files edited on disk (e.g. by the Action Assistant).
+  const saveCommandsConfig = useCallback(async (
+    config: CommandsConfig,
+    intent: { changedIds?: string[]; deletedIds?: string[]; changedClasses?: string[] },
+  ) => {
     setSaveStatus('saving');
     try {
       const res = await fetch('/api/sly-actions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, ...intent }),
       });
 
       if (!res.ok) throw new Error('Save failed');
@@ -208,7 +218,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
       },
     };
 
-    saveCommandsConfig(newConfig);
+    saveCommandsConfig(newConfig, { changedIds: [commandId] });
   }, [commandsConfig, saveCommandsConfig]);
 
   // Create a new command
@@ -231,7 +241,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
       },
     };
 
-    saveCommandsConfig(newConfig);
+    saveCommandsConfig(newConfig, { changedIds: [newId] });
     setNav({ level: 'edit', commandId: newId });
   }, [commandsConfig, saveCommandsConfig]);
 
@@ -254,7 +264,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
       classAssignments: newAssignments,
     };
 
-    saveCommandsConfig(newConfig);
+    saveCommandsConfig(newConfig, { deletedIds: [commandId] });
     setNav({ level: 'list', commandId: null });
   }, [commandsConfig, saveCommandsConfig]);
 
@@ -431,11 +441,11 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
                   commands={commandsConfig.commands}
                   classAssignments={commandsConfig.classAssignments || {}}
                   classes={classes}
-                  onUpdate={(newAssignments) => {
+                  onUpdate={(newAssignments, changedClass) => {
                     saveCommandsConfig({
                       ...commandsConfig,
                       classAssignments: newAssignments,
-                    });
+                    }, { changedClasses: [changedClass] });
                   }}
                 />
               )}
@@ -525,9 +535,17 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onMouseDown={(e) => {
+        backdropPressRef.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        // Click outside modal closes everything (unless voice is busy on the assistant terminal)
-        if (e.target === e.currentTarget) {
+        // Click outside modal closes everything — but only when the press
+        // STARTED on the backdrop. A text-selection drag that begins inside
+        // the panel and releases over the backdrop dispatches its click on
+        // the backdrop (common ancestor) and must not close the modal.
+        const pressStartedOnBackdrop = backdropPressRef.current;
+        backdropPressRef.current = false;
+        if (e.target === e.currentTarget && pressStartedOnBackdrop) {
           const busy = voice.voiceState !== 'idle' && voice.voiceState !== 'disabled';
           if (busy) return;
           onClose();
@@ -770,7 +788,7 @@ interface ClassAssignmentsProps {
   commands: Record<string, Command>;
   classAssignments: Record<string, string[]>;
   classes: TerminalClassesConfig;
-  onUpdate: (newAssignments: Record<string, string[]>) => void;
+  onUpdate: (newAssignments: Record<string, string[]>, changedClass: string) => void;
 }
 
 function ClassAssignments({ commands, classAssignments, classes, onUpdate }: ClassAssignmentsProps) {
@@ -785,17 +803,17 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
     const list = [...(classAssignments[classId] || [])];
     const [moved] = list.splice(fromIndex, 1);
     list.splice(toIndex, 0, moved);
-    onUpdate({ ...classAssignments, [classId]: list });
+    onUpdate({ ...classAssignments, [classId]: list }, classId);
   };
 
   const removeCommand = (classId: string, commandId: string) => {
     const list = (classAssignments[classId] || []).filter(id => id !== commandId);
-    onUpdate({ ...classAssignments, [classId]: list });
+    onUpdate({ ...classAssignments, [classId]: list }, classId);
   };
 
   const addCommand = (classId: string, commandId: string) => {
     const list = [...(classAssignments[classId] || []), commandId];
-    onUpdate({ ...classAssignments, [classId]: list });
+    onUpdate({ ...classAssignments, [classId]: list }, classId);
     setAddingTo(null);
   };
 

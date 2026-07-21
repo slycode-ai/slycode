@@ -1,8 +1,8 @@
 ---
 name: kanban
-version: 1.13.1
-updated: 2026-07-07
-description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, AI-set status line (manual + tiered auto-status), and structured questionnaires"
+version: 1.14.0
+updated: 2026-07-21
+description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
 
@@ -28,6 +28,7 @@ Manage kanban cards via CLI: `sly-kanban <command>`
 | `automation` | Configure and manage scheduled automations |
 | `prompt` | Send a prompt to another card's session (cross-card) |
 | `respond` | Reply to a cross-card prompt (--wait callback) |
+| `session` | Manage a card's terminal sessions (list, relink, link, dismiss, stop) |
 | `areas` | List available areas |
 
 ## Card Identification
@@ -638,6 +639,55 @@ The submit endpoint enforces three checks:
 3. **Idle/ready** — proceeds with submission
 
 Use `--force` to bypass all guards.
+
+## Card Session Management
+
+Every card's terminal sessions are bridge records that can occasionally need
+repair — a session that never captured its conversation id, a record you want
+gone, or a conversation you want bound to a different card. The `session`
+subcommands cover all of it without touching the bridge API directly.
+
+```bash
+# See every provider session on a card: status, conversation id, resumability
+sly-kanban session list <card-id>
+
+# Re-detect and bind the newest plausible conversation for the card's session
+sly-kanban session relink <card-id> --provider codex
+
+# Bind a SPECIFIC conversation id — the manual override
+sly-kanban session link <card-id> --guid <uuid> --provider claude
+
+# Remove the session record from the card (conversation files stay on disk)
+sly-kanban session dismiss <card-id> --provider codex
+
+# Stop the session's terminal process
+sly-kanban session stop <card-id> --provider claude
+```
+
+`--provider` may be omitted when the card has exactly one session (it's
+targeted automatically); with multiple sessions the CLI asks you to specify.
+
+**Semantics that matter:**
+
+- **`relink` is authoritative.** It binds the newest conversation file within
+  the session's lifetime (falling back to newest overall) and only errors when
+  the provider has no session files at all. Conversation ids claimed by other
+  cards neither block the bind nor get modified — multiple cards may
+  deliberately share one conversation.
+- **`link` binds exactly what you give it.** If no matching file exists on
+  disk you get a warning (probable typo) but the bind still happens — resume
+  will fail visibly if the id is wrong. This is the all-else-fails recovery
+  path: search the provider's transcript directory manually (Claude:
+  `~/.claude/projects/<cwd-slug>/*.jsonl`, Codex:
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, Gemini:
+  `~/.gemini/tmp/<slug>/chats/session-*.json`), identify the conversation you
+  want by reading its content, then bind its id to the card.
+- **`dismiss` removes the bridge's record only.** Transcript/conversation
+  files on disk are never deleted, so a dismissed conversation can always be
+  re-bound later via `link`.
+- Session ids and resumability shown by `list` mirror what the card modal's
+  terminal tab shows — `(not resumable)` means the record has no captured
+  conversation id and renders as the "ended" tab in the UI.
 
 ## Error Handling
 

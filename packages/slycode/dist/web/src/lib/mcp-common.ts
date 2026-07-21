@@ -211,6 +211,63 @@ function activateJsonMcp(
   return 'deployed';
 }
 
+export interface McpMergeResult {
+  /** Server names copied into the destination. */
+  imported: string[];
+  /** Server names skipped because the destination already has them. */
+  skipped: string[];
+}
+
+/**
+ * Merge every mcpServers entry from a source .mcp.json into a destination
+ * .mcp.json, one server at a time. Existing destination entries are never
+ * overwritten (same refuse-overwrite semantics as activateJsonMcp), and all
+ * other top-level keys in the destination are preserved.
+ *
+ * Unlike activateJsonMcp, a destination that exists but fails to parse is an
+ * ERROR, not an empty object — treating corrupt JSON as `{}` would clobber
+ * whatever the file held on the next write.
+ */
+export function mergeMcpFile(srcPath: string, dstPath: string): McpMergeResult {
+  const srcRaw = fs.readFileSync(srcPath, 'utf-8');
+  let src: Record<string, unknown>;
+  try {
+    src = JSON.parse(srcRaw);
+  } catch {
+    throw new Error(`Source MCP config is not valid JSON: ${srcPath}`);
+  }
+
+  let dst: Record<string, unknown> = {};
+  if (fs.existsSync(dstPath)) {
+    const dstRaw = fs.readFileSync(dstPath, 'utf-8');
+    try {
+      dst = JSON.parse(dstRaw);
+    } catch {
+      throw new Error(
+        `Destination MCP config exists but is not valid JSON — refusing to overwrite: ${dstPath}`,
+      );
+    }
+  }
+
+  const srcServers = (src.mcpServers ?? {}) as Record<string, unknown>;
+  const dstServers = (dst.mcpServers ?? {}) as Record<string, unknown>;
+
+  const result: McpMergeResult = { imported: [], skipped: [] };
+  for (const [name, entry] of Object.entries(srcServers)) {
+    if (name in dstServers) {
+      result.skipped.push(name);
+    } else {
+      dstServers[name] = entry;
+      result.imported.push(name);
+    }
+  }
+
+  dst.mcpServers = dstServers;
+  fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+  fs.writeFileSync(dstPath, JSON.stringify(dst, null, 2) + '\n');
+  return result;
+}
+
 function deactivateJsonMcp(configPath: string, mcpName: string): void {
   if (!fs.existsSync(configPath)) return;
 

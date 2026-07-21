@@ -38,36 +38,35 @@ export interface RelinkCandidate {
   timestampMs: number | null;
 }
 
-export interface RelinkFilterOptions {
-  /** Provider ids already claimed by any session (active or persisted). */
-  claimed: Set<string>;
-  /** The relinking session's own current id — stays eligible despite being claimed. */
-  ownPrevious: string | null;
-  /** The relinking session's createdAt (epoch ms); null skips the lifetime check. */
+export interface RelinkChoiceOptions {
+  /** The relinking session's createdAt (epoch ms); null disables the lifetime preference. */
   createdAtMs: number | null;
   slackMs?: number;
 }
 
 /**
- * Filter relink candidates, preserving input order (callers pass newest-first):
- * - drop ids claimed by OTHER sessions (own previous id stays eligible)
- * - drop files that predate the session's creation (minus slack) — they cannot
- *   hold this session's conversation. Unknown timestamps are kept.
+ * Choose the candidate an EXPLICIT user relink should bind (feature 080 rev 2).
+ *
+ * User directive: "if I say relink, I want it to relink" — an explicit relink
+ * must succeed whenever any session file exists. Claims held by other session
+ * records do NOT veto the choice; the caller transfers the claim instead.
+ * Candidates arrive newest-first. Preference order:
+ *   1. newest candidate within the session's lifetime (timestamp >= createdAt
+ *      minus slack, unknown timestamps count as within) — avoids grabbing an
+ *      ancient conversation when a plausible one exists
+ *   2. otherwise newest overall (never fail while files exist)
  */
-export function filterRelinkCandidates(
+export function chooseRelinkCandidate(
   candidates: RelinkCandidate[],
-  opts: RelinkFilterOptions
-): RelinkCandidate[] {
+  opts: RelinkChoiceOptions
+): RelinkCandidate | null {
+  if (candidates.length === 0) return null;
   const slack = opts.slackMs ?? RELINK_LIFETIME_SLACK_MS;
-  return candidates.filter(c => {
-    if (opts.claimed.has(c.sessionId) && c.sessionId !== opts.ownPrevious) return false;
-    if (
-      opts.createdAtMs !== null &&
-      c.timestampMs !== null &&
-      c.timestampMs < opts.createdAtMs - slack
-    ) {
-      return false;
-    }
-    return true;
-  });
+  if (opts.createdAtMs !== null) {
+    const within = candidates.find(
+      c => c.timestampMs === null || c.timestampMs >= (opts.createdAtMs as number) - slack
+    );
+    if (within) return within;
+  }
+  return candidates[0];
 }

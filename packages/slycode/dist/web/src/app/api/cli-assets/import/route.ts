@@ -17,6 +17,7 @@ import {
 } from '@/lib/asset-scanner';
 import { appendEvent } from '@/lib/event-log';
 import { validateAssetName } from '@/lib/asset-path-guard';
+import { mergeMcpFile, type McpMergeResult } from '@/lib/mcp-common';
 import type { AssetType } from '@/lib/types';
 import fs from 'fs';
 
@@ -59,8 +60,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Copy asset from source project to workspace
-    copyAsset(sourceProject.path, masterPath, assetType, assetName);
+    // Copy asset from source project to workspace. MCP configs are containers
+    // of per-server entries — merge them one server at a time (never overwrite
+    // existing entries) instead of clobbering the workspace .mcp.json.
+    let mcpMerge: McpMergeResult | null = null;
+    if (assetType === 'mcp') {
+      mcpMerge = mergeMcpFile(
+        getAssetPath(sourceProject.path, 'mcp', assetName),
+        getAssetPath(masterPath, 'mcp', assetName),
+      );
+    } else {
+      copyAsset(sourceProject.path, masterPath, assetType, assetName);
+    }
 
     // Read the imported asset to check its frontmatter validity
     const importedPath = getAssetPath(masterPath, assetType, assetName);
@@ -82,10 +93,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Emit event
+    const mcpDetail = mcpMerge
+      ? ` (servers imported: ${mcpMerge.imported.length}, skipped existing: ${mcpMerge.skipped.length})`
+      : '';
     appendEvent({
       type: 'skill_imported',
       project: path.basename(masterPath),
-      detail: `Imported ${assetType} '${assetName}' from ${sourceProject.name}`,
+      detail: `Imported ${assetType} '${assetName}' from ${sourceProject.name}${mcpDetail}`,
       timestamp: new Date().toISOString(),
     });
 
@@ -98,6 +112,7 @@ export async function POST(request: NextRequest) {
         frontmatter,
         isValid,
       },
+      ...(mcpMerge ? { mcpMerge } : {}),
     });
   } catch (error) {
     console.error('CLI assets import failed:', error);

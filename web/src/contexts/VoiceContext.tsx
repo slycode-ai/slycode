@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useCallback, useRef, useState, useEffect, type ReactNode } from 'react';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { submitVerified, notifyDeliveryFailure } from '@/lib/submit-verified';
 import { useVoiceShortcuts } from '@/hooks/useVoiceShortcuts';
 import { useSettings } from '@/hooks/useSettings';
 import { FloatingVoiceWidget } from '@/components/FloatingVoiceWidget';
@@ -126,9 +127,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const handle = terminalHandlesRef.current.get(target.terminalId);
       if (!handle) return;
       const shouldAutoSubmit = globalSubmitModeRef.current === 'auto' && settings.voice.autoSubmitTerminal;
-      handle.sendInput(text);
-      if (shouldAutoSubmit) {
-        setTimeout(() => handle.sendInput('\r'), 300);
+      if (shouldAutoSubmit && handle.sessionName) {
+        // Verified submit (feature 070): the bridge owns paste + Enter,
+        // detects blocking dialogs, and reports the typed delivery outcome.
+        const sessionName = handle.sessionName;
+        submitVerified(sessionName, text)
+          .then((delivery) => {
+            if (delivery && delivery.outcome !== 'delivered') notifyDeliveryFailure(sessionName, delivery);
+          })
+          .catch(() => {
+            notifyDeliveryFailure(sessionName, { outcome: 'failed', reason: 'request failed' });
+          });
+      } else {
+        handle.sendInput(text);
+        if (shouldAutoSubmit) {
+          // Session-less handles (e.g. the code-mode editor target) keep the
+          // raw path — real terminal handles carry a sessionName
+          setTimeout(() => handle.sendInput('\r'), 300);
+        }
       }
     }
     globalSubmitModeRef.current = 'auto';

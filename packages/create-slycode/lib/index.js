@@ -71,6 +71,22 @@ function promptYN(rl, question, defaultYes = false) {
         });
     });
 }
+/**
+ * Tail of a failed child process's captured output (stderr preferred, stdout
+ * fallback). Piped stdio swallows npm's errors and the node-pty preinstall
+ * guidance — this surfaces the actionable part without replaying the full log.
+ */
+function installOutputTail(err, maxLines = 20) {
+    const e = err;
+    const text = (e.stderr && e.stderr.toString().trim()) || (e.stdout && e.stdout.toString().trim()) || '';
+    if (!text)
+        return '';
+    const lines = text.split(/\r?\n/);
+    const tail = lines.slice(-maxLines).map((l) => '  ' + l);
+    if (lines.length > maxLines)
+        tail.unshift('  ... (earlier output omitted)');
+    return tail.join('\n');
+}
 async function runSetup(rl, autoYes) {
     // Detect system timezone
     const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -521,9 +537,11 @@ async function main(args) {
     if (targetDir.startsWith('~/') || targetDir === '~') {
         targetDir = targetDir.replace(/^~/, require('os').homedir());
     }
-    // Reject relative paths (defensive — shell normally expands ~, but programmatic callers may not)
-    if (!path.isAbsolute(targetDir) && targetDir !== 'slycode') {
-        console.error('  Error: Please provide an absolute path (e.g. ~/Dev/myproject or /home/user/Dev/myproject)');
+    // Reject still-unexpanded home-relative forms (~user/...) that survived the
+    // expansion above — path.resolve would create a literal './~user' directory.
+    // Plain relative paths (my-workspace, .) resolve against cwd below.
+    if (targetDir.startsWith('~')) {
+        console.error(`  Error: Could not expand '${targetDir}' — please provide an absolute path (e.g. /home/user/Dev/myproject)`);
         process.exit(1);
     }
     const resolvedDir = path.resolve(targetDir);
@@ -610,6 +628,7 @@ async function main(args) {
     console.log('  \u2713 Workspace structure created');
     // npm install
     console.log('  Installing dependencies (this may take a minute)...');
+    let installOk = true;
     try {
         (0, child_process_1.execSync)('npm install', {
             cwd: resolvedDir,
@@ -619,7 +638,14 @@ async function main(args) {
         console.log('  \u2713 Dependencies installed');
     }
     catch (err) {
-        console.error('  \u2717 npm install failed. Run manually: cd ' + resolvedDir + ' && npm install');
+        installOk = false;
+        console.error('  \u2717 npm install failed.');
+        const tail = installOutputTail(err);
+        if (tail) {
+            console.error('');
+            console.error(tail);
+            console.error('');
+        }
     }
     // Deploy store skills and actions to workspace and provider directories
     deployStoreAndSkills(resolvedDir);
@@ -666,22 +692,27 @@ async function main(args) {
     catch {
         // Non-fatal
     }
-    // Link global CLI commands (slycode, sly-kanban, sly-messaging, sly-scaffold)
-    try {
-        const symlinksMod = path.join(resolvedDir, 'node_modules', '@slycode', 'slycode', 'lib', 'platform', 'symlinks.js');
-        const devSymlinks = path.join(__dirname, '..', '..', 'slycode', 'lib', 'platform', 'symlinks.js');
-        const symlinksPath = fs.existsSync(symlinksMod) ? symlinksMod : fs.existsSync(devSymlinks) ? devSymlinks : null;
-        if (symlinksPath) {
-            const { linkClis } = require(symlinksPath);
-            linkClis(resolvedDir);
-            console.log('  \u2713 Global CLI commands linked');
+    // Link global CLI commands (slycode, sly-kanban, sly-messaging, sly-scaffold).
+    // Skipped on install failure — linkClis targets the workspace node_modules
+    // and would create dangling symlinks.
+    if (installOk) {
+        try {
+            const symlinksMod = path.join(resolvedDir, 'node_modules', '@slycode', 'slycode', 'lib', 'platform', 'symlinks.js');
+            const devSymlinks = path.join(__dirname, '..', '..', 'slycode', 'lib', 'platform', 'symlinks.js');
+            const symlinksPath = fs.existsSync(symlinksMod) ? symlinksMod : fs.existsSync(devSymlinks) ? devSymlinks : null;
+            if (symlinksPath) {
+                const { linkClis } = require(symlinksPath);
+                linkClis(resolvedDir);
+                console.log('  \u2713 Global CLI commands linked');
+            }
+        }
+        catch {
+            console.log('  ! Could not link CLI commands. Run later: npx slycode service install');
         }
     }
-    catch {
-        console.log('  ! Could not link CLI commands. Run later: npx slycode service install');
-    }
-    // Install as service if requested
-    if (answers.installService) {
+    // Install as service if requested (skipped on install failure — the service
+    // would point at a workspace whose dependencies are missing)
+    if (installOk && answers.installService) {
         console.log('  Installing as system service...');
         try {
             // Use direct require with dev fallback — avoids npx trying to download from npm
@@ -705,15 +736,40 @@ async function main(args) {
             console.log('  ! Service install failed. Run later: slycode service install');
         }
     }
+    // Failed install: the workspace is scaffolded but unusable until npm install
+    // succeeds — be honest about it, give recovery steps, exit non-zero.
+    // Wording kept in sync with packages/slycode/scripts/preinstall.js.
+    if (!installOk) {
+        console.log('');
+        console.log('  ✗ Workspace was scaffolded, but installing dependencies FAILED.');
+        console.log('    SlyCode will not run until the install succeeds.');
+        console.log('');
+        console.log('  Next steps:');
+        console.log('');
+        console.log('  1. If the output above mentions missing build tools, install them first.');
+        console.log('     node-pty needs a C/C++ toolchain on platforms without prebuilds, e.g.:');
+        console.log('       debian/ubuntu:  sudo apt-get update && sudo apt-get install -y build-essential python3');
+        console.log('       fedora/rhel:    sudo dnf install -y gcc gcc-c++ make python3');
+        console.log('       macOS:          xcode-select --install');
+        console.log('       Windows:        Visual Studio Build Tools (Desktop development with C++) + Python 3');
+        console.log('');
+        console.log('  2. Re-run the install:');
+        console.log(`       cd ${resolvedDir} && npm install`);
+        console.log('');
+        console.log('  3. Verify the environment:');
+        console.log('       npx slycode doctor');
+        console.log('');
+        process.exit(1);
+    }
     // Done!
     console.log('');
     console.log('  SlyCode is ready!');
     console.log('');
-    if (targetDir !== '.') {
+    if (resolvedDir !== process.cwd()) {
         if (process.platform === 'win32') {
             console.log('  ⚠  IMPORTANT: change into your workspace directory first:');
             console.log('');
-            console.log(`     cd ${targetDir}`);
+            console.log(`     cd ${resolvedDir}`);
             console.log('');
             console.log('  Then run SlyCode commands:');
             console.log('');
@@ -729,7 +785,7 @@ async function main(args) {
         else if (process.platform === 'darwin') {
             console.log('  ⚠  macOS: cd into your workspace before running slycode:');
             console.log('');
-            console.log(`     cd ${targetDir}`);
+            console.log(`     cd ${resolvedDir}`);
             console.log('     slycode start           Start all services');
             console.log('');
             console.log('  slycode doctor          Check environment');
@@ -738,7 +794,7 @@ async function main(args) {
         else {
             console.log('  Next steps:');
             console.log('');
-            console.log(`     cd ${targetDir}`);
+            console.log(`     cd ${resolvedDir}`);
             console.log('     slycode start           Start all services');
             console.log('');
             console.log('  slycode doctor          Check environment');

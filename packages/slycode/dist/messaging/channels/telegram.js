@@ -87,6 +87,20 @@ export class TelegramChannel {
             await this.apiSendMessage(this.chatId, chunk, this.keyboardMarkup());
         }
     }
+    async sendReply(text, replyToMessageId) {
+        if (!this.chatId)
+            throw new Error('No active chat. Send a message from Telegram first.');
+        // Raw send (no parse_mode) — transcripts routinely contain
+        // Markdown-breaking characters. Only the first chunk is threaded;
+        // overflow chunks follow as plain messages.
+        const chunks = this.splitMessage(text);
+        for (let i = 0; i < chunks.length; i++) {
+            const opts = { ...this.keyboardMarkup() };
+            if (i === 0)
+                opts.reply_to_message_id = replyToMessageId;
+            await this.apiSendMessage(this.chatId, chunks[i], opts);
+        }
+    }
     async sendVoice(audio) {
         if (!this.chatId)
             throw new Error('No active chat. Send a message from Telegram first.');
@@ -382,7 +396,7 @@ export class TelegramChannel {
                 const tempPath = path.join(os.tmpdir(), `voice_${Date.now()}.ogg`);
                 const buffer = await this.downloadFileWithRetry(fileLink, 'voice');
                 fs.writeFileSync(tempPath, buffer);
-                this.voiceHandler(tempPath);
+                this.voiceHandler(tempPath, msg.message_id);
             }
             catch (err) {
                 console.error('Error downloading voice message:', err);

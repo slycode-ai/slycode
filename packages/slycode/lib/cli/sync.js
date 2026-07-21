@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.hashSkillDirDigest = hashSkillDirDigest;
 exports.refreshUpdates = refreshUpdates;
 exports.refreshActionUpdates = refreshActionUpdates;
 exports.refreshProviders = refreshProviders;
@@ -40,6 +41,7 @@ exports.refreshTerminalClasses = refreshTerminalClasses;
 exports.sync = sync;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+const crypto = __importStar(require("crypto"));
 const workspace_1 = require("./workspace");
 function parseVersion(skillMdPath) {
     if (!fs.existsSync(skillMdPath))
@@ -52,6 +54,43 @@ function parseVersion(skillMdPath) {
             return vMatch[1].trim();
     }
     return '0.0.0';
+}
+/**
+ * Whole-directory content digest: sorted '/'-normalized relative paths +
+ * per-file sha256 (12 hex) rolled into one sha256, truncated to 12 hex.
+ * Detects changes to ANY file in a skill, not just SKILL.md.
+ *
+ * LOCKSTEP MIRROR of web/src/lib/skill-dir-digest.ts:hashSkillDir (the CLI
+ * cannot import from web/). Keep walk order, separator normalization, and
+ * roll format identical or the two detection stages will disagree.
+ * Exported for the parity test in web/src/lib/skill-dir-digest.test.ts.
+ */
+function hashSkillDirDigest(dir) {
+    const relPaths = [];
+    function walk(current, prefix) {
+        if (!fs.existsSync(current))
+            return;
+        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+            // Normalize to '/' so Windows and POSIX produce identical digests.
+            const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) {
+                walk(path.join(current, entry.name), rel);
+            }
+            else {
+                relPaths.push(rel);
+            }
+        }
+    }
+    walk(dir, '');
+    relPaths.sort();
+    const roll = crypto.createHash('sha256');
+    roll.update('');
+    for (const rel of relPaths) {
+        const buf = fs.readFileSync(path.join(dir, ...rel.split('/')));
+        const fileHash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 12);
+        roll.update(`${rel}\n${fileHash}\n`);
+    }
+    return roll.digest('hex').slice(0, 12);
 }
 function copyDirRecursive(src, dest) {
     if (!fs.existsSync(dest)) {
@@ -69,8 +108,9 @@ function copyDirRecursive(src, dest) {
     }
 }
 /**
- * Compare versions in package templates/updates/skills/ vs workspace updates/skills/.
- * Copy when versions differ or skill is missing.
+ * Compare package templates/updates/skills/ vs workspace updates/skills/ by
+ * whole-directory content digest. Copy when ANY file differs or skill is
+ * missing — a reference/script fix without a version bump still propagates.
  */
 function refreshUpdates(workspace) {
     const packageDir = (0, workspace_1.resolvePackageDir)(workspace);
@@ -97,11 +137,16 @@ function refreshUpdates(workspace) {
     for (const entry of templateSkills) {
         const templateSkillDir = path.join(templateUpdatesDir, entry.name);
         const workspaceSkillDir = path.join(workspaceUpdatesDir, entry.name);
-        const templateVersion = parseVersion(path.join(templateSkillDir, 'SKILL.md'));
-        const workspaceVersion = fs.existsSync(workspaceSkillDir)
-            ? parseVersion(path.join(workspaceSkillDir, 'SKILL.md'))
-            : '0.0.0';
-        if (templateVersion !== workspaceVersion) {
+        const templateDigest = hashSkillDirDigest(templateSkillDir);
+        const workspaceDigest = fs.existsSync(workspaceSkillDir)
+            ? hashSkillDirDigest(workspaceSkillDir)
+            : null;
+        if (templateDigest !== workspaceDigest) {
+            // Versions are display-only in the result details
+            const templateVersion = parseVersion(path.join(templateSkillDir, 'SKILL.md'));
+            const workspaceVersion = fs.existsSync(workspaceSkillDir)
+                ? parseVersion(path.join(workspaceSkillDir, 'SKILL.md'))
+                : '0.0.0';
             // Full-replace
             if (fs.existsSync(workspaceSkillDir)) {
                 fs.rmSync(workspaceSkillDir, { recursive: true, force: true });

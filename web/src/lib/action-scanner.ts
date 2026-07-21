@@ -11,6 +11,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { getSlycodeRoot } from './paths';
 import { getIgnoredUpdates, saveIgnoredUpdates } from './asset-scanner';
+import { validateAssetName } from './asset-path-guard';
 import type { SlyActionsConfig } from './sly-actions';
 import type { Placement } from './types';
 
@@ -162,13 +163,22 @@ export function toParsedAction(frontmatter: Record<string, unknown>, body: strin
 // Directory Scanning
 // ============================================================================
 
-/**
- * Scan a directory for action .md files and return parsed actions.
- */
-export function scanActionFiles(actionsDir: string): ParsedAction[] {
-  const actions: ParsedAction[] = [];
+export interface ActionScanResult {
+  actions: ParsedAction[];
+  /** Filenames (not paths) of .md files that failed to parse or read. */
+  failedFiles: string[];
+}
 
-  if (!fs.existsSync(actionsDir)) return actions;
+/**
+ * Scan a directory for action .md files, reporting parse/read failures
+ * alongside the parsed actions. The write path needs the failure list so it
+ * never treats "unparseable" as "deleted by the user".
+ */
+export function scanActionFilesDetailed(actionsDir: string): ActionScanResult {
+  const actions: ParsedAction[] = [];
+  const failedFiles: string[] = [];
+
+  if (!fs.existsSync(actionsDir)) return { actions, failedFiles };
 
   try {
     const entries = fs.readdirSync(actionsDir);
@@ -178,7 +188,10 @@ export function scanActionFiles(actionsDir: string): ParsedAction[] {
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const parsed = parseActionFile(content);
-        if (!parsed) continue;
+        if (!parsed) {
+          failedFiles.push(entry);
+          continue;
+        }
         const action = toParsedAction(parsed.frontmatter, parsed.body);
         if (!action.name) {
           // Fallback: derive name from filename
@@ -186,14 +199,21 @@ export function scanActionFiles(actionsDir: string): ParsedAction[] {
         }
         actions.push(action);
       } catch {
-        // Skip unreadable files
+        failedFiles.push(entry);
       }
     }
   } catch {
     // Directory not readable
   }
 
-  return actions;
+  return { actions, failedFiles };
+}
+
+/**
+ * Scan a directory for action .md files and return parsed actions.
+ */
+export function scanActionFiles(actionsDir: string): ParsedAction[] {
+  return scanActionFilesDetailed(actionsDir).actions;
 }
 
 /**
@@ -341,62 +361,187 @@ export function writeActionFile(action: ParsedAction, dir?: string): void {
 }
 
 /**
- * Write all actions from a SlyActionsConfig to individual files.
+ * Explicit change intent sent by the config UI alongside the snapshot.
+ * Only what is named here gets written or deleted — "absent from the
+ * snapshot" carries no deletion intent.
+ */
+export interface ActionWriteIntent {
+  /** Actions whose fields the user actually edited (or just created). */
+  changedIds?: string[];
+  /** Actions the user explicitly deleted. */
+  deletedIds?: string[];
+  /** Terminal classes whose assignment list / ordering the user edited. */
+  changedClasses?: string[];
+}
+
+function normalizeNames(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter((n): n is string => validateAssetName(n));
+}
+
+function stringArraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Semantic equality of two parsed actions (formatting-independent). */
+function actionsEqual(a: ParsedAction, b: ParsedAction): boolean {
+  const aClasses = Object.keys(a.classes).sort();
+  const bClasses = Object.keys(b.classes).sort();
+  return (
+    a.name === b.name &&
+    a.version === b.version &&
+    a.label === b.label &&
+    a.description === b.description &&
+    a.group === b.group &&
+    a.placement === b.placement &&
+    a.scope === b.scope &&
+    stringArraysEqual(a.projects ?? [], b.projects ?? []) &&
+    stringArraysEqual(a.cardTypes ?? [], b.cardTypes ?? []) &&
+    stringArraysEqual(aClasses, bClasses) &&
+    aClasses.every(k => a.classes[k] === b.classes[k]) &&
+    a.prompt === b.prompt
+  );
+}
+
+/**
+ * Write actions from a SlyActionsConfig to individual files.
  * Used when saving from SlyActionConfigModal.
+ *
+ * Surgical semantics: merges against a FRESH disk scan (never the cache), so
+ * a stale client snapshot cannot revert or delete work done directly on disk
+ * (e.g. by the Action Assistant). Only actions named in the intent are
+ * written; only `deletedIds` are deleted. Files that fail to parse are never
+ * written and never deleted, regardless of the payload.
+ *
+ * Legacy payloads (no intent) fall back to diff-writes across the whole
+ * snapshot and perform NO deletions.
  */
 export function writeActionsFromConfig(
   config: SlyActionsConfig,
+  intent?: ActionWriteIntent,
   dir?: string,
 ): void {
   const actionsDir = dir || getActionsDir();
 
-  // Build reverse class map: actionName → { className: priority }
-  // We need to reconstruct the classes from classAssignments + ordering
-  const classesMap: Record<string, Record<string, number>> = {};
-  for (const [cls, ids] of Object.entries(config.classAssignments)) {
-    for (let i = 0; i < ids.length; i++) {
-      const name = ids[i];
-      if (!classesMap[name]) classesMap[name] = {};
-      classesMap[name][cls] = (i + 1) * 10;
+  const { actions: diskActions, failedFiles } = scanActionFilesDetailed(actionsDir);
+  const diskByName = new Map(diskActions.map(a => [a.name, a]));
+  const failedNames = new Set(failedFiles.map(f => f.replace(/\.md$/, '')));
+
+  const changedIds = normalizeNames(intent?.changedIds);
+  const deletedIds = normalizeNames(intent?.deletedIds);
+  const changedClassesRaw = intent?.changedClasses;
+  const changedClasses = Array.isArray(changedClassesRaw)
+    ? changedClassesRaw.filter((c): c is string => typeof c === 'string' && c.length > 0)
+    : [];
+  const hasIntent = changedIds.length > 0 || deletedIds.length > 0 || changedClasses.length > 0;
+
+  // Priority derived from position in the class list (position × 10), or null
+  // when the action is not assigned to the class.
+  const priorityIn = (cls: string, name: string): number | null => {
+    const ids = config.classAssignments?.[cls] ?? [];
+    const idx = ids.indexOf(name);
+    return idx === -1 ? null : (idx + 1) * 10;
+  };
+
+  const toWrite: ParsedAction[] = [];
+
+  if (hasIntent) {
+    // Candidates: explicitly edited actions, plus every action a changed class
+    // touches (currently assigned in the payload, or assigned on disk and now
+    // removed).
+    const candidates = new Set(changedIds);
+    for (const cls of changedClasses) {
+      for (const id of config.classAssignments?.[cls] ?? []) candidates.add(id);
+      for (const a of diskActions) {
+        if (cls in a.classes) candidates.add(a.name);
+      }
+    }
+    for (const id of deletedIds) candidates.delete(id);
+
+    for (const name of candidates) {
+      if (failedNames.has(name)) continue;
+      const disk = diskByName.get(name);
+      const cmd = config.commands?.[name];
+      // Field source: the client payload only when this action was explicitly
+      // edited. Class-only candidates keep their disk fields so a stale
+      // snapshot can't revert edits made on disk since the client loaded.
+      const useCmdFields = changedIds.includes(name) && !!cmd;
+      if (!useCmdFields && !disk) continue;
+
+      const next: ParsedAction = useCmdFields
+        ? {
+            name,
+            version: disk?.version || '1.0.0',
+            label: cmd.label,
+            description: cmd.description,
+            group: cmd.group || '',
+            placement: cmd.placement,
+            scope: cmd.scope,
+            projects: cmd.projects ?? [],
+            cardTypes: cmd.cardTypes,
+            // Classes are edited in the Classes tab, not the Commands tab —
+            // start from disk and let changedClasses adjust below.
+            classes: { ...(disk?.classes ?? {}) },
+            prompt: cmd.prompt,
+          }
+        : { ...disk!, classes: { ...disk!.classes } };
+
+      for (const cls of changedClasses) {
+        const priority = priorityIn(cls, name);
+        if (priority === null) delete next.classes[cls];
+        else next.classes[cls] = priority;
+      }
+
+      if (disk && actionsEqual(next, disk)) continue;
+      toWrite.push(next);
+    }
+  } else {
+    // Legacy payload: rebuild the full class map (old behavior), but only
+    // write actions that actually differ from disk, and never delete.
+    const classesMap: Record<string, Record<string, number>> = {};
+    for (const [cls, ids] of Object.entries(config.classAssignments ?? {})) {
+      for (let i = 0; i < ids.length; i++) {
+        const name = ids[i];
+        if (!classesMap[name]) classesMap[name] = {};
+        classesMap[name][cls] = (i + 1) * 10;
+      }
+    }
+
+    for (const [name, cmd] of Object.entries(config.commands ?? {})) {
+      if (!validateAssetName(name) || failedNames.has(name)) continue;
+      const disk = diskByName.get(name);
+      const next: ParsedAction = {
+        name,
+        version: disk?.version || '1.0.0',
+        label: cmd.label,
+        description: cmd.description,
+        group: cmd.group || '',
+        placement: cmd.placement,
+        scope: cmd.scope,
+        projects: cmd.projects ?? [],
+        cardTypes: cmd.cardTypes,
+        classes: classesMap[name] || {},
+        prompt: cmd.prompt,
+      };
+      if (disk && actionsEqual(next, disk)) continue;
+      toWrite.push(next);
     }
   }
 
-  // Read existing files to preserve versions and any fields we don't model
-  const existingActions = scanActionFiles(actionsDir);
-  const existingVersions: Record<string, string> = {};
-  for (const a of existingActions) {
-    existingVersions[a.name] = a.version;
-  }
-
-  for (const [name, cmd] of Object.entries(config.commands)) {
-    const action: ParsedAction = {
-      name,
-      version: existingVersions[name] || '1.0.0',
-      label: cmd.label,
-      description: cmd.description,
-      group: cmd.group || '',
-      placement: cmd.placement,
-      scope: cmd.scope,
-      projects: cmd.projects,
-      cardTypes: cmd.cardTypes,
-      classes: classesMap[name] || {},
-      prompt: cmd.prompt,
-    };
+  for (const action of toWrite) {
+    if (!validateAssetName(action.name)) continue;
     writeActionFile(action, actionsDir);
   }
 
-  // Remove action files that no longer exist in config
-  try {
-    const existing = fs.readdirSync(actionsDir).filter(f => f.endsWith('.md'));
-    const configNames = new Set(Object.keys(config.commands));
-    for (const file of existing) {
-      const name = file.replace(/\.md$/, '');
-      if (!configNames.has(name)) {
-        fs.unlinkSync(path.join(actionsDir, file));
-      }
+  // Deletions are explicit-intent only. Parse-failing files are never deleted.
+  for (const name of deletedIds) {
+    if (failedNames.has(name)) continue;
+    try {
+      const target = path.join(actionsDir, `${name}.md`);
+      if (fs.existsSync(target)) fs.unlinkSync(target);
+    } catch {
+      // Best effort
     }
-  } catch {
-    // Best effort cleanup
   }
 
   invalidateActionsCache();

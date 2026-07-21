@@ -242,21 +242,34 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
   }, [openFiles]);
 
   // ---------- Phase 3: nav-event consumption (one-shot directives) ----------
-  const cursorRef = useRef<string>(new Date().toISOString()); // ignore pre-mount events
+  // Cursor starts null and is seeded from the SERVER clock (`serverNow` in the
+  // first response) — events are server-stamped, so a browser clock running
+  // ahead would otherwise silently drop every directive fired in the first N
+  // seconds of skew. Pre-entry events are still ignored (seed poll discards).
+  const cursorRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
-        const params = new URLSearchParams({ projectId, after: cursorRef.current });
+        const params = new URLSearchParams({ projectId });
+        if (cursorRef.current) params.set('after', cursorRef.current);
         const res = await fetch(`/api/atlas/nav-events?${params}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
+        if (cursorRef.current === null) {
+          // Seed poll: take the server's now, discard pre-entry events. On a
+          // malformed response stay unseeded — never fall back to the browser
+          // clock; the next tick retries.
+          if (typeof data.serverNow === 'string') cursorRef.current = data.serverNow;
+          return;
+        }
         const events: NavEvent[] = data.events ?? [];
         if (events.length === 0) return;
         cursorRef.current = events[events.length - 1].ts;
         for (const ev of events) applyNavEvent(ev);
       } catch { /* bridge of silence — next poll */ }
     };
+    poll(); // immediate seed — don't leave a dead zone until the first tick
     const t = setInterval(poll, 2000);
     return () => { cancelled = true; clearInterval(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

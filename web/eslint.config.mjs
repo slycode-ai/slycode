@@ -32,6 +32,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Prod-build check output (NEXT_DIST_DIR=.next-build-check) — same
+    // generated bundles as .next, linting them OOMs and floods with errors.
+    ".next-build-check/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

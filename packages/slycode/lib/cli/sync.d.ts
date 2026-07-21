@@ -9,8 +9,20 @@ export interface RefreshResult {
     }[];
 }
 /**
- * Compare versions in package templates/updates/skills/ vs workspace updates/skills/.
- * Copy when versions differ or skill is missing.
+ * Whole-directory content digest: sorted '/'-normalized relative paths +
+ * per-file sha256 (12 hex) rolled into one sha256, truncated to 12 hex.
+ * Detects changes to ANY file in a skill, not just SKILL.md.
+ *
+ * LOCKSTEP MIRROR of web/src/lib/skill-dir-digest.ts:hashSkillDir (the CLI
+ * cannot import from web/). Keep walk order, separator normalization, and
+ * roll format identical or the two detection stages will disagree.
+ * Exported for the parity test in web/src/lib/skill-dir-digest.test.ts.
+ */
+export declare function hashSkillDirDigest(dir: string): string;
+/**
+ * Compare package templates/updates/skills/ vs workspace updates/skills/ by
+ * whole-directory content digest. Copy when ANY file differs or skill is
+ * missing — a reference/script fix without a version bump still propagates.
  */
 export declare function refreshUpdates(workspace: string): RefreshResult;
 /**

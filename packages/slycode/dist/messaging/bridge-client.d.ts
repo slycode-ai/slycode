@@ -20,7 +20,9 @@ export declare class BridgeClient {
     sendImage(name: string, filePath: string, cwd?: string, aliases?: string[]): Promise<{
         filename: string;
     }>;
-    stopSession(name: string, aliases?: string[]): Promise<{
+    stopSession(name: string, aliases?: string[], opts?: {
+        clearInput?: boolean;
+    }): Promise<{
         stopped: boolean;
         reason?: string;
     }>;

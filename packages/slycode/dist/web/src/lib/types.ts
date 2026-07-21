@@ -393,6 +393,7 @@ export interface PendingChange {
   action: 'deploy' | 'remove';
   provider?: ProviderId;        // Provider for store-based operations
   source?: 'master' | 'store';  // Where asset comes from (default: 'master')
+  overwriteNewer?: boolean;     // Explicit consent to overwrite a newer project copy (sync API rejects otherwise)
 }
 
 // ============================================================================
@@ -407,11 +408,12 @@ export interface UpdateEntry {
   status: UpdateEntryStatus;     // existing skill with version change vs brand new
   currentVersion?: string;       // store version (undefined if new)
   availableVersion: string;      // updates/ version (display only)
-  contentHash: string;           // SHA-256 hash of upstream SKILL.md (12 hex chars)
+  contentHash: string;           // whole-directory digest of the updates/ skill (12 hex chars)
   description?: string;          // from frontmatter
   updatesPath: string;           // relative path in updates/ (e.g. "skills/checkpoint")
   storePath: string;             // relative path in store/ (e.g. "skills/checkpoint")
   filesAffected: string[];       // list of files in the update package
+  changedFiles: string[];        // files that differ from the store copy (all files when status is 'new')
   skillMdOnly: boolean;          // true if only SKILL.md is in the update
 }
 
@@ -525,6 +527,10 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 
 export interface TerminalHandle {
   sendInput: (data: string) => void;
+  // Bridge session name — present on real terminal handles (enriched by
+  // ClaudeTerminalPanel). Absent on pseudo-terminals (e.g. the code-mode
+  // editor voice target), which must stay on the raw insert path.
+  sessionName?: string;
 }
 
 export interface VoiceClaimant {
@@ -634,7 +640,9 @@ export type SkillUpdateState =
   | 'ahead'            // project semver-newer than store/ (local bump) — no toast
   | 'invalidVersion';  // missing/unparsable frontmatter — no toast in v1
 
-export type WatchedSkillName = 'kanban' | 'messaging';
+// Watched skills are derived from updates/skills/ (the store manifest's
+// projection) rather than a hardcoded union — any shipped skill can toast.
+export type WatchedSkillName = string;
 
 export interface SkillUpdateStatus {
   name: WatchedSkillName;

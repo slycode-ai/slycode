@@ -20,6 +20,7 @@ import {
 import { getStoreAssets } from '@/lib/store-scanner';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
 import { validateAssetName } from '@/lib/asset-path-guard';
+import { compareVersions } from '@/lib/version-compare';
 import { parseMcpFromStore, activateMcp, deactivateMcp } from '@/lib/mcp-common';
 import { getSlycodeRoot } from '@/lib/paths';
 import { appendEvent } from '@/lib/event-log';
@@ -46,6 +47,48 @@ export async function POST(request: NextRequest) {
 
     const results: { change: PendingChange; success: boolean; error?: string }[] = [];
 
+    // Per-request scan cache for the newer-copy guard (key: `${path}:${provider}`)
+    const providerScanCache = new Map<string, AssetInfo[]>();
+    const scanCached = (projectPath: string, provider: ProviderId): AssetInfo[] => {
+      const key = `${projectPath}:${provider}`;
+      let assets = providerScanCache.get(key);
+      if (!assets) {
+        assets = scanProviderAssets(projectPath, provider);
+        providerScanCache.set(key, assets);
+      }
+      return assets;
+    };
+
+    /**
+     * Newer-copy guard: a deploy must not silently overwrite a project copy
+     * whose version is newer than the source copy. The client's push warning
+     * sets `overwriteNewer: true` on explicitly included targets; anything
+     * else is rejected here. Missing/unparsable versions compare equal and
+     * pass — this is a warn-with-consent guard, not a hard block.
+     * Returns an error string when the deploy must be rejected.
+     */
+    const checkNewerCopy = (change: PendingChange, projectPath: string): string | null => {
+      if (change.action !== 'deploy') return null;
+      if (change.assetType !== 'skill' && change.assetType !== 'agent') return null;
+      if (change.overwriteNewer === true) return null;
+
+      const provider = change.provider || 'claude';
+      const sourceAssets = change.source === 'store'
+        ? getStoreAssets()
+        : scanCached(masterPath, 'claude');
+      const sourceVersion = sourceAssets.find(
+        a => a.name === change.assetName && a.type === change.assetType
+      )?.frontmatter?.version as string | undefined;
+      const projectVersion = scanCached(projectPath, provider).find(
+        a => a.name === change.assetName && a.type === change.assetType
+      )?.frontmatter?.version as string | undefined;
+
+      if (compareVersions(projectVersion, sourceVersion) > 0) {
+        return `Project copy of '${change.assetName}' is newer (v${projectVersion} > v${sourceVersion ?? '?'}) — deploy requires overwriteNewer consent`;
+      }
+      return null;
+    };
+
     for (const change of changes) {
       const project = projectMap.get(change.projectId);
       if (!project) {
@@ -58,6 +101,12 @@ export async function POST(request: NextRequest) {
       // `${assetName}.json` store file, so guard all types.
       if (!validateAssetName(change.assetName)) {
         results.push({ change, success: false, error: `Invalid asset name: ${String(change.assetName)}` });
+        continue;
+      }
+
+      const newerCopyError = checkNewerCopy(change, project.path);
+      if (newerCopyError) {
+        results.push({ change, success: false, error: newerCopyError });
         continue;
       }
 

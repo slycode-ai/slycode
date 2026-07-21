@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { AssetRow, AssetCell, PendingChange, AssetType, AssetCellStatus } from '@/lib/types';
+import { compareVersions } from '@/lib/version-compare';
 import { AssetViewer } from './AssetViewer';
 
 interface ProjectInfo {
@@ -33,21 +34,6 @@ const statusIcons: Record<AssetCellStatus, { icon: string; color: string }> = {
   missing: { icon: '\u2715', color: 'text-void-400' },
 };
 
-/**
- * Compare two semver strings. Returns 1 if a > b, -1 if a < b, 0 if equal.
- */
-function compareVersions(a?: string, b?: string): number {
-  if (!a || !b) return 0;
-  const partsA = a.split('.').map(Number);
-  const partsB = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const va = partsA[i] || 0;
-    const vb = partsB[i] || 0;
-    if (va > vb) return 1;
-    if (va < vb) return -1;
-  }
-  return 0;
-}
 
 function isPending(changes: PendingChange[], assetName: string, assetType: AssetType, projectId: string): PendingChange | undefined {
   return changes.find(c =>
