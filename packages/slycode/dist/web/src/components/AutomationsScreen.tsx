@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { KanbanCard } from '@/lib/types';
 import { cronToHumanReadable } from '@/lib/cron-utils';
+import { formatDateTimeShort } from '@/lib/date-format';
 
 interface AutomationsScreenProps {
   cards: KanbanCard[];
@@ -201,11 +202,20 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                                       {isEnabled ? 'Enabled' : 'Disabled'}
                                     </span>
                                     {card.automation?.lastResult && (
-                                      <span className={`rounded px-1.5 py-0.5 text-[11px] ${
-                                        card.automation.lastResult === 'success'
-                                          ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
-                                          : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                                      }`}>
+                                      <span
+                                        // Native title tooltip on purpose — no positioning logic,
+                                        // works everywhere. Only failures carry error text.
+                                        title={
+                                          card.automation.lastResult === 'error' && card.automation.lastError
+                                            ? card.automation.lastError
+                                            : undefined
+                                        }
+                                        className={`rounded px-1.5 py-0.5 text-[11px] ${
+                                          card.automation.lastResult === 'success'
+                                            ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                                            : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                                        } ${card.automation.lastResult === 'error' && card.automation.lastError ? 'cursor-help' : ''}`}
+                                      >
                                         {card.automation.lastResult === 'success' ? 'OK' : 'Err'}
                                       </span>
                                     )}
@@ -227,7 +237,7 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                                 )}
                                 <div className="mt-0.5 h-4 text-[10px] text-void-350 dark:text-void-600">
                                   {card.automation?.lastRun
-                                    ? `Prev: ${new Date(card.automation.lastRun).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                                    ? `Prev: ${formatDateTimeShort(card.automation.lastRun)}`
                                     : ''}
                                 </div>
                               </div>

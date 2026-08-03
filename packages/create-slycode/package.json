@@ -1,6 +1,6 @@
 {
   "name": "@slycode/create-slycode",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Create a new SlyCode workspace",
   "bin": {
     "create-slycode": "./bin/create-slycode.js"
@@ -40,5 +40,9 @@
   "devDependencies": {
     "typescript": "^5.3.0",
     "@types/node": "^20.0.0"
+  },
+  "overrides": {
+    "form-data": "^4.0.6",
+    "ws": "^8.20.2"
   }
 }

@@ -17,6 +17,8 @@ interface KanbanColumnProps {
   cards: KanbanCard[];
   cardSessions: Map<string, CardSessionStatus>;
   activeCards: Set<string>;
+  /** Cards with finished-but-unviewed session output (feature 082). */
+  unseenCards: Set<string>;
   onCardClick: (card: KanbanCard) => void;
   onCardContextMenu?: (card: KanbanCard, e: React.MouseEvent) => void;
   onMoveCard: (cardId: string, newStage: KanbanStage, insertIndex?: number) => void;
@@ -92,7 +94,7 @@ function getDoneTagsServerSnapshot(): boolean {
   return false;
 }
 
-export function KanbanColumn({ stage, cards, cardSessions, activeCards, onCardClick, onCardContextMenu, onMoveCard, onAddCardClick }: KanbanColumnProps) {
+export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCards, onCardClick, onCardContextMenu, onMoveCard, onAddCardClick }: KanbanColumnProps) {
   const colors = colorClasses[stage.color] || colorClasses.zinc;
   const isDone = stage.id === 'done';
   const showDoneTags = useSyncExternalStore(subscribeDoneTags, getDoneTagsSnapshot, getDoneTagsServerSnapshot);
@@ -308,6 +310,7 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, onCardCl
                     card={card}
                     sessionStatus={cardSessions.get(card.id) || 'none'}
                     isActivelyWorking={activeCards.has(card.id)}
+                    isUnseen={unseenCards.has(card.id)}
                     stage={stage.id}
                     showTags={isDone && showDoneTags}
                     onClick={() => onCardClick(card)}

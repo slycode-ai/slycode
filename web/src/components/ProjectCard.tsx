@@ -9,12 +9,14 @@ import { PlatformBadges } from './PlatformBadges';
 interface ProjectCardProps {
   project: ProjectWithBacklog;
   onDeleted?: () => void;
+  /** Cards with finished-but-unviewed session output (feature 082). */
+  unseenCount?: number;
   shortcutKey?: number;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }
 
-export function ProjectCard({ project, onDeleted, shortcutKey, onDragStart, onDragEnd }: ProjectCardProps) {
+export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, onDragStart, onDragEnd }: ProjectCardProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editName, setEditName] = useState(project.name);
@@ -82,6 +84,19 @@ export function ProjectCard({ project, onDeleted, shortcutKey, onDragStart, onDr
             {project.name}
           </h3>
           <HealthDot health={project.healthScore} />
+          {/*
+            Unseen roll-up (feature 082) — how many cards in this project have
+            finished work you haven't opened. Same "cue, not alarm" brief as the
+            card marker, so it stays a quiet count rather than a red badge.
+          */}
+          {unseenCount > 0 && (
+            <span
+              className="flex-shrink-0 rounded-full border border-neon-blue-400/30 bg-neon-blue-400/10 px-1.5 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-4 text-neon-blue-700 dark:border-neon-blue-400/25 dark:text-neon-blue-300"
+              title={`${unseenCount} card${unseenCount !== 1 ? 's' : ''} with activity you haven't looked at`}
+            >
+              {unseenCount}
+            </span>
+          )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           {project.masterCompliant && (

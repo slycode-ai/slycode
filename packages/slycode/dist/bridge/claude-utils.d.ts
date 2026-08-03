@@ -76,7 +76,7 @@ export declare function getGeminiSessionDir(cwd: string): string;
  */
 export declare function listGeminiSessionFiles(dir: string): Promise<string[]>;
 /**
- * Extract the full session UUID from a Gemini session JSON file.
+ * Extract the full session UUID from a Gemini session file (JSON or JSONL).
  */
 export declare function extractGeminiSessionId(filePath: string): Promise<string | null>;
 /**
@@ -104,8 +104,13 @@ export interface SessionFileCandidate {
  * List all session-file candidates for a provider+cwd, newest-first (feature 080).
  * Used by relink so it can walk candidates instead of blindly taking the newest
  * file — Codex multi-agent runs put sub-agent rollouts in the same directory.
+ *
+ * `excludeFiles` (feature 081): the spawn-time before-files snapshot, in the
+ * same identifier format as listProviderSessionFiles (Claude: bare GUIDs;
+ * Codex/Gemini: filenames). Entries present at spawn are skipped so the
+ * detection watch can consume candidates instead of the old unsorted diff.
  */
-export declare function listProviderSessionCandidates(providerId: string, cwd: string): Promise<SessionFileCandidate[]>;
+export declare function listProviderSessionCandidates(providerId: string, cwd: string, excludeFiles?: string[]): Promise<SessionFileCandidate[]>;
 /**
  * Get the session directory for a provider.
  */

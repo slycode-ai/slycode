@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import type { GitLogEntry } from './types';
+import { formatDate } from '@/lib/date-format';
 
 interface LogViewProps {
   projectId: string;
@@ -51,7 +52,7 @@ export function LogView({ projectId, path, onShowCommit }: LogViewProps) {
             <span className="min-w-0 flex-1 truncate text-(--cm-text)" title={e.subject}>{e.subject}</span>
             <span className="hidden shrink-0 text-[10.5px] text-(--cm-muted) sm:inline">{e.author}</span>
             <span className="shrink-0 text-[10.5px] text-(--cm-faint)">
-              {new Date(e.date).toLocaleDateString()}
+              {formatDate(e.date)}
             </span>
           </button>
         ))}

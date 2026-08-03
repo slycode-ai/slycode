@@ -1,14 +1,21 @@
 import os from 'os';
+import { randomUUID } from 'crypto';
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import {
   getProviderSessionDir,
   listProviderSessionFiles,
-  detectNewProviderSessionId,
   listProviderSessionCandidates,
 } from './claude-utils.js';
-import { shouldArmDetection, chooseRelinkCandidate, GUID_REARM_COOLDOWN_MS } from './session-detection.js';
+import {
+  shouldArmDetection,
+  chooseRelinkCandidate,
+  chooseDetectionCandidate,
+  assessAssignedIdVerification,
+  GUID_REARM_COOLDOWN_MS,
+  ASSIGNED_ID_VERIFY_COOLDOWN_MS,
+} from './session-detection.js';
 import {
   loadProviders,
   getProvider,
@@ -135,6 +142,10 @@ export class SessionManager {
   private persistedState: PersistedState = { sessions: {} };
   private idleCheckTimer: NodeJS.Timeout | null = null;
   private sseHeartbeatTimer: NodeJS.Timeout | null = null;
+  // FIFO chain serializing exit-time detections (feature 081) — batch kills
+  // must claim sequentially so the live claimed-set check stays accurate.
+  // Never rejects: each link swallows its own error inside detectSessionIdAtExit.
+  private exitDetectionChain: Promise<void> = Promise.resolve();
 
   constructor(config: Partial<BridgeConfig> = {}, runtimeConfig?: BridgeRuntimeConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -502,6 +513,16 @@ export class SessionManager {
       const storedSessionId = doResume ? persisted.claudeSessionId : null;
       const isProviderSession = !!providerConfig;
 
+      // Deterministic session-id assignment (feature 081): for providers with
+      // a sessionIdFlag (Claude, Gemini), generate the id ourselves and pass
+      // it at spawn — attribution is definitional, the detection pipeline
+      // below never arms, and the id is persisted before the PTY exists.
+      // MUST be a fresh UUID per spawn attempt (never reused from persisted
+      // state): Claude hard-errors on a --session-id that already exists.
+      const assignedSessionId = (!doResume && providerConfig?.sessionIdFlag)
+        ? randomUUID()
+        : null;
+
       // On Windows, .cmd batch wrappers run through cmd.exe which mangles multi-line
       // CLI arguments (newlines become command separators). Strip the prompt from args
       // and deliver it via bracketed paste after the provider finishes starting up.
@@ -517,6 +538,7 @@ export class SessionManager {
           skipPermissions,
           resume: doResume,
           sessionId: storedSessionId,
+          assignSessionId: assignedSessionId ?? undefined,
           prompt: promptForArgs,
           model: doResume ? undefined : model,
         });
@@ -527,10 +549,11 @@ export class SessionManager {
         args = [];
       }
 
-      // For providers that support session detection, capture existing session files before spawn
+      // For providers that support session detection, capture existing session
+      // files before spawn — skipped entirely when the id was assigned (081)
       let claudeDir: string | null = null;
       let beforeSessionFiles: string[] = [];
-      if (providerConfig && supportsSessionDetection(providerConfig) && !doResume) {
+      if (providerConfig && supportsSessionDetection(providerConfig) && !doResume && !assignedSessionId) {
         claudeDir = getProviderSessionDir(providerId, cwd);
         if (claudeDir) {
           beforeSessionFiles = await listProviderSessionFiles(providerId, claudeDir);
@@ -560,7 +583,7 @@ export class SessionManager {
         status: 'running',
         pid: null,
         connectedClients: 0,
-        claudeSessionId: doResume ? storedSessionId : null,
+        claudeSessionId: doResume ? storedSessionId : assignedSessionId,
         createdAt: doResume ? (persisted?.createdAt || now) : now,
         lastActive: persisted?.lastActive || now,
         lastOutputAt: now,
@@ -574,6 +597,7 @@ export class SessionManager {
         terminalDimensions: { cols: DEFAULT_PTY_COLS, rows: DEFAULT_PTY_ROWS },
         claudeDir: claudeDir || undefined,
         claudeBeforeFiles: (providerConfig && supportsSessionDetection(providerConfig)) ? beforeSessionFiles : undefined,
+        assignedIdUnverified: assignedSessionId ? true : undefined,
         activityTransitions: [],
         pendingPrompt: deferredPrompt,
       };
@@ -628,11 +652,12 @@ export class SessionManager {
       }
 
       // For providers with session detection, detect the session ID in background
+      // (never runs for assigned-id spawns — claudeSessionId is already set)
       if (providerConfig && supportsSessionDetection(providerConfig) && !session.claudeSessionId && claudeDir) {
-        this.detectProviderSessionId(name, providerId, claudeDir, beforeSessionFiles);
+        this.detectProviderSessionId(name, providerId, beforeSessionFiles);
       }
 
-      console.log(`Session created: ${name} [${providerConfig?.displayName || command}] (pid: ${session.pid})${doResume ? ' [resumed]' : ''}`);
+      console.log(`Session created: ${name} [${providerConfig?.displayName || command}] (pid: ${session.pid})${doResume ? ' [resumed]' : ''}${assignedSessionId ? ` [assigned-id ${assignedSessionId}]` : ''}`);
 
       return {
         name,
@@ -659,12 +684,11 @@ export class SessionManager {
   private async detectProviderSessionId(
     name: string,
     providerId: string,
-    sessionDir: string,
     beforeFiles: string[]
   ): Promise<void> {
     // Custom watch that uses live claimed-GUID checks (not a stale snapshot)
     // Gemini CLI takes ~30s to create session files; Claude is ~5s. Use 60s to be safe.
-    const sessionId = await this.watchForUnclaimedSession(name, providerId, sessionDir, beforeFiles, 60000);
+    const sessionId = await this.watchForUnclaimedSession(name, providerId, beforeFiles, 60000);
     if (sessionId) {
       await this.claimDetectedSessionId(name, sessionId);
     }
@@ -672,31 +696,69 @@ export class SessionManager {
 
   /**
    * Exit-time last-chance session-id detection (feature 080). Single-shot
-   * before/after diff against the spawn-time snapshot — no polling watch.
-   * Called from handlePtyExit AFTER guidDetectionCancelled is set, so it
-   * claims via allowCancelled.
+   * candidate check — no polling watch. Called from handlePtyExit AFTER
+   * guidDetectionCancelled is set, so it claims via allowCancelled.
+   *
+   * Feature 081: runs are SERIALIZED through a FIFO promise chain — a batch
+   * kill fires one of these per session over the same directory, and racing
+   * them made the live claimed-set check unreliable (concurrent checks all
+   * saw the same unclaimed file). Sequential runs claim against an accurate
+   * set. Also handles assigned-id verification: if the session carries an
+   * unverified assigned id that no transcript ever materialized for, the id
+   * is nulled here (honest record: unlinked beats confidently wrong).
    */
-  private async detectSessionIdAtExit(name: string): Promise<void> {
+  private detectSessionIdAtExit(name: string): Promise<void> {
+    // Capture the session object NOW — a queued run may execute after
+    // handlePtyExit removes it from the map (claimDetectedSessionId then
+    // links via the persisted-state branch).
     const session = this.sessions.get(name);
-    if (!session || session.claudeSessionId) return;
+    if (!session) return Promise.resolve();
+    const run = () => this.detectSessionIdAtExitBody(name, session).catch((err) => {
+      console.warn(`[detection] Exit-time detection failed for ${name}:`, err);
+    });
+    const tail = this.exitDetectionChain.then(run, run);
+    this.exitDetectionChain = tail;
+    return tail;
+  }
+
+  private async detectSessionIdAtExitBody(name: string, session: Session): Promise<void> {
 
     const providerId = session.provider || 'claude';
     const providerConfig = await getProvider(providerId);
     if (!providerConfig || !supportsSessionDetection(providerConfig)) return;
+    if (!getProviderSessionDir(providerId, session.cwd)) return;
 
-    const sessionDir = session.claudeDir || getProviderSessionDir(providerId, session.cwd);
-    if (!sessionDir) return;
-
-    try {
-      const sessionId = await detectNewProviderSessionId(providerId, sessionDir, session.claudeBeforeFiles || []);
-      if (sessionId) {
-        const claimed = await this.claimDetectedSessionId(name, sessionId, true);
-        if (claimed) {
-          console.log(`[detection] Exit-time link: ${sessionId} → ${name}`);
-        }
+    // Assigned-id verification at exit (081 fallback): the transcript exists
+    // by now or never will. Present → verified; absent → the CLI dropped or
+    // ignored --session-id: null the id and fall through to normal detection.
+    if (session.claudeSessionId && session.assignedIdUnverified) {
+      const candidates = await listProviderSessionCandidates(providerId, session.cwd);
+      if (candidates.some(c => c.sessionId === session.claudeSessionId)) {
+        session.assignedIdUnverified = undefined;
+        return;
       }
-    } catch (err) {
-      console.warn(`[detection] Exit-time detection failed for ${name}:`, err);
+      console.warn(`[detection] Assigned session id ${session.claudeSessionId} for ${name} never materialized — falling back to exit-time detection`);
+      session.claudeSessionId = null;
+      session.assignedIdUnverified = undefined;
+      if (this.persistedState.sessions[name]) {
+        this.persistedState.sessions[name].claudeSessionId = null;
+        await this.savePersistedState();
+      }
+    }
+
+    if (session.claudeSessionId) return;
+
+    const candidates = await listProviderSessionCandidates(providerId, session.cwd, session.claudeBeforeFiles || []);
+    const createdAtMs = session.createdAt ? new Date(session.createdAt).getTime() : null;
+    const choice = chooseDetectionCandidate(candidates, {
+      createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+      claimedIds: this.getClaimedGuids(),
+    });
+    if (choice) {
+      const claimed = await this.claimDetectedSessionId(name, choice.sessionId, true);
+      if (claimed) {
+        console.log(`[detection] Exit-time link: ${choice.sessionId} → ${name}`);
+      }
     }
   }
 
@@ -728,6 +790,10 @@ export class SessionManager {
       // Session already exited and was removed from the map, but GUID detection
       // completed after exit. Still link the GUID in persisted state so the UI
       // shows the session attached to the card (resumable for manual inspection).
+      // Invariant (081): only the serialized exit-time check reaches here — the
+      // polling watch resolves null as soon as its session leaves the map, and
+      // deleteSession removes the persisted record, so deleted sessions can
+      // never claim through this branch.
       if (!this.getClaimedGuids().has(sessionId)) {
         this.persistedState.sessions[name].claudeSessionId = sessionId;
         await this.savePersistedState();
@@ -895,8 +961,10 @@ export class SessionManager {
     // by now or never will, so run ONE synchronous-ish check (no watch). Runs
     // despite the cancellation flag above — that flag exists to stop the
     // polling watch from stomping stopped sessions; this final check is the
-    // authoritative closer that keeps stopped records resumable.
-    if (!session.claudeSessionId) {
+    // authoritative closer that keeps stopped records resumable. Also runs
+    // for unverified assigned ids (081) to confirm the transcript exists or
+    // fall back before a resume can anchor to a phantom id.
+    if (!session.claudeSessionId || session.assignedIdUnverified) {
       void this.detectSessionIdAtExit(name);
     }
 
@@ -1247,6 +1315,11 @@ export class SessionManager {
     const resolvedName = this.resolveSessionName(name);
     // Stop if running
     const session = this.sessions.get(resolvedName);
+    if (session) {
+      // Cancel any in-flight GUID watch BEFORE removal — a deleted session's
+      // watcher must never claim a file (it could steal a live sibling's)
+      session.guidDetectionCancelled = true;
+    }
     if (session?.pty) {
       killPty(session.pty);
     }
@@ -1393,7 +1466,7 @@ export class SessionManager {
     this.updateClientCount(session);
 
     // Client attach is a detection re-arm event (feature 080)
-    if (!session.claudeSessionId) {
+    if (!session.claudeSessionId || session.assignedIdUnverified) {
       void this.ensureSessionIdDetection(this.resolveSessionName(name));
     }
 
@@ -1454,7 +1527,7 @@ export class SessionManager {
     }
 
     // Client attach is a detection re-arm event (feature 080)
-    if (!session.claudeSessionId) {
+    if (!session.claudeSessionId || session.assignedIdUnverified) {
       void this.ensureSessionIdDetection(this.resolveSessionName(name));
     }
 
@@ -1552,7 +1625,7 @@ export class SessionManager {
 
     // If this session doesn't have a GUID yet, (re-)arm detection — input is
     // the event that makes lazily-created provider session files appear (080)
-    if (!session.claudeSessionId) {
+    if (!session.claudeSessionId || session.assignedIdUnverified) {
       void this.ensureSessionIdDetection(resolvedName);
     }
 
@@ -1563,33 +1636,44 @@ export class SessionManager {
    * Watch for a new unclaimed session file.
    * Uses live getClaimedGuids() checks on each poll iteration to prevent
    * two concurrent watchers from claiming the same GUID.
+   *
+   * Feature 081: candidate-based — each tick lists candidates NOT in the
+   * spawn-time before-files snapshot, then chooseDetectionCandidate applies
+   * the lifetime bound (no file older than createdAt - 60s) and the claimed
+   * set, picking the oldest eligible file deterministically (the old diff
+   * returned validGuids[0] of an unsorted readdir — order-arbitrary).
    */
   private watchForUnclaimedSession(
     sessionName: string,
     providerId: string,
-    sessionDir: string,
     beforeFiles: string[],
     timeoutMs: number
   ): Promise<string | null> {
     return new Promise((resolve) => {
       const startTime = Date.now();
       const pollInterval = 200;
-      let pollCount = 0;
 
       const check = async () => {
-        // Check if detection was cancelled (session stopped/exited)
+        // Stop when detection was cancelled OR the session left the live map
+        // (stopped/deleted/exited). A missing session must end the watch —
+        // before feature 081 the optional-chain read `undefined` here and a
+        // dead session's watcher kept polling (and claiming) for up to 60s.
+        // Post-exit linking is detectSessionIdAtExit's job, not this watch.
         const session = this.sessions.get(sessionName);
-        if (session?.guidDetectionCancelled) {
+        if (!session || session.guidDetectionCancelled) {
           resolve(null);
           return;
         }
 
-        pollCount++;
-        const sessionId = await detectNewProviderSessionId(providerId, sessionDir, beforeFiles);
-
-        // Live check against currently claimed GUIDs (not a stale snapshot)
-        if (sessionId && !this.getClaimedGuids().has(sessionId)) {
-          resolve(sessionId);
+        const candidates = await listProviderSessionCandidates(providerId, session.cwd, beforeFiles);
+        const createdAtMs = session.createdAt ? new Date(session.createdAt).getTime() : null;
+        const choice = chooseDetectionCandidate(candidates, {
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+          // Live check against currently claimed GUIDs (not a stale snapshot)
+          claimedIds: this.getClaimedGuids(),
+        });
+        if (choice) {
+          resolve(choice.sessionId);
           return;
         }
 
@@ -1639,6 +1723,17 @@ export class SessionManager {
   private async ensureSessionIdDetection(name: string): Promise<void> {
     const session = this.sessions.get(name);
     if (!session) return;
+
+    // Assigned-id verification (081 fallback): the same events that would
+    // re-arm detection also confirm the --session-id we passed actually
+    // produced a transcript. If it provably never did (future CLI dropping
+    // or ignoring the flag), null the id and fall through to arm detection —
+    // the session continues exactly as a pre-081 detection session.
+    if (session.claudeSessionId && session.assignedIdUnverified) {
+      const fellBack = await this.verifyAssignedSessionId(name, session);
+      if (!fellBack) return;
+    }
+
     const arm = shouldArmDetection({
       hasId: !!session.claudeSessionId,
       cancelled: !!session.guidDetectionCancelled,
@@ -1652,16 +1747,17 @@ export class SessionManager {
     const providerId = session.provider || 'claude';
     const providerConfig = await getProvider(providerId);
     if (!providerConfig || !supportsSessionDetection(providerConfig)) return;
+    if (!getProviderSessionDir(providerId, session.cwd)) return;
 
-    // Use the stored claudeDir and beforeFiles from session creation
-    const sessionDir = session.claudeDir || getProviderSessionDir(providerId, session.cwd);
-    if (!sessionDir) return;
+    // Spawn-time before-files snapshot; empty for assigned-id fallbacks (the
+    // snapshot was skipped) — the lifetime bound in chooseDetectionCandidate
+    // keeps an empty snapshot from admitting ancient files.
     const beforeFiles = session.claudeBeforeFiles || [];
 
     session.guidDetectionInFlight = true;
     session.guidDetectionLastArmedAt = Date.now();
     try {
-      const sessionId = await this.watchForUnclaimedSession(name, providerId, sessionDir, beforeFiles, 60000);
+      const sessionId = await this.watchForUnclaimedSession(name, providerId, beforeFiles, 60000);
       if (sessionId) {
         await this.claimDetectedSessionId(name, sessionId);
       }
@@ -1669,6 +1765,47 @@ export class SessionManager {
       const live = this.sessions.get(name);
       if (live) live.guidDetectionInFlight = false;
     }
+  }
+
+  /**
+   * One throttled assigned-id verification check (feature 081 fallback).
+   * Returns true when the id was nulled (caller should arm detection now).
+   */
+  private async verifyAssignedSessionId(name: string, session: Session): Promise<boolean> {
+    const now = Date.now();
+    if (session.assignedIdVerifyLastAt && now - session.assignedIdVerifyLastAt < ASSIGNED_ID_VERIFY_COOLDOWN_MS) {
+      return false;
+    }
+    session.assignedIdVerifyLastAt = now;
+
+    const providerId = session.provider || 'claude';
+    const candidates = await listProviderSessionCandidates(providerId, session.cwd);
+    const present = candidates.some(c => c.sessionId === session.claudeSessionId);
+    const failures = present ? 0 : (session.assignedIdVerifyFailures ?? 0) + 1;
+    session.assignedIdVerifyFailures = failures;
+    const createdAtMs = session.createdAt ? new Date(session.createdAt).getTime() : now;
+
+    const verdict = assessAssignedIdVerification({
+      idPresentInDir: present,
+      failures,
+      ageMs: now - createdAtMs,
+    });
+
+    if (verdict === 'verified') {
+      session.assignedIdUnverified = undefined;
+      return false;
+    }
+    if (verdict === 'fallback') {
+      console.warn(`[detection] Assigned session id ${session.claudeSessionId} for ${name} never materialized (${failures} checks) — falling back to detection`);
+      session.claudeSessionId = null;
+      session.assignedIdUnverified = undefined;
+      if (this.persistedState.sessions[name]) {
+        this.persistedState.sessions[name].claudeSessionId = null;
+        await this.savePersistedState();
+      }
+      return true;
+    }
+    return false;
   }
 
   resizeSession(name: string, cols: number, rows: number): boolean {
@@ -1853,7 +1990,7 @@ export class SessionManager {
         // Raw (non-bracketed) write — rare compat path. Without paste markers
         // framing the content there is nothing to verify against; legacy
         // fixed-delay behavior is preserved.
-        if (!session.claudeSessionId) {
+        if (!session.claudeSessionId || session.assignedIdUnverified) {
           void this.ensureSessionIdDetection(resolvedName);
         }
         await writeChunkedToPty(session.pty, prompt);
@@ -2028,7 +2165,7 @@ export class SessionManager {
 
       // Prompt delivery is a detection re-arm event (feature 080) — verified
       // submits write straight to the PTY, bypassing writeToSession's hook
-      if (!session.claudeSessionId) {
+      if (!session.claudeSessionId || session.assignedIdUnverified) {
         void this.ensureSessionIdDetection(resolvedName);
       }
 

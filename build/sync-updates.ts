@@ -42,6 +42,80 @@ interface SyncResult {
   total: number;
 }
 
+/**
+ * Guard: the store copy of context-priming is the SHIPPED EMPTY TEMPLATE.
+ * SlyCode's own populated references live only in .claude/skills/context-priming/
+ * (not shipped); the two copies share just the machinery files (SKILL.md,
+ * references/maintenance.md), which must be mirrored by hand when edited.
+ * Populated references leaked to npm through v0.4.2 — this check makes any
+ * recurrence, or a forgotten machinery mirror, fail the build loudly.
+ */
+export function checkContextPrimingTemplate(rootDir: string = ROOT): void {
+  const storeSkill = path.join(rootDir, 'store', 'skills', 'context-priming');
+  const liveSkill = path.join(rootDir, '.claude', 'skills', 'context-priming');
+
+  // Every shipped copy of the skill: the store template plus the two provider
+  // trees inside the tutorial-project scaffold template (which leaked an old
+  // snapshot of the populated maps independently of the store copy).
+  const shippedCopies = [
+    { label: 'store/skills/context-priming', dir: storeSkill },
+    ...['.claude', '.agents'].map((tree) => ({
+      label: `data/scaffold-templates/tutorial-project/${tree}/skills/context-priming`,
+      dir: path.join(rootDir, 'data', 'scaffold-templates', 'tutorial-project', tree, 'skills', 'context-priming'),
+    })),
+  ];
+
+  // 1. references/ whitelist — the leak-regression guard. Anything beyond the
+  //    blank template index + generic maintenance doctrine must not ship.
+  const allowed = new Set(['area-index.md', 'maintenance.md']);
+  for (const copy of shippedCopies) {
+    const refsDir = path.join(copy.dir, 'references');
+    if (!fs.existsSync(refsDir)) continue;
+    for (const entry of fs.readdirSync(refsDir, { withFileTypes: true })) {
+      if (entry.isDirectory() || !allowed.has(entry.name)) {
+        throw new Error(
+          `context-priming template check failed: ${copy.label}/references/ ` +
+          `must contain only area-index.md + maintenance.md (it ships as an empty template), ` +
+          `found "${entry.name}". SlyCode's populated references belong ONLY in ` +
+          `.claude/skills/context-priming/ — remove the offending content from the shipped copy.`
+        );
+      }
+    }
+  }
+
+  // 2. Machinery drift — SKILL.md and maintenance.md must stay byte-identical
+  //    between the store template and the live .claude/ copy…
+  for (const rel of ['SKILL.md', path.join('references', 'maintenance.md')]) {
+    const storeFile = path.join(storeSkill, rel);
+    const liveFile = path.join(liveSkill, rel);
+    if (!fs.existsSync(storeFile) || !fs.existsSync(liveFile)) continue;
+    if (!fs.readFileSync(storeFile).equals(fs.readFileSync(liveFile))) {
+      throw new Error(
+        `context-priming machinery drift: store/skills/context-priming/${rel} differs from ` +
+        `.claude/skills/context-priming/${rel}. These files are shared machinery — mirror ` +
+        `whichever copy you edited onto the other, then rebuild.`
+      );
+    }
+  }
+
+  // …and the tutorial trees must match the store template exactly (all three
+  // files — they ship the same empty skill).
+  for (const copy of shippedCopies.slice(1)) {
+    for (const rel of ['SKILL.md', path.join('references', 'maintenance.md'), path.join('references', 'area-index.md')]) {
+      const storeFile = path.join(storeSkill, rel);
+      const tutorialFile = path.join(copy.dir, rel);
+      if (!fs.existsSync(storeFile) || !fs.existsSync(tutorialFile)) continue;
+      if (!fs.readFileSync(storeFile).equals(fs.readFileSync(tutorialFile))) {
+        throw new Error(
+          `context-priming template drift: ${copy.label}/${rel} differs from ` +
+          `store/skills/context-priming/${rel}. The tutorial scaffold ships the same empty ` +
+          `template as the store — copy the store version over it.`
+        );
+      }
+    }
+  }
+}
+
 function syncSkills(skillNames: string[], rootDir: string): SyncResult {
   const storeDir = path.join(rootDir, 'store', 'skills');
   const updatesDir = path.join(rootDir, 'updates', 'skills');
@@ -124,6 +198,7 @@ function syncActions(actionNames: string[], rootDir: string): SyncResult {
 }
 
 export function syncStoreToUpdates(rootDir: string = ROOT): { skills: SyncResult; actions: SyncResult } {
+  checkContextPrimingTemplate(rootDir);
   const manifest = require(path.join(rootDir, 'build', 'store-manifest.js'));
 
   const skillResult = syncSkills(manifest.skills || [], rootDir);

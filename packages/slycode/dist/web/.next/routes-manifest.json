@@ -229,6 +229,12 @@
       "namedRegex": "^/api/auth/status(?:/)?$"
     },
     {
+      "page": "/api/board-view-state",
+      "regex": "^/api/board\\-view\\-state(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/board\\-view\\-state(?:/)?$"
+    },
+    {
       "page": "/api/changelog",
       "regex": "^/api/changelog(?:/)?$",
       "routeKeys": {},
@@ -365,6 +371,12 @@
       "regex": "^/api/scheduler(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/scheduler(?:/)?$"
+    },
+    {
+      "page": "/api/scheduler/log",
+      "regex": "^/api/scheduler/log(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/scheduler/log(?:/)?$"
     },
     {
       "page": "/api/search",

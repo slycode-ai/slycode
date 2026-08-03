@@ -37,6 +37,9 @@ export interface Session {
     guidDetectionInFlight?: boolean;
     guidDetectionLastArmedAt?: number;
     guidDetectionCancelled?: boolean;
+    assignedIdUnverified?: boolean;
+    assignedIdVerifyLastAt?: number;
+    assignedIdVerifyFailures?: number;
     lastClientDisconnect?: string;
     exitResolver?: () => void;
     pendingPrompt?: string;

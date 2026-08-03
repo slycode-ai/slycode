@@ -10,6 +10,7 @@ export declare class SessionManager {
     private persistedState;
     private idleCheckTimer;
     private sseHeartbeatTimer;
+    private exitDetectionChain;
     constructor(config?: Partial<BridgeConfig>, runtimeConfig?: BridgeRuntimeConfig);
     init(): Promise<void>;
     /**
@@ -66,11 +67,19 @@ export declare class SessionManager {
     private detectProviderSessionId;
     /**
      * Exit-time last-chance session-id detection (feature 080). Single-shot
-     * before/after diff against the spawn-time snapshot — no polling watch.
-     * Called from handlePtyExit AFTER guidDetectionCancelled is set, so it
-     * claims via allowCancelled.
+     * candidate check — no polling watch. Called from handlePtyExit AFTER
+     * guidDetectionCancelled is set, so it claims via allowCancelled.
+     *
+     * Feature 081: runs are SERIALIZED through a FIFO promise chain — a batch
+     * kill fires one of these per session over the same directory, and racing
+     * them made the live claimed-set check unreliable (concurrent checks all
+     * saw the same unclaimed file). Sequential runs claim against an accurate
+     * set. Also handles assigned-id verification: if the session carries an
+     * unverified assigned id that no transcript ever materialized for, the id
+     * is nulled here (honest record: unlinked beats confidently wrong).
      */
     private detectSessionIdAtExit;
+    private detectSessionIdAtExitBody;
     /**
      * Atomically claim a detected session id for a session (feature 080 —
      * shared by spawn-time watch, re-armed watches, and exit-time detection).
@@ -160,6 +169,12 @@ export declare class SessionManager {
      * Watch for a new unclaimed session file.
      * Uses live getClaimedGuids() checks on each poll iteration to prevent
      * two concurrent watchers from claiming the same GUID.
+     *
+     * Feature 081: candidate-based — each tick lists candidates NOT in the
+     * spawn-time before-files snapshot, then chooseDetectionCandidate applies
+     * the lifetime bound (no file older than createdAt - 60s) and the claimed
+     * set, picking the oldest eligible file deterministically (the old diff
+     * returned validGuids[0] of an unsorted readdir — order-arbitrary).
      */
     private watchForUnclaimedSession;
     /**
@@ -175,6 +190,11 @@ export declare class SessionManager {
      * delivery (not spawn) is the event that makes detection succeed.
      */
     private ensureSessionIdDetection;
+    /**
+     * One throttled assigned-id verification check (feature 081 fallback).
+     * Returns true when the id was nulled (caller should arm detection now).
+     */
+    private verifyAssignedSessionId;
     resizeSession(name: string, cols: number, rows: number): boolean;
     sendSignal(name: string, signal: string): boolean;
     private responseStore;

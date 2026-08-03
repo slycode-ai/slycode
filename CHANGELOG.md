@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-03
+
+### Added
+- Deterministic session IDs — the bridge now generates a UUID per spawn and hands it to Claude and Gemini directly. Concurrent spawns no longer risk being cross-attributed, and a bridge restart resumes the right conversation every time. An "unlinked" chip appears on the terminal panel when a session can't be tied to a transcript.
+- Board attention cues — cards whose session emitted output while you were away get a lane-coloured corner fold and backlight until you open them. Dashboard project cards show a roll-up count of unseen cards, and archived search results become live deep-links back into the archived board view.
+- Activity feed rows now carry a project badge and are clickable — jump straight to the card that triggered the event.
+- Automation run history viewer — the automation config modal now has a Recent Runs section showing the last 20 firings with provider, session, bridge, liveness and delivery detail. The Automations screen's error badge grows a tooltip with the last error message.
+- Card-number references across the CLI — every `sly-kanban` command that takes a card now accepts `0274`, `#0274`, the long ID, or the exact title. Output leads with the short number and demotes the long ID to a detail line. Search output gains a `Card` column.
+- Kanban skill v1.15.0 — documents the new card-number reference workflow across all subcommands.
+
+### Fixed
+- Day-first dates across the web UI — dates and times no longer render in US format when your system is anywhere else. Locale is inferred from your timezone region.
+- One-shot automation double-fire fix — a past-due one-shot could refire on every scheduler tick during the kickoff window; the re-fire guard now runs above the one-shot branch, and the Run Now button writes `lastRun` before triggering to close a race with the scheduler.
+- Automation `lastError` now reliably clears after a successful run instead of lingering as a stale badge.
+- One-shot schedule picker no longer silently shifts stored times by your timezone offset when you save.
+- Questionnaire submit now drains any pending answer edits before posting, so a just-typed answer can no longer arrive as "(no answer)". Warnings survive the tab-switch unmount.
+- Three latent bugs in session detection closed — a ghost watcher, an unbounded diff window, and an exit stampede — all uncovered while shipping the deterministic-session-ID work.
+
+### Changed
+- Security hardening pass — dependency refresh (including a Next.js patch bump) and tightened transitive-dep resolution across web and `create-slycode`.
+
 ## [0.4.2] - 2026-07-21
 
 ### Added

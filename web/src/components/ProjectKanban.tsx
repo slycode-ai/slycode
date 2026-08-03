@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard } from '@/lib/types';
 import type { NewCardData, CardCreatingState } from './CardModal';
 import { connectionManager } from '@/lib/connection-manager';
+import { formatCardNumber } from '@/lib/kanban-numbering';
 import { tabSync } from '@/lib/tab-sync';
 import { usePolling } from '@/hooks/usePolling';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -19,11 +20,15 @@ import { VersionUpdateToast } from './VersionUpdateToast';
 import { SkillUpdateToast } from './SkillUpdateToast';
 import { RetentionWarningToast } from './RetentionWarningToast';
 import { projectKeyAlternation } from '@/lib/session-keys';
+import { computeUnseen, type BoardViewState, type UnseenCardInput, type UnseenSessionInput } from '@/lib/board-view-state';
 
 interface SessionInfo {
   name: string;
   status: 'running' | 'stopped' | 'detached';
   hasHistory: boolean;
+  /** Last SUSTAINED activity — feature 082 keys the unseen marker off this. */
+  lastActive?: string | null;
+  lastOutputAt?: string | null;
 }
 
 type CardSessionStatus = 'running' | 'detached' | 'resumable' | 'none';
@@ -37,6 +42,12 @@ interface ProjectKanbanProps {
   onActiveAutomationsChange?: (hasActive: boolean) => void;
   onExitMode?: () => void;
   onRefreshReady?: (refresh: () => Promise<void>) => void;
+  /**
+   * Ask the parent to switch the board into archived mode (feature 082).
+   * Used when a deep-link names a card that isn't in the live board — it may
+   * be in cold storage, which is only fetched when archived mode is on.
+   */
+  onRequestArchived?: () => void;
 }
 
 const STAGE_ORDER: KanbanStage[] = ['backlog', 'design', 'implementation', 'testing', 'done'];
@@ -62,7 +73,7 @@ function stagesEqual(a: KanbanStages, b: KanbanStages): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-export function ProjectKanban({ project, projectPath, showArchived = false, showAutomations = false, onAutomationToggle, onActiveAutomationsChange, onExitMode, onRefreshReady }: ProjectKanbanProps) {
+export function ProjectKanban({ project, projectPath, showArchived = false, showAutomations = false, onAutomationToggle, onActiveAutomationsChange, onExitMode, onRefreshReady, onRequestArchived }: ProjectKanbanProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -89,7 +100,18 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const [cardSessions, setCardSessions] = useState<Map<string, CardSessionStatus>>(new Map());
   const [activeCards, setActiveCards] = useState<Set<string>>(new Set());
   const prevActiveCardsRef = useRef<Set<string>>(new Set());
+  // Unseen-activity markers (feature 082): cards whose session output is newer
+  // than the card's seen watermark and has since gone quiet.
+  const [unseenCards, setUnseenCards] = useState<Set<string>>(new Set());
+  const viewStateRef = useRef<BoardViewState | null>(null);
   const consumedCardParamRef = useRef<string | null>(null);
+  // Deep-link -> cold-storage retry (feature 082): the sig we already asked the
+  // parent to enable archived mode for, so a miss can't loop.
+  const archivedRetryRef = useRef<string | null>(null);
+  // Whether the currently-loaded stages were fetched WITH archived cards.
+  // Without this, the "card not found" toast can fire in the window between
+  // archived mode turning on and the refetch landing.
+  const loadedArchivedRef = useRef(false);
   const editedCardIdsRef = useRef<Set<string>>(new Set());
   const movedCardIdsRef = useRef<Set<string>>(new Set());
 
@@ -249,7 +271,23 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
 
         // Match sessions to cards by pattern: {projectId}:card:{cardId} or {projectId}:{provider}:card:{cardId}
         const cardPattern = new RegExp(`^${project.id}:(?:[^:]+:)?card:(.+)$`);
+        // Unseen markers (feature 082) are computed from THIS poll rather than
+        // bridge stats, because /sessions carries `lastActive` — the bridge's
+        // sustained-activity timestamp. Stats only exposes lastOutputAt, which
+        // counts stray blips as work and produced false markers.
+        // Alias-aware so sessions under a legacy project-id prefix still match.
+        const unseenPattern = new RegExp(`^(?:${projectKeyAlternation(project)}):(?:[^:]+:)?card:(.+)$`);
+        const unseenInputs: UnseenSessionInput[] = [];
         for (const session of sessions) {
+          const unseenMatch = session.name.match(unseenPattern);
+          if (unseenMatch) {
+            unseenInputs.push({
+              cardId: unseenMatch[1],
+              lastOutputAt: session.lastOutputAt ?? null,
+              lastActiveAt: session.lastActive ?? null,
+            });
+          }
+
           const match = session.name.match(cardPattern);
           if (match) {
             const cardId = match[1];
@@ -264,11 +302,30 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
         }
 
         setCardSessions(statusMap);
+
+        const viewState = viewStateRef.current;
+        if (viewState) {
+          // Card stage/updated_at feeds the Done-lane suppression rule: a card
+          // finished since you last looked doesn't nag.
+          const cardInputs: UnseenCardInput[] = [];
+          for (const stage of STAGE_ORDER) {
+            for (const c of stagesRef.current[stage]) {
+              cardInputs.push({ id: c.id, stage, updatedAt: c.updated_at });
+            }
+          }
+          const nextUnseen = computeUnseen(unseenInputs, viewState, new Date(), cardInputs);
+          setUnseenCards((prev) => {
+            if (prev.size === nextUnseen.size && [...nextUnseen].every((id) => prev.has(id))) {
+              return prev; // identical — avoid a pointless board re-render
+            }
+            return nextUnseen;
+          });
+        }
       }
     } catch {
       // Bridge might not be running
     }
-  }, [project.id]);
+  }, [project]);
 
   // Fetch bridge stats to determine which cards are actively working
   const fetchActiveCards = useCallback(async (signal: AbortSignal) => {
@@ -322,8 +379,49 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     }
   }, [project.id]);
 
+  // Seen watermarks change only when a card modal opens, so this polls slowly;
+  // the marker itself recomputes on every stats tick against the cached state.
+  const fetchViewState = useCallback(async (signal: AbortSignal) => {
+    try {
+      const res = await fetch(`/api/board-view-state?projectId=${encodeURIComponent(project.id)}`, { signal });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.viewState) viewStateRef.current = data.viewState as BoardViewState;
+      }
+    } catch {
+      // Leave the previous watermarks in place — a failed read must never
+      // light up every card.
+    }
+  }, [project.id]);
+
+  /**
+   * Clear a card's marker immediately, without waiting for the POST + next
+   * poll. Also advances the local watermark so the very next stats tick doesn't
+   * re-flag the card from output that predates the open.
+   */
+  const markCardSeenLocally = useCallback((cardId: string) => {
+    const state = viewStateRef.current;
+    if (state) state.card_seen[cardId] = new Date().toISOString();
+    setUnseenCards((prev) => {
+      if (!prev.has(cardId)) return prev;
+      const next = new Set(prev);
+      next.delete(cardId);
+      return next;
+    });
+  }, []);
+
+  const markCardSeen = useCallback((cardId: string) => {
+    markCardSeenLocally(cardId);
+    void fetch('/api/board-view-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: project.id, cardId }),
+    }).catch(() => { /* best-effort: the marker is already cleared locally */ });
+  }, [markCardSeenLocally, project.id]);
+
   usePolling(fetchCardSessions, 5000);
   usePolling(fetchActiveCards, 2000);
+  usePolling(fetchViewState, 15000);
 
   // Report whether any automation cards are actively working
   useEffect(() => {
@@ -362,6 +460,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       const loadedStages = data.stages || EMPTY_STAGES;
       setStages(loadedStages);
       cleanBaselineRef.current = loadedStages;
+      loadedArchivedRef.current = showArchived;
       setExternalUpdate(false);
     } catch {
       // Silently ignore — network errors are expected during sleep/wake
@@ -378,6 +477,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       const loadedStages = data.stages || EMPTY_STAGES;
       setStages(loadedStages);
       cleanBaselineRef.current = loadedStages;
+      loadedArchivedRef.current = showArchived;
       isDirtyRef.current = false;
       setExternalUpdate(false);
     } catch {
@@ -423,12 +523,15 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     if (!sig || consumedCardParamRef.current === sig) return;
 
     // Find card across all stages
+    let found = false;
     for (const stage of STAGE_ORDER) {
       const card = stages[stage]?.find((c) => c.id === cardId);
       if (card) {
+        found = true;
         consumedCardParamRef.current = sig;
         setSelectedCardId(card.id);
         setSelectedStage(stage);
+        markCardSeen(card.id); // feature 082 — arriving via deep-link counts as looking
         // Capture the optional shortcut payload — CardModal consumes it once
         // the per-provider session is ready.
         if (promptParam) {
@@ -450,7 +553,31 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
         break;
       }
     }
-  }, [isLoaded, searchParams, stages, pathname, router]);
+
+    if (found) return;
+
+    // Not on the live board. It may be archived — cold storage is only fetched
+    // when archived mode is on, which is why this used to fail silently
+    // (feature 082). Ask the parent to flip modes once, then let the reload
+    // re-run this effect.
+    if (!loadedArchivedRef.current) {
+      if (onRequestArchived && archivedRetryRef.current !== sig) {
+        archivedRetryRef.current = sig;
+        onRequestArchived();
+      }
+      return; // still waiting on the archived refetch — don't judge yet
+    }
+
+    // Archived storage was searched too and the card genuinely isn't there.
+    // Say so rather than leaving a dead ?card param and no feedback.
+    consumedCardParamRef.current = sig;
+    setShortcutErr('That card is no longer on this board.');
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.delete('card');
+    sp.delete('archived');
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [isLoaded, searchParams, stages, pathname, router, onRequestArchived, markCardSeen]);
 
   // Auto-dismiss the shortcut-not-found toast after 5s
   useEffect(() => {
@@ -652,9 +779,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     setSuppressAutoTerminal(suppress);
     setSelectedCardId(card.id);
     setSelectedStage(stage);
+    markCardSeen(card.id); // feature 082 — opening a card is "I've looked at it"
   };
 
   const handleCloseModal = () => {
+    // Re-stamp on close so output produced while the modal was open counts as
+    // seen — otherwise reading a card re-flags it seconds after you close it.
+    if (selectedCardId) markCardSeen(selectedCardId);
     // Flush any pending dirty save immediately on close
     if (!stagesEqual(stages, cleanBaselineRef.current)) {
       if (saveTimeoutRef.current) {
@@ -994,6 +1125,9 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           {
             label: 'Copy',
             items: [
+              ...(card.number != null
+                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { navigator.clipboard.writeText(formatCardNumber(card.number!)); } }]
+                : []),
               { label: 'Card ID', onClick: () => { navigator.clipboard.writeText(card.id); } },
               { label: 'Title', onClick: () => { navigator.clipboard.writeText(card.title); } },
               { label: 'Description', onClick: () => { navigator.clipboard.writeText(card.description || ''); } },
@@ -1070,6 +1204,9 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           {
             label: 'Copy',
             items: [
+              ...(card.number != null
+                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { navigator.clipboard.writeText(formatCardNumber(card.number!)); } }]
+                : []),
               { label: 'Card ID', onClick: () => { navigator.clipboard.writeText(card.id); } },
               { label: 'Title', onClick: () => { navigator.clipboard.writeText(card.title); } },
               { label: 'Description', onClick: () => { navigator.clipboard.writeText(card.description || ''); } },
@@ -1270,6 +1407,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
                     .sort((a, b) => a.order - b.order)}
                   cardSessions={cardSessions}
                   activeCards={activeCards}
+                  unseenCards={unseenCards}
                   onCardClick={(card) => handleCardClick(card, stageConfig.id)}
                   onCardContextMenu={(card, e) => handleCardContextMenu(card, stageConfig.id, e)}
                   onMoveCard={handleMoveCard}

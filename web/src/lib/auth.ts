@@ -251,6 +251,14 @@ export function lockedUntil(_ip: string): number {
   return readAuthFile().lockouts[GLOBAL_LOCKOUT_KEY]?.lockedUntil ?? 0;
 }
 
+// ACCEPTED RISK — non-atomic read-modify-write, deliberately unlocked
+// (Master, 2026-08-01, card #0309; suppressed in .security/suppressions.json).
+// Within the server process this cannot interleave: the whole RMW is
+// synchronous with no await, and Node runs it single-threaded. writeAuthFile
+// is an atomic tmp+rename, so no torn writes. The only other writers are
+// manual CLI paths (`slycode reset-password`), so the worst case is one lost
+// failure-count increment slightly delaying lockout. Do not add a file lock
+// here without new evidence of a concurrent multi-process write path.
 export function recordFailure(_ip: string, now = Date.now()): void {
   const data = readAuthFile();
   const e = data.lockouts[GLOBAL_LOCKOUT_KEY] ?? { count: 0, lockedUntil: 0 };

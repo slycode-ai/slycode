@@ -20,6 +20,7 @@ import { VersionUpdateToast } from './VersionUpdateToast';
 import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
 import { useVoice } from '@/contexts/VoiceContext';
+import { formatDateTime } from '@/lib/date-format';
 
 interface DashboardProps {
   data: DashboardData;
@@ -34,6 +35,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [isGlobalActive, setIsGlobalActive] = useState(false);
   const voice = useVoice();
   const [bridgeCounts, setBridgeCounts] = useState<Record<string, number> | null>(null);
+  const [unseenCounts, setUnseenCounts] = useState<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState<Tab>('projects');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -143,6 +145,23 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   }, []);
 
   usePolling(fetchGlobalActivity, 1000);
+
+  // Unseen-card roll-up per project (feature 082). Server-side because it needs
+  // each project's seen-state file; polled slowly since it only shifts when a
+  // session settles or a card is opened.
+  const fetchUnseenCounts = useCallback(async (signal: AbortSignal) => {
+    try {
+      const res = await fetch('/api/board-view-state?counts=1', { signal });
+      if (res.ok) {
+        const body = await res.json();
+        if (body?.counts) setUnseenCounts(body.counts as Record<string, number>);
+      }
+    } catch {
+      // Leave the last known counts alone rather than flashing them to zero.
+    }
+  }, []);
+
+  usePolling(fetchUnseenCounts, 10000);
 
   // Connect to SSE stream for live updates using ConnectionManager
   useEffect(() => {
@@ -343,7 +362,10 @@ export function Dashboard({ data: initialData }: DashboardProps) {
         <div className="mx-auto mt-6 flex w-full max-w-lg items-center gap-3">
           <SearchBar
             onResultClick={(result) => {
-              window.location.href = `/project/${result.projectId}?card=${result.cardId}`;
+              // Archived hits need the board in archived mode or the card isn't
+              // loaded and the deep-link silently finds nothing (feature 082).
+              const archived = result.isArchived ? '&archived=1' : '';
+              window.location.href = `/project/${result.projectId}?card=${result.cardId}${archived}`;
             }}
           />
           {isLive && (
@@ -466,6 +488,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
                     <ProjectCard
                       project={project}
                       onDeleted={refreshData}
+                      unseenCount={unseenCounts[project.id] ?? 0}
                       shortcutKey={i < 10 ? (i === 9 ? 0 : i + 1) : undefined}
                       onDragStart={() => setDraggedId(project.id)}
                       onDragEnd={() => { setDraggedId(null); setDropIndex(null); }}
@@ -497,7 +520,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {inaccessibleProjects.map((project) => (
-                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} />
+                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} unseenCount={unseenCounts[project.id] ?? 0} />
                   ))}
                 </div>
               </section>
@@ -505,7 +528,9 @@ export function Dashboard({ data: initialData }: DashboardProps) {
 
             {/* Activity Feed */}
             <section>
-              <ActivityFeed />
+              <ActivityFeed
+                projectNames={Object.fromEntries(data.projects.map((p) => [p.id, p.name]))}
+              />
             </section>
           </>
         ) : activeTab === 'atlas' ? (
@@ -526,7 +551,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
 
         {/* Last Refresh + Copyright */}
         <footer className="mt-8 text-center text-sm text-void-400 dark:text-void-600">
-          <p>Last refresh: {new Date(data.lastRefresh).toLocaleString()}</p>
+          <p>Last refresh: {formatDateTime(data.lastRefresh)}</p>
           <p className="mt-2 text-xs text-void-500 dark:text-void-400">
             &copy; 2026 SlyCode (<a href="https://slycode.ai" target="_blank" rel="noopener noreferrer" className="hover:text-neon-blue-500 dark:hover:text-neon-blue-400 transition-colors">slycode.ai</a>). All rights reserved.
             {slycodeVersion && <span className="ml-2 text-void-400 dark:text-void-500">v{slycodeVersion}</span>}

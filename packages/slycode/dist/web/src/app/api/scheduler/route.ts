@@ -66,13 +66,26 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Card has no automation config' }, { status: 400 });
       }
 
+      // Write lastRun BEFORE the kickoff, mirroring checkAutomations.
+      // A manual trigger registers in neither guard the scheduler relies on:
+      // it never enters activeKickoffs (that Set is local to the scheduler
+      // loop), and until lastRun lands, isDue()'s re-fire guard has nothing to
+      // read. Writing it after the kickoff left a 60-80s window in which a
+      // scheduler tick would see the card as due and fire it a second time —
+      // no restart required, just a manual run overlapping its own schedule.
+      await updateCardAutomation(projectPath, cardId, {
+        lastRun: new Date().toISOString(),
+      });
+
       const result = await triggerAutomation(foundCard, projectId, projectPath, { trigger: 'manual' });
 
-      // Persist lastRun and lastResult for manual triggers
+      // Persist the outcome once the kickoff resolves
       // (scheduled triggers handle this in checkAutomations, but manual bypasses that)
       const configUpdates: Partial<AutomationConfig> = {
-        lastRun: new Date().toISOString(),
         lastResult: result.success ? 'success' : 'error',
+        // undefined clears the key (Object.assign + JSON.stringify drops it),
+        // so a card that has since succeeded shows no stale error.
+        lastError: result.success ? undefined : result.error,
       };
       await updateCardAutomation(projectPath, cardId, configUpdates);
 

@@ -284,6 +284,15 @@ export function ClaudeTerminalPanel({
   const isRunning = sessionInfo?.status === 'running' || sessionInfo?.status === 'detached';
   const hasHistory = sessionInfo?.hasHistory;
 
+  // Unlinked badge (feature 081): a session with no linked transcript id is
+  // never silent — but detection legitimately takes up to ~60s (Codex creates
+  // its file on first prompt), so only surface once the session is old enough
+  // that "still unlinked" means something. Re-evaluates on the 5s info poll.
+  const UNLINKED_BADGE_MIN_AGE_MS = 90_000;
+  const sessionAgeMs = sessionInfo?.createdAt ? Date.now() - new Date(sessionInfo.createdAt).getTime() : null;
+  const showUnlinkedBadge = !!sessionInfo && !sessionInfo.claudeSessionId
+    && sessionAgeMs !== null && sessionAgeMs > UNLINKED_BADGE_MIN_AGE_MS;
+
   // Check for missing instruction file when provider/cwd changes or session stops
   useEffect(() => {
     if (!cwd || !selectedProvider) return;
@@ -1032,6 +1041,15 @@ export function ClaudeTerminalPanel({
             {sessionInfo?.provider && sessionInfo.provider !== 'claude' && (
               <span className="text-xs text-void-500">
                 {providersData?.providers[sessionInfo.provider]?.displayName || sessionInfo.provider}
+              </span>
+            )}
+            {/* Unlinked badge — no transcript id after the detection window */}
+            {showUnlinkedBadge && (
+              <span
+                className="flex-shrink-0 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-400/90"
+                title="No conversation linked to this session — resume won't find it. Use Relink to bind the session file."
+              >
+                unlinked
               </span>
             )}
             {/* Relink button + confirmation */}

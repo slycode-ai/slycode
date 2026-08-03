@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { getProviderColor } from '@/lib/provider-colors';
 import { ConfirmDialog } from './ConfirmDialog';
+import { formatDateTime } from '@/lib/date-format';
 
 interface EndedSessionPanelProps {
   sessionName: string;
@@ -82,7 +83,7 @@ export default function EndedSessionPanel({
         This session stopped before its conversation was linked, so it can&apos;t be resumed.
         {endedAt && (
           <span className="mt-1 block text-xs text-void-400 dark:text-void-600">
-            Ended {new Date(endedAt).toLocaleString()}
+            Ended {formatDateTime(endedAt)}
           </span>
         )}
       </p>

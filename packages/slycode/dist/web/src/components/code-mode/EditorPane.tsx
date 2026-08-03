@@ -16,6 +16,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import type { editor as MonacoEditorNS } from 'monaco-editor';
 import { useVoice } from '@/contexts/VoiceContext';
 import type { BlameLine, OpenTarget } from './types';
+import { formatDate } from '@/lib/date-format';
 
 // Self-host Monaco (module-level, once).
 loader.config({ paths: { vs: '/monaco/vs' } });
@@ -508,7 +509,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
           {blameForLine ? (
             <>
               <span className="text-(--cm-atlas)">{blameForLine.shortHash}</span> · {blameForLine.author} ·{' '}
-              {new Date(blameForLine.date).toLocaleDateString()} · {blameForLine.summary}
+              {formatDate(blameForLine.date)} · {blameForLine.summary}
             </>
           ) : (
             <span className="text-(--cm-faint)">line {cursorLine}: no blame data (unsaved or untracked)</span>

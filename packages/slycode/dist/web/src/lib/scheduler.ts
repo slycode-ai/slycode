@@ -14,7 +14,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { Cron } from 'croner';
-import type { KanbanCard, KanbanBoard, AutomationConfig } from './types';
+import type { KanbanCard, KanbanBoard, AutomationConfig, DeliveryInfo, AutomationLogEntry } from './types';
 import { loadRegistry } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
@@ -105,35 +105,9 @@ async function fetchWithTimeout(url: string, opts?: RequestInit, timeoutMs: numb
 /**
  * Automation run log entry — one per automation execution.
  */
-/** Mirror of the bridge's DeliveryResult (feature 070) — kept loose so an older/newer bridge can't break logging. */
-interface DeliveryInfo {
-  outcome: 'delivered' | 'failed' | 'ambiguous' | 'blocked';
-  verified: boolean;
-  mode: string;
-  attempts: number;
-  resends: number;
-  warnings: string[];
-  reason?: string;
-  polls?: string[];
-  elapsedMs?: number;
-}
-
-interface AutomationLogEntry {
-  timestamp: string;
-  cardId: string;
-  cardTitle: string;
-  projectId: string;
-  trigger: 'scheduled' | 'manual';
-  provider: string;
-  sessionName: string;
-  fresh: boolean;
-  bridgeRequest: { status: number; resumed?: boolean; pid?: number; error?: string } | null;
-  livenessCheck: { type: string; result: string; delayMs?: number; exitCode?: number; exitedAt?: string } | null;
-  delivery?: DeliveryInfo | null;
-  outcome: 'success' | 'error';
-  error: string | null;
-  elapsedMs: number;
-}
+// DeliveryInfo and AutomationLogEntry live in @/lib/types — the run-history UI
+// is a client component and must not import from this module, which pulls in
+// fs/os/child_process. Imported at the top of this file.
 
 /**
  * Append a JSON lines entry to the automation log.
@@ -161,6 +135,50 @@ async function writeAutomationLog(entry: AutomationLogEntry): Promise<void> {
   } catch (err) {
     serr('Failed to write automation log:', err);
   }
+}
+
+/** Upper bound on how many entries a single read may return (query-param abuse guard). */
+const AUTOMATION_LOG_READ_MAX = 200;
+
+/**
+ * Read recent automation log entries for one card, newest first.
+ *
+ * Lives beside writeAutomationLog on purpose: AUTOMATION_LOG_PATH and the
+ * AutomationLogEntry shape stay single-source, so a caller (the API route)
+ * can't drift from the writer.
+ *
+ * Tolerant by design — this is diagnostic data, not load-bearing state:
+ *   - No log file yet (nothing has ever run) is not an error; returns [].
+ *   - Malformed lines are skipped individually. The rotation above slices at a
+ *     line boundary, but the file is appended to concurrently, so a torn final
+ *     line is possible; one bad line must not lose the whole history.
+ */
+export async function readAutomationLog(
+  cardId: string,
+  limit: number,
+  logPath: string = AUTOMATION_LOG_PATH,
+): Promise<AutomationLogEntry[]> {
+  const capped = Math.max(1, Math.min(Math.floor(limit) || 1, AUTOMATION_LOG_READ_MAX));
+
+  let content: string;
+  try {
+    content = await fs.readFile(logPath, 'utf-8');
+  } catch {
+    return []; // No log file yet — fresh install, or no automation has run.
+  }
+
+  const matches: AutomationLogEntry[] = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = JSON.parse(trimmed) as AutomationLogEntry;
+      if (entry?.cardId === cardId) matches.push(entry);
+    } catch { /* torn or malformed line — skip it, keep the rest */ }
+  }
+
+  // File is append-ordered, so the newest entries are at the end.
+  return matches.slice(-capped).reverse();
 }
 
 interface LivenessResult {
@@ -337,27 +355,35 @@ export function getNextRun(schedule: string, scheduleType: 'recurring' | 'one-sh
  *                            cron "0 22 * * *").
  *
  * Re-fire guard: if `lastRun` is within the last RE_FIRE_GUARD_MS, suppress.
- * Prevents self-perpetuating loops when post-fire recompute lands another
- * past `nextRun` (fire took longer than one cron period; or process died
- * before the line ~723 recompute landed).
+ * Applies to BOTH schedule types, and runs before either branch. For recurring
+ * cards it prevents self-perpetuating loops when post-fire recompute lands
+ * another past `nextRun` (fire took longer than one cron period; or the process
+ * died before the recompute landed). For one-shots it is the only persistent
+ * restart protection during the kickoff window — see the note at the guard.
  *
- * One-shot: unchanged — uses the stored ISO timestamp directly.
+ * One-shot: uses the stored ISO timestamp directly, after the re-fire guard.
  */
 export function isDue(config: AutomationConfig): boolean {
   if (!config.enabled || !config.schedule) return false;
   const now = Date.now();
 
-  if (config.scheduleType === 'one-shot') {
-    const target = new Date(config.schedule);
-    return !isNaN(target.getTime()) && target.getTime() <= now;
-  }
-
   // Re-fire guard: never fire twice within RE_FIRE_GUARD_MS of the previous fire.
+  // Deliberately ABOVE the one-shot branch — one-shots need it more than
+  // recurring cards do. A past-due one-shot reports due on every tick until
+  // enabled:false is persisted, which only happens after the kickoff resolves,
+  // so this guard is its sole restart protection in that window. `lastRun` is
+  // written optimistically before kickoff (see checkAutomations), so it is
+  // already populated by the time a restarted process re-evaluates this.
   if (config.lastRun) {
     const lastRunMs = new Date(config.lastRun).getTime();
     if (!isNaN(lastRunMs) && (now - lastRunMs) < RE_FIRE_GUARD_MS) {
       return false;
     }
+  }
+
+  if (config.scheduleType === 'one-shot') {
+    const target = new Date(config.schedule);
+    return !isNaN(target.getTime()) && target.getTime() <= now;
   }
 
   // Primary: trust stored config.nextRun when it's a valid timestamp.
@@ -895,6 +921,11 @@ async function checkAutomations(): Promise<void> {
 
                 const configUpdates: Partial<AutomationConfig> = {
                   lastResult: result.success ? 'success' : 'error',
+                  // undefined CLEARS the key: updateCardAutomation does an
+                  // Object.assign and the board is then JSON.stringify'd, which
+                  // drops undefined values. Without this a stale error would
+                  // linger on a card that has since succeeded.
+                  lastError: result.success ? undefined : result.error,
                 };
 
                 // Calculate next run

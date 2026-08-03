@@ -1,11 +1,32 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePolling } from '@/hooks/usePolling';
 import type { ActivityEvent, EventType } from '@/lib/types';
+import { formatDayMonth } from '@/lib/date-format';
 
 interface ActivityFeedProps {
   projectFilter?: string;
+  /**
+   * Project id -> display name, used for the per-row badge (feature 082).
+   * Omitted when the feed is already scoped to one project.
+   */
+  projectNames?: Record<string, string>;
+}
+
+/**
+ * Event types that carry no card id but still have a sensible destination:
+ * the project's board (feature 082).
+ */
+const PROJECT_LEVEL_TYPES = new Set<string>(['skill_deployed', 'skill_removed', 'skill_imported']);
+
+/** Where a feed row should navigate, or null if it has nowhere useful to go. */
+function eventHref(event: ActivityEvent): string | null {
+  if (!event.project) return null;
+  if (event.card) return `/project/${event.project}?card=${event.card}`;
+  if (PROJECT_LEVEL_TYPES.has(event.type)) return `/project/${event.project}`;
+  return null;
 }
 
 const eventLabels: Record<EventType, string> = {
@@ -109,12 +130,13 @@ function dayLabel(timestamp: string): string {
 
   if (date.toDateString() === today.toDateString()) return 'Today';
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return formatDayMonth(date);
 }
 
-export function ActivityFeed({ projectFilter }: ActivityFeedProps) {
+export function ActivityFeed({ projectFilter, projectNames }: ActivityFeedProps) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const router = useRouter();
 
   const fetchEvents = useCallback(async (signal: AbortSignal) => {
     try {
@@ -174,22 +196,52 @@ export function ActivityFeed({ projectFilter }: ActivityFeedProps) {
                 <div className="sticky top-0 bg-void-50 px-4 py-1 text-xs font-medium text-void-500 dark:bg-void-800 dark:text-void-400">
                   {day}
                 </div>
-                {dayEvents.map((event) => (
-                  <div
-                    key={event.id}
-                    className="flex items-start gap-2 px-4 py-2 text-xs"
-                  >
-                    <span className={`mt-0.5 font-medium ${eventColor(event.type)}`}>
-                      {eventLabel(event.type)}
-                    </span>
-                    <span className="flex-1 text-void-600 dark:text-void-400">
-                      {renderDetail(event)}
-                    </span>
-                    <span className="flex-shrink-0 text-void-400 dark:text-void-500">
-                      {relativeTime(event.timestamp)}
-                    </span>
-                  </div>
-                ))}
+                {dayEvents.map((event) => {
+                  const href = eventHref(event);
+                  // Badge only earns its space on a multi-project feed. Falls
+                  // back to the raw id if the project is no longer registered.
+                  const badge = projectFilter
+                    ? null
+                    : (projectNames?.[event.project] ?? event.project);
+
+                  const row = (
+                    <>
+                      <span className={`mt-0.5 font-medium ${eventColor(event.type)}`}>
+                        {eventLabel(event.type)}
+                      </span>
+                      {badge && (
+                        <span className="mt-0.5 max-w-[7rem] flex-shrink-0 truncate rounded border border-void-200 px-1 font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500 dark:border-void-700 dark:text-void-400">
+                          {badge}
+                        </span>
+                      )}
+                      <span className="flex-1 text-left text-void-600 dark:text-void-400">
+                        {renderDetail(event)}
+                      </span>
+                      <span className="flex-shrink-0 text-void-400 dark:text-void-500">
+                        {relativeTime(event.timestamp)}
+                      </span>
+                    </>
+                  );
+
+                  if (!href) {
+                    return (
+                      <div key={event.id} className="flex items-start gap-2 px-4 py-2 text-xs">
+                        {row}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => router.push(href)}
+                      className="flex w-full items-start gap-2 px-4 py-2 text-xs hover:bg-void-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-neon-blue-400 dark:hover:bg-void-800"
+                    >
+                      {row}
+                    </button>
+                  );
+                })}
               </div>
             ))
           )}

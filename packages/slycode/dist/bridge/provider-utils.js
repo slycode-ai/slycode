@@ -34,7 +34,7 @@ export async function getProvider(providerId) {
  * Returns { command, args } since Codex resume changes the base command.
  */
 export function buildProviderCommand(opts) {
-    const { provider, skipPermissions, resume, sessionId, prompt, model } = opts;
+    const { provider, skipPermissions, resume, sessionId, assignSessionId, prompt, model } = opts;
     const args = [];
     let command = provider.command;
     // Handle Codex-style subcommand resume (command becomes "codex resume")
@@ -75,6 +75,12 @@ export function buildProviderCommand(opts) {
             // No GUID — just pass the flag (Gemini resumes latest)
             args.push(provider.resume.flag);
         }
+    }
+    // Assigned session id — FRESH spawns only (feature 081). Claude hard-errors
+    // when the id already exists, so callers must generate a new UUID per spawn
+    // attempt, never reuse a persisted one.
+    if (!resume && assignSessionId && provider.sessionIdFlag) {
+        args.push(provider.sessionIdFlag, assignSessionId);
     }
     // Initial prompt (Claude accepts prompt alongside --resume; Codex handled by early return above)
     if (prompt) {

@@ -7,6 +7,7 @@ import type {
   QuestionnaireItem,
   AnswerableItem,
 } from '@/lib/questionnaire';
+import { formatDateTime } from '@/lib/date-format';
 
 interface IndexItem {
   ref: string;
@@ -21,8 +22,12 @@ interface IndexItem {
 interface QuestionnaireTabProps {
   card: KanbanCard;
   projectId: string;
-  /** Called when Submit succeeds — parent uses this to switch back to terminal tab. */
-  onSubmitSuccess?: () => void;
+  /**
+   * Called when Submit succeeds — parent uses this to switch back to terminal
+   * tab. Any delivery warning is handed up so the parent can show it at modal
+   * level; a tab-local toast would unmount with the tab switch.
+   */
+  onSubmitSuccess?: (warning?: string) => void;
   /** Currently-selected terminal session name (for submit delivery). */
   activeSessionName?: string;
   /** Provider for session creation if no session exists. */
@@ -114,13 +119,16 @@ export function QuestionnaireTab({
 
   // Patch one answer (debounced via component-local delay timers).
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Values whose patch is scheduled but hasn't fired yet. Submit drains this
+  // so the last-typed answer can't be left behind on disk.
+  const pendingValues = useRef<Record<string, unknown>>({});
 
   const patchAnswer = useCallback(
-    (itemId: string, value: unknown) => {
-      if (!selectedName) return;
+    (itemId: string, value: unknown): Promise<boolean> => {
+      if (!selectedName) return Promise.resolve(false);
       setSaveState('saving');
       setSaveError(null);
-      fetch(
+      return fetch(
         `/api/questionnaire/${encodeURIComponent(projectId)}/${encodeURIComponent(selectedName)}/answer`,
         {
           method: 'POST',
@@ -141,7 +149,7 @@ export function QuestionnaireTab({
                 .then((d) => setQuestionnaire(d.questionnaire || null))
                 .catch(() => {});
             }, 500);
-            return;
+            return false;
           }
           if (!res.ok) {
             const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -151,10 +159,12 @@ export function QuestionnaireTab({
           setSaveError(null);
           // Auto-fade back to idle after a moment.
           setTimeout(() => setSaveState((cur) => (cur === 'saved' ? 'idle' : cur)), 1500);
+          return true;
         })
         .catch((err) => {
           setSaveState('failed');
           setSaveError(err instanceof Error ? err.message : String(err));
+          return false;
         });
     },
     [projectId, selectedName]
@@ -175,13 +185,39 @@ export function QuestionnaireTab({
       // Schedule the patch.
       if (debounceTimers.current[itemId]) clearTimeout(debounceTimers.current[itemId]);
       if (debounceMs > 0) {
-        debounceTimers.current[itemId] = setTimeout(() => patchAnswer(itemId, value), debounceMs);
+        pendingValues.current[itemId] = value;
+        debounceTimers.current[itemId] = setTimeout(() => {
+          delete debounceTimers.current[itemId];
+          delete pendingValues.current[itemId];
+          patchAnswer(itemId, value);
+        }, debounceMs);
       } else {
+        delete pendingValues.current[itemId];
         patchAnswer(itemId, value);
       }
     },
     [patchAnswer]
   );
+
+  /**
+   * Fire every debounce-queued patch immediately and wait for it to land.
+   * Returns false if any patch failed, so Submit can stop rather than deliver
+   * an answer set that doesn't match what's on screen.
+   */
+  const flushPendingAnswers = useCallback(async (): Promise<boolean> => {
+    const ids = Object.keys(pendingValues.current);
+    if (ids.length === 0) return true;
+    const patches = ids.map((itemId) => {
+      const timer = debounceTimers.current[itemId];
+      if (timer) clearTimeout(timer);
+      delete debounceTimers.current[itemId];
+      const value = pendingValues.current[itemId];
+      delete pendingValues.current[itemId];
+      return patchAnswer(itemId, value);
+    });
+    const results = await Promise.all(patches);
+    return results.every(Boolean);
+  }, [patchAnswer]);
 
   // Submit the questionnaire.
   const handleSubmit = useCallback(async () => {
@@ -193,6 +229,14 @@ export function QuestionnaireTab({
     setSubmitting(true);
     setSubmitToast(null);
     try {
+      // Land any debounce-queued answers before the server reads from disk —
+      // otherwise the question you just typed into arrives as "(no answer)".
+      const flushed = await flushPendingAnswers();
+      if (!flushed) {
+        setSubmitToast("Couldn't save your latest answer — nothing was submitted. Try again.");
+        setSubmitting(false);
+        return;
+      }
       const res = await fetch(
         `/api/questionnaire/${encodeURIComponent(projectId)}/${encodeURIComponent(selectedName)}/submit`,
         {
@@ -221,15 +265,25 @@ export function QuestionnaireTab({
       } catch {
         // ignore
       }
-      if (warning) setSubmitToast(`Submitted with warning: ${warning}`);
-      else setSubmitToast(null);
-      onSubmitSuccess?.();
+      // The warning goes to the parent, not to a local toast: this tab is about
+      // to unmount when the parent switches to the terminal.
+      setSubmitToast(null);
+      onSubmitSuccess?.(warning);
     } catch (err) {
       setSubmitToast(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
-  }, [questionnaire, selectedName, activeSessionName, activeProvider, cwd, projectId, onSubmitSuccess]);
+  }, [
+    questionnaire,
+    selectedName,
+    activeSessionName,
+    activeProvider,
+    cwd,
+    projectId,
+    onSubmitSuccess,
+    flushPendingAnswers,
+  ]);
 
   const counts = useMemo(() => (questionnaire ? computeCounts(questionnaire) : null), [questionnaire]);
 
@@ -341,7 +395,7 @@ export function QuestionnaireTab({
               <span aria-hidden>←</span> All questionnaires
             </button>
           )}
-          <div className="text-sm font-medium text-void-900 dark:text-void-100">
+          <div className="text-base font-semibold text-void-900 dark:text-void-50">
             {questionnaire?.title || selectedName}
           </div>
         </div>
@@ -361,11 +415,11 @@ export function QuestionnaireTab({
         {questionnaire && (
           <>
             {questionnaire.intro && (
-              <p className="mb-3 whitespace-pre-wrap text-xs text-void-600 dark:text-void-400">
+              <p className="mb-5 border-l-2 border-cyan-400/50 py-0.5 pl-3.5 whitespace-pre-wrap text-[15px] leading-relaxed text-void-700 dark:text-void-200">
                 {questionnaire.intro}
               </p>
             )}
-            <div className="space-y-2">
+            <div className="space-y-3">
               {questionnaire.items.map((item, idx) => (
                 <ItemControl
                   key={isAnswerable(item) ? item.id : `exp-${idx}`}
@@ -382,19 +436,19 @@ export function QuestionnaireTab({
       {questionnaire && counts && (
         <div className="border-t border-void-200/60 px-4 py-2 dark:border-void-700/40">
           {submitToast && (
-            <div className="mb-2 rounded-md border border-amber-300/50 bg-amber-50/50 p-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-300">
+            <div className="mb-2 rounded-md border border-amber-300/50 bg-amber-50/50 p-2.5 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
               {submitToast}
             </div>
           )}
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs text-void-500 dark:text-void-400">
-              <span className="font-mono">
+            <div className="text-sm text-void-600 dark:text-void-300">
+              <span className="font-mono font-medium">
                 {counts.answered} / {counts.answerable} answered
               </span>
               {questionnaire.submission_count > 0 && questionnaire.submitted_at && (
-                <span className="ml-2 text-[10px] opacity-70">
+                <span className="ml-2 text-xs text-void-500 dark:text-void-400">
                   · submitted {questionnaire.submission_count}× (last:{' '}
-                  {new Date(questionnaire.submitted_at).toLocaleString()})
+                  {formatDateTime(questionnaire.submitted_at)})
                 </span>
               )}
             </div>
@@ -455,15 +509,17 @@ function ItemControl({
 }) {
   if (item.type === 'exposition') {
     return (
-      <div className="rounded-md bg-void-50/60 px-3 py-2 text-xs italic text-void-600 dark:bg-void-900/40 dark:text-void-400">
-        <p className="whitespace-pre-wrap">{item.text}</p>
+      <div className="rounded-lg border-l-2 border-cyan-400/40 bg-void-50/70 px-4 py-3 dark:bg-void-850/60">
+        <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-void-700 dark:text-void-200">
+          {item.text}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-md border border-void-200/60 bg-white/30 px-3 py-2.5 dark:border-void-700/40 dark:bg-void-900/30">
-      <label className="mb-1.5 block text-sm font-medium text-void-900 dark:text-void-100">
+    <div className="rounded-lg border border-void-200/70 bg-white/40 px-4 py-3.5 dark:border-void-700/60 dark:bg-void-850/50">
+      <label className="mb-2.5 block text-base font-semibold leading-snug text-void-900 dark:text-void-50">
         {item.question}
       </label>
       {renderInput(item, onChange)}
@@ -479,8 +535,8 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
           data-voice-target
           value={item.answer ?? ''}
           onChange={(e) => onChange(e.target.value || null, 500)}
-          rows={2}
-          className="w-full rounded-md border border-void-200/60 bg-white/50 px-2.5 py-1.5 text-sm text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-100"
+          rows={3}
+          className="w-full rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] leading-relaxed text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
           placeholder="Type your answer…"
         />
       );
@@ -492,39 +548,7 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
       return <MultiChoiceInput item={item} onChange={onChange} />;
 
     case 'boolean':
-      return (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => onChange(true)}
-            className={`min-w-[64px] rounded-md border px-3 py-1.5 text-sm transition-all ${
-              item.answer === true
-                ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
-                : 'border-void-200/60 bg-white/30 text-void-600 hover:border-neon-blue-400/30 dark:border-void-700/40 dark:bg-void-900/30 dark:text-void-400'
-            }`}
-          >
-            Yes
-          </button>
-          <button
-            onClick={() => onChange(false)}
-            className={`min-w-[64px] rounded-md border px-3 py-1.5 text-sm transition-all ${
-              item.answer === false
-                ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
-                : 'border-void-200/60 bg-white/30 text-void-600 hover:border-neon-blue-400/30 dark:border-void-700/40 dark:bg-void-900/30 dark:text-void-400'
-            }`}
-          >
-            No
-          </button>
-          {item.answer !== null && (
-            <button
-              onClick={() => onChange(null)}
-              className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
-              title="Clear"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      );
+      return <BooleanInput item={item} onChange={onChange} />;
 
     case 'scale': {
       const range: number[] = [];
@@ -538,7 +562,7 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
               className={`min-w-[36px] rounded-md border px-2.5 py-1.5 text-sm transition-all ${
                 item.answer === n
                   ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
-                  : 'border-void-200/60 bg-white/30 text-void-600 hover:border-neon-blue-400/30 dark:border-void-700/40 dark:bg-void-900/30 dark:text-void-400'
+                  : 'border-void-200/60 bg-white/30 text-void-700 hover:border-neon-blue-400/30 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-200'
               }`}
             >
               {n}
@@ -574,10 +598,82 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
               if (Number.isFinite(n)) onChange(n, 300);
             }
           }}
-          className="w-28 rounded-md border border-void-200/60 bg-white/50 px-2.5 py-1.5 text-sm text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-100"
+          className="w-28 rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50"
         />
       );
   }
+}
+
+/**
+ * Yes / No, plus an "Other" escape hatch for when neither fits. The Other
+ * answer is stored as an `"Other: …"` string (same shape as single_choice), so
+ * boolean answers are `true | false | "Other: …" | null`.
+ */
+function BooleanInput({
+  item,
+  onChange,
+}: {
+  item: import('@/lib/questionnaire').BooleanItem;
+  onChange: (v: unknown, debounceMs?: number) => void;
+}) {
+  const isOther = typeof item.answer === 'string' && item.answer.startsWith('Other:');
+  const otherText = isOther ? (item.answer as string).slice('Other:'.length).trimStart() : '';
+  const [userAddedOther, setUserAddedOther] = useState(false);
+  const showOther = !!item.allow_other || isOther || userAddedOther;
+
+  const buttonClass = (selected: boolean) =>
+    `rounded-md border px-3 py-1.5 text-sm transition-all ${
+      selected
+        ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
+        : 'border-void-200/60 bg-white/30 text-void-700 hover:border-neon-blue-400/30 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-200'
+    }`;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button onClick={() => onChange(true)} className={`min-w-[64px] ${buttonClass(item.answer === true)}`}>
+          Yes
+        </button>
+        <button onClick={() => onChange(false)} className={`min-w-[64px] ${buttonClass(item.answer === false)}`}>
+          No
+        </button>
+        {showOther && (
+          <button onClick={() => onChange('Other:')} className={buttonClass(isOther)}>
+            Other
+          </button>
+        )}
+        {item.answer !== null && (
+          <button
+            onClick={() => onChange(null)}
+            className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
+            title="Clear"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {isOther && (
+        <textarea
+          data-voice-target
+          value={otherText}
+          onChange={(e) => onChange(`Other: ${e.target.value}`, 500)}
+          rows={2}
+          placeholder="Specify…"
+          className="w-full rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] leading-relaxed text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
+        />
+      )}
+      <ChoiceFooter
+        canClear={false}
+        canAddOther={!showOther}
+        onAddOther={() => {
+          setUserAddedOther(true);
+          // Match the choice inputs: clicking "+ Other" selects it, so the
+          // question immediately reads as answered.
+          onChange('Other:');
+        }}
+      />
+    </div>
+  );
 }
 
 function SingleChoiceInput({
@@ -593,28 +689,28 @@ function SingleChoiceInput({
   const showOther = !!item.allow_other || isOther || userAddedOther;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {item.options.map((opt) => (
-        <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
+        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
           <input
             type="radio"
             name={item.id}
             checked={item.answer === opt}
             onChange={() => onChange(opt)}
-            className="accent-neon-blue-400"
+            className="h-4 w-4 accent-neon-blue-400"
           />
           {opt}
         </label>
       ))}
       {showOther && (
-        <div className="space-y-1">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
+        <div className="space-y-1.5">
+          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
             <input
               type="radio"
               name={item.id}
               checked={isOther}
               onChange={() => onChange('Other:')}
-              className="accent-neon-blue-400"
+              className="h-4 w-4 accent-neon-blue-400"
             />
             Other
           </label>
@@ -625,7 +721,7 @@ function SingleChoiceInput({
               value={otherText}
               onChange={(e) => onChange(`Other: ${e.target.value}`, 500)}
               placeholder="Specify…"
-              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-2.5 py-1 text-sm text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-100"
+              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-3 py-1.5 text-[15px] text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
             />
           )}
         </div>
@@ -680,26 +776,26 @@ function MultiChoiceInput({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {item.options.map((opt) => (
-        <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
+        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
           <input
             type="checkbox"
             checked={current.includes(opt)}
             onChange={() => toggleOption(opt)}
-            className="accent-neon-blue-400"
+            className="h-4 w-4 accent-neon-blue-400"
           />
           {opt}
         </label>
       ))}
       {showOther && (
-        <div className="space-y-1">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-void-700 dark:text-void-300">
+        <div className="space-y-1.5">
+          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
             <input
               type="checkbox"
               checked={isOther}
               onChange={toggleOther}
-              className="accent-neon-blue-400"
+              className="h-4 w-4 accent-neon-blue-400"
             />
             Other
           </label>
@@ -710,7 +806,7 @@ function MultiChoiceInput({
               value={otherText}
               onChange={(e) => setOtherText(e.target.value)}
               placeholder="Specify…"
-              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-2.5 py-1 text-sm text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-100"
+              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-3 py-1.5 text-[15px] text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
             />
           )}
         </div>
@@ -751,7 +847,7 @@ function ChoiceFooter({
         {canClear && (
           <button
             onClick={onClear}
-            className="text-xs text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300"
+            className="text-xs text-void-600 hover:text-void-800 dark:text-void-300 dark:hover:text-void-100"
             title="Clear selection"
           >
             Clear
@@ -762,7 +858,7 @@ function ChoiceFooter({
         {canAddOther && (
           <button
             onClick={onAddOther}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-400 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-500"
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-500 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-400"
             title="Add an 'Other' option for a free-text answer"
           >
             <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -793,6 +889,8 @@ function isAnswerFilled(item: AnswerableItem): boolean {
     case 'multi_choice':
       return Array.isArray(item.answer) && item.answer.length > 0;
     case 'boolean':
+      // Boolean items accept an "Other: …" string when Yes/No doesn't fit.
+      if (typeof item.answer === 'string') return item.answer.trim().length > 0;
       return item.answer === true || item.answer === false;
     case 'scale':
     case 'number':

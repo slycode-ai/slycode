@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.14.0
-updated: 2026-07-21
+version: 1.15.0
+updated: 2026-07-29
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -33,15 +33,25 @@ Manage kanban cards via CLI: `sly-kanban <command>`
 
 ## Card Identification
 
-All commands accept either a **card ID** or an **exact card title** (case-insensitive, non-archived cards only):
+Every command that takes a card reference accepts three forms interchangeably:
+
+- **Card number** — `0274` or `'#0274'` (leading zeros optional, so `274` works too). This is the **preferred everyday form**.
+- **Long card ID** — `card-1234567890`. Internal primary key; still valid everywhere.
+- **Exact card title** — case-insensitive, non-archived cards only.
 
 ```bash
-sly-kanban show card-1234567890      # By ID
+sly-kanban show 0274                 # By number (preferred)
+sly-kanban show '#0274'              # Same — note the quotes (see below)
+sly-kanban show card-1234567890      # By long ID
 sly-kanban show "Test Card"          # By exact title
-sly-kanban prompt "Test Card" "do X" # Title works for prompt too
+sly-kanban prompt 0274 "do X"        # Numbers work for prompt/questionnaire/session too
 ```
 
-If a title doesn't match, use the card ID instead.
+**Shell gotcha:** unquoted `#0274` starts a bash comment — `sly-kanban show #0274` sends no argument at all. Use the bare form (`0274`) or quote it (`'#0274'`).
+
+Resolution precedence: exact long ID → card number → exact title. Numbers win over digits-only titles by design. Number and ID lookups cover archived cards in cold storage (with `--include-archived` where the command requires it); an unknown number fails loudly (`No card with number #0274`).
+
+**Present numbers, not long IDs.** Card numbers are unique and never reused (monotonic allocation spans hot board + cold archive). When referring to cards in human-facing output — summaries, notes, messages, status lines — use `#0274`, not `card-1234567890`. Long IDs remain fine as machine handles in scripts and cross-card plumbing.
 
 ## Quick Reference
 
@@ -56,7 +66,7 @@ sly-kanban search --stage backlog
 sly-kanban search --type feature
 
 # Show card details (use 'show', NOT 'view')
-sly-kanban show card-123
+sly-kanban show 0274
 
 # Create card
 sly-kanban create --title "Add feature X" --type feature --priority medium
@@ -69,28 +79,28 @@ Acceptance criteria:
 - Session timeout warning" --type feature
 
 # Update card
-sly-kanban update card-123 --title "New title" --areas "web-frontend,terminal-bridge"
+sly-kanban update 0274 --title "New title" --areas "web-frontend,terminal-bridge"
 
 # Link documentation to card (all ref types append — cards can hold multiple)
-sly-kanban update card-123 --design-ref "documentation/designs/foo.md"
-sly-kanban update card-123 --feature-ref "documentation/features/bar.md"
-sly-kanban update card-123 --html-ref "documentation/designs/foo.html"
+sly-kanban update 0274 --design-ref "documentation/designs/foo.md"
+sly-kanban update 0274 --feature-ref "documentation/features/bar.md"
+sly-kanban update 0274 --html-ref "documentation/designs/foo.html"
 
 # Remove ONE ref by path (any type) — unlinks the reference, never deletes the file
-sly-kanban update card-123 --unlink-ref "documentation/designs/foo.md"
+sly-kanban update 0274 --unlink-ref "documentation/designs/foo.md"
 
 # Clear ALL refs of a type (pass empty string)
-sly-kanban update card-123 --design-ref ""
-sly-kanban update card-123 --html-ref ""
+sly-kanban update 0274 --design-ref ""
+sly-kanban update 0274 --html-ref ""
 
 # Move card
-sly-kanban move card-123 design
+sly-kanban move 0274 design
 
 # Reorder cards within a stage
-sly-kanban reorder backlog card-1 card-2 card-3   # Full reorder (listed first, rest after)
-sly-kanban reorder backlog --top card-2            # Move card to top
-sly-kanban reorder backlog --bottom card-5         # Move card to bottom
-sly-kanban reorder implementation --position 2 card-7  # Move to position N
+sly-kanban reorder backlog 0271 0272 0273   # Full reorder (listed first, rest after)
+sly-kanban reorder backlog --top 0272            # Move card to top
+sly-kanban reorder backlog --bottom 0275         # Move card to bottom
+sly-kanban reorder implementation --position 2 0277  # Move to position N
 
 # Board snapshot
 sly-kanban board                    # Full board (backlog → testing)
@@ -98,35 +108,35 @@ sly-kanban board --compact          # One line per card
 sly-kanban board --inflight         # Design + implementation + testing only
 
 # Archive card (not allowed on automation cards)
-sly-kanban archive card-123
+sly-kanban archive 0274
 
 # Checklist management
-sly-kanban checklist card-123 list
-sly-kanban checklist card-123 add "Write tests"
-sly-kanban checklist card-123 toggle check-123
+sly-kanban checklist 0274 list
+sly-kanban checklist 0274 add "Write tests"
+sly-kanban checklist 0274 toggle check-123
 
 # Problem tracking
-sly-kanban problem card-123 list
-sly-kanban problem card-123 add "Bug description" --severity major
-sly-kanban problem card-123 resolve prob-123
-sly-kanban problem card-123 promote prob-123 --type chore
+sly-kanban problem 0274 list
+sly-kanban problem 0274 add "Bug description" --severity major
+sly-kanban problem 0274 resolve prob-123
+sly-kanban problem 0274 promote prob-123 --type chore
 
 # Agent notes
-sly-kanban notes card-123 list
-sly-kanban notes card-123 add "Context for next agent" --agent "Claude"
-sly-kanban notes card-123 search "blocker"
-sly-kanban notes card-123 edit 2 "Updated note text"
-sly-kanban notes card-123 delete 3
-sly-kanban notes card-123 clear
+sly-kanban notes 0274 list
+sly-kanban notes 0274 add "Context for next agent" --agent "Claude"
+sly-kanban notes 0274 search "blocker"
+sly-kanban notes 0274 edit 2 "Updated note text"
+sly-kanban notes 0274 delete 3
+sly-kanban notes 0274 clear
 
 # Card status — short progress label visible on the card in the web UI
-sly-kanban status card-123                              # print current status
-sly-kanban status card-123 "Finished design"            # set status (max 120 chars)
-sly-kanban status card-123 --clear                      # clear
-sly-kanban status card-123 ""                           # also clears (empty arg)
-sly-kanban update card-123 --status "Investigating"     # alternative set form
-sly-kanban update card-123 --status ""                  # alternative clear form
-sly-kanban move card-123 testing --status "Ready for review"   # move + set status in one shot
+sly-kanban status 0274                              # print current status
+sly-kanban status 0274 "Finished design"            # set status (max 120 chars)
+sly-kanban status 0274 --clear                      # clear
+sly-kanban status 0274 ""                           # also clears (empty arg)
+sly-kanban update 0274 --status "Investigating"     # alternative set form
+sly-kanban update 0274 --status ""                  # alternative clear form
+sly-kanban move 0274 testing --status "Ready for review"   # move + set status in one shot
 
 # List available areas
 sly-kanban areas
@@ -149,15 +159,15 @@ Two ways to keep a status across a transition:
 
 ```bash
 # Best: one shot — atomic move + manual status
-sly-kanban move card-123 testing --status "Ready for review"
+sly-kanban move 0274 testing --status "Ready for review"
 
 # Or: move first, then set
-sly-kanban move card-123 testing
-sly-kanban status card-123 "Ready for review"
+sly-kanban move 0274 testing
+sly-kanban status 0274 "Ready for review"
 
 # Wrong: status before move — wiped by the move
-sly-kanban status card-123 "Ready for review"
-sly-kanban move card-123 testing
+sly-kanban status 0274 "Ready for review"
+sly-kanban move 0274 testing
 ```
 
 Status text is normalized at write time (whitespace collapsed, control
@@ -256,13 +266,13 @@ Agent notes are a shared scratchpad on each card for passing context between age
 
 ```bash
 # Read notes before starting
-sly-kanban notes card-123 list
+sly-kanban notes 0274 list
 
 # Leave context after your session
-sly-kanban notes card-123 add "Completed API routes, tests passing. Frontend still needs the Notes tab wired up." --agent "Claude"
+sly-kanban notes 0274 add "Completed API routes, tests passing. Frontend still needs the Notes tab wired up." --agent "Claude"
 
 # Flag a blocker
-sly-kanban notes card-123 add "Build fails on node 18 — needs --experimental flag for crypto" --agent "Codex"
+sly-kanban notes 0274 add "Build fails on node 18 — needs --experimental flag for crypto" --agent "Codex"
 ```
 
 ## Integration with Onboard Action
@@ -295,24 +305,24 @@ Cards support dedicated reference fields for documentation:
 
 ```bash
 # Attach a design doc (appends — cards can hold multiple)
-sly-kanban update card-123 --design-ref "documentation/designs/my-feature.md"
-sly-kanban update card-123 --design-ref "documentation/designs/my-feature-v2.md"
+sly-kanban update 0274 --design-ref "documentation/designs/my-feature.md"
+sly-kanban update 0274 --design-ref "documentation/designs/my-feature-v2.md"
 
 # Feature spec / test doc — same append behaviour
-sly-kanban update card-123 --feature-ref "documentation/features/001_my_feature.md"
-sly-kanban update card-123 --test-ref "documentation/tests/my-feature-tests.md"
+sly-kanban update 0274 --feature-ref "documentation/features/001_my_feature.md"
+sly-kanban update 0274 --test-ref "documentation/tests/my-feature-tests.md"
 
 # Append an HTML mockup / a questionnaire (also multiple per card)
-sly-kanban update card-123 --html-ref "documentation/designs/my-feature-mockup.html"
-sly-kanban update card-123 --questionnaire-ref "documentation/questionnaires/001_scope.json"
+sly-kanban update 0274 --html-ref "documentation/designs/my-feature-mockup.html"
+sly-kanban update 0274 --questionnaire-ref "documentation/questionnaires/001_scope.json"
 
 # Remove ONE ref (any type) without deleting the file
-sly-kanban update card-123 --unlink-ref "documentation/designs/my-feature.md"
+sly-kanban update 0274 --unlink-ref "documentation/designs/my-feature.md"
 
 # Clear ALL refs of a type by passing an empty string
-sly-kanban update card-123 --design-ref ""
-sly-kanban update card-123 --html-ref ""
-sly-kanban update card-123 --questionnaire-ref ""
+sly-kanban update 0274 --design-ref ""
+sly-kanban update 0274 --html-ref ""
+sly-kanban update 0274 --questionnaire-ref ""
 ```
 
 These appear as dedicated fields on the card (not in description). Legacy cards with a single design/feature/test ref keep working — the singular value is read as the first entry and folds into the list on the next CLI write.
@@ -402,7 +412,7 @@ The agent writes the JSON file directly — same pattern as feature specs.
 | `free_text` | Multi-line text input. | `string` |
 | `single_choice` | Radio buttons. Add `allow_other: true` for an "Other" option with a free-text field. | `string` (an option, or `"Other: <text>"`) |
 | `multi_choice` | Checkboxes. Add `allow_other: true` for an "Other" option with a free-text field. | `string[]` |
-| `boolean` | Yes/No toggle. Required-check is `answer !== null` (so `false` is a valid answer). | `boolean` |
+| `boolean` | Yes/No toggle. Add `allow_other: true` to show an "Other" button with a free-text field (users can also add it themselves). Required-check is `answer !== null` (so `false` is a valid answer). | `boolean`, or `"Other: <text>"` |
 | `scale` | Segmented integer scale (e.g. 1-5). Requires `min` and `max`; optional `step` (default 1). | `number` |
 | `number` | Free numeric input. Optional `min`, `max`, `step`. | `number` |
 
@@ -433,7 +443,7 @@ The agent writes the JSON file directly — same pattern as feature specs.
 - `exposition` → `text` only (no `id`, no `answer`)
 - `free_text` → `id`, `question`, `answer` (use `null` until answered)
 - `single_choice` / `multi_choice` → `id`, `question`, `options` (non-empty `string[]`), `answer`. Optional: `allow_other: true`
-- `boolean` → `id`, `question`, `answer`
+- `boolean` → `id`, `question`, `answer`. Optional: `allow_other: true`
 - `scale` → `id`, `question`, `min`, `max` (must satisfy `min < max`), `answer`. Optional: `step` (default 1, must be > 0)
 - `number` → `id`, `question`, `answer`. Optional: `min`, `max`, `step` (must be > 0 if set)
 
@@ -441,7 +451,7 @@ The agent writes the JSON file directly — same pattern as feature specs.
 
 - Item ids: non-empty strings, unique within the questionnaire, stable once the user starts answering.
 - `multi_choice` answer is `null` when nothing is selected (NOT `[]`).
-- "Other" answers: store as the literal string `"Other: <text>"` (with a space). For multi_choice, that string lives inside the array.
+- "Other" answers: store as the literal string `"Other: <text>"` (with a space). For multi_choice, that string lives inside the array. `boolean` items accept the same string in place of `true`/`false` when Yes/No doesn't fit.
 - `schema_version`: bump by 1 whenever you edit `items` (add/remove a question, reword, change options) so the UI reloads stale forms in any open browser tab.
 - `name` field is the lookup key — the API resolves questionnaires by `name`, not by filename. Filename slug should match `name` for clarity but mismatch is non-fatal.
 
@@ -489,17 +499,17 @@ The `--value` argument MUST be valid JSON (note the quoted strings). Path valida
 ### Refining a backlog item
 ```bash
 # 1. View current state
-sly-kanban show card-123
+sly-kanban show 0274
 
 # 2. Update with refined details
-sly-kanban update card-123 \
+sly-kanban update 0274 \
   --title "Implement user authentication with OAuth" \
   --description "Add Google and GitHub OAuth providers..." \
   --areas "backend,auth" \
   --priority high
 
 # 3. Move to design when ready
-sly-kanban move card-123 design
+sly-kanban move 0274 design
 ```
 
 ### Creating a new task from user request
@@ -515,25 +525,25 @@ sly-kanban create \
 ### Tracking testing progress
 ```bash
 # Add checklist items
-sly-kanban checklist card-123 add "Unit tests pass"
-sly-kanban checklist card-123 add "Integration tests pass"
-sly-kanban checklist card-123 add "Manual testing complete"
+sly-kanban checklist 0274 add "Unit tests pass"
+sly-kanban checklist 0274 add "Integration tests pass"
+sly-kanban checklist 0274 add "Manual testing complete"
 
 # Mark as done
-sly-kanban checklist card-123 toggle check-xxx
+sly-kanban checklist 0274 toggle check-xxx
 
 # If issues found
-sly-kanban problem card-123 add "Login fails after timeout" --severity major
+sly-kanban problem 0274 add "Login fails after timeout" --severity major
 ```
 
 ### Promoting problems to backlog
 When a problem is too big for a quick fix and needs its own design/implementation cycle:
 ```bash
 # Review problems
-sly-kanban problem card-123 list
+sly-kanban problem 0274 list
 
 # Promote a problem to a new backlog card
-sly-kanban problem card-123 promote prob-xxx --type chore
+sly-kanban problem 0274 promote prob-xxx --type chore
 
 # The original problem is marked resolved, new card created in backlog
 # Card inherits areas from source card, references original in description
@@ -548,25 +558,25 @@ Cards can be toggled into automation mode — a scheduled task that fires a prom
 sly-kanban create --title "Nightly test run" --type chore --automation
 
 # Toggle existing card to automation mode
-sly-kanban update card-123 --automation true
-sly-kanban update card-123 --automation false
+sly-kanban update 0274 --automation true
+sly-kanban update 0274 --automation false
 
 # Configure automation (partial updates — only specified fields change)
-sly-kanban automation card-123 configure --schedule "0 6 * * *" --prompt "Run all tests" --provider claude
-sly-kanban automation card-123 configure --schedule "0 9 * * 1"    # just the schedule
-sly-kanban automation card-123 configure --prompt "New prompt"      # just the prompt
-sly-kanban automation card-123 configure --fresh-session true
-sly-kanban automation card-123 configure --report-messaging true
+sly-kanban automation 0274 configure --schedule "0 6 * * *" --prompt "Run all tests" --provider claude
+sly-kanban automation 0274 configure --schedule "0 9 * * 1"    # just the schedule
+sly-kanban automation 0274 configure --prompt "New prompt"      # just the prompt
+sly-kanban automation 0274 configure --fresh-session true
+sly-kanban automation 0274 configure --report-messaging true
 
 # Enable / disable
-sly-kanban automation card-123 enable
-sly-kanban automation card-123 disable
+sly-kanban automation 0274 enable
+sly-kanban automation 0274 disable
 
 # Manual trigger (calls bridge API directly)
-sly-kanban automation card-123 run
+sly-kanban automation 0274 run
 
 # View automation status
-sly-kanban automation card-123 status
+sly-kanban automation 0274 status
 
 # List all automation cards
 sly-kanban automation list

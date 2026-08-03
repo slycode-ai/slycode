@@ -26,6 +26,8 @@ import { VoiceErrorPopup } from './VoiceErrorPopup';
 import { useVoice } from '@/contexts/VoiceContext';
 import { readStatus, formatStatusForPrompt } from '@/lib/status';
 import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
+import { formatDate } from '@/lib/date-format';
+import { formatCardNumber } from '@/lib/kanban-numbering';
 
 interface VoiceFocusTarget {
   type: 'input' | 'terminal';
@@ -231,6 +233,11 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
 
 export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
+
+  // Questionnaire delivery warning — lives at modal level so it survives the
+  // auto-switch to the terminal tab that follows a submit (the tab-local toast
+  // used to unmount before it could be read).
+  const [questionnaireWarning, setQuestionnaireWarning] = useState<string | null>(null);
 
   const [newProblem, setNewProblem] = useState('');
   // In create mode, start with title editing enabled
@@ -677,7 +684,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const ctxLines: string[] = [];
   ctxLines.push(`Project: ${projectId} (${cwd})`);
   ctxLines.push('');
-  ctxLines.push(`Card: ${card.title} [${card.id}]`);
+  ctxLines.push(`Card: ${card.title} [${card.number != null ? `${formatCardNumber(card.number)}, ` : ''}${card.id}]`);
   ctxLines.push(`Type: ${card.type} | Priority: ${card.priority} | Stage: ${stage}`);
   if (card.description) ctxLines.push(`Description: ${card.description}`);
   if (card.areas.length > 0) ctxLines.push(`Areas: ${card.areas.join(', ')}`);
@@ -1257,6 +1264,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       if (hasFeature) visibleTabs.push('feature');
       if (hasHtml) visibleTabs.push('html');
       if (hasTest) visibleTabs.push('test');
+      if (hasQuestionnaires) visibleTabs.push('questionnaires');
       visibleTabs.push('notes');
       if (hasChecklist) visibleTabs.push('checklist');
       visibleTabs.push('terminal');
@@ -1274,7 +1282,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasChecklist]);
+  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasQuestionnaires, hasChecklist]);
 
   return (
     <div
@@ -2090,7 +2098,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                         <div className="flex-1">
                           <p className="text-sm text-red-800 dark:text-red-200">{problem.description}</p>
                           <p className="text-xs text-red-600 dark:text-red-400">
-                            {new Date(problem.created_at).toLocaleDateString()}
+                            {formatDate(problem.created_at)}
                           </p>
                         </div>
                         <button
@@ -2151,7 +2159,10 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 activeSessionName={activeSession?.name ?? sessionName}
                 activeProvider={selectedProvider ?? activeSession?.provider ?? undefined}
                 cwd={cwd}
-                onSubmitSuccess={() => setActiveTab('terminal')}
+                onSubmitSuccess={(warning) => {
+                  setQuestionnaireWarning(warning ?? null);
+                  setActiveTab('terminal');
+                }}
                 onUnlink={handleUnlinkRef}
               />
             </div>
@@ -2430,13 +2441,42 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           ) : null}
         </div>
 
+        {/* Questionnaire delivery warning — modal-level so it outlives the
+            post-submit switch to the terminal tab. In-flow rather than floating
+            so it never covers the terminal's input line. */}
+        {questionnaireWarning && (
+          <div className="flex shrink-0 items-start gap-3 border-t border-amber-400/40 bg-amber-50/80 px-4 py-3 dark:bg-amber-950/40">
+            <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z" />
+            </svg>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Questionnaire submitted with a warning
+              </div>
+              <div className="mt-0.5 text-sm text-amber-800 dark:text-amber-100/80">
+                {questionnaireWarning}
+              </div>
+            </div>
+            <button
+              onClick={() => setQuestionnaireWarning(null)}
+              className="shrink-0 rounded p-1 text-amber-700/70 transition-colors hover:bg-amber-200/50 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
+              title="Dismiss"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Footer - only show when not on terminal tab (terminal has its own footer) */}
         {activeTab !== 'terminal' && (
           <div className="flex items-center justify-between border-t border-void-200 px-4 py-2 text-xs text-void-500 dark:border-void-700 dark:text-void-400">
-            <span>Created: {new Date(card.created_at).toLocaleDateString()}</span>
-            <span>Updated: {new Date(card.updated_at).toLocaleDateString()}</span>
+            <span>Created: {formatDate(card.created_at)}</span>
+            <span>Updated: {formatDate(card.updated_at)}</span>
           </div>
         )}
+
       </div>
 
       {/* Delete Confirmation Dialog */}

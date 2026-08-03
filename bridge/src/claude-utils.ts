@@ -291,20 +291,30 @@ export function getGeminiSessionDir(cwd: string): string {
 export async function listGeminiSessionFiles(dir: string): Promise<string[]> {
   try {
     const files = await fs.readdir(dir);
-    return files.filter(f => f.startsWith('session-') && f.endsWith('.json'));
+    // Gemini CLI ≤0.4x wrote session-*.json (single JSON object); 0.49+ writes
+    // session-*.jsonl (JSONL, metadata on the first line). Accept both —
+    // matching only .json made current Gemini sessions invisible to detection.
+    return files.filter(f => f.startsWith('session-') && (f.endsWith('.json') || f.endsWith('.jsonl')));
   } catch {
     return [];
   }
 }
 
 /**
- * Extract the full session UUID from a Gemini session JSON file.
+ * Extract the full session UUID from a Gemini session file (JSON or JSONL).
  */
 export async function extractGeminiSessionId(filePath: string): Promise<string | null> {
   try {
     const content = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(content);
-    const id = data.sessionId;
+    let data: { sessionId?: unknown };
+    try {
+      data = JSON.parse(content);
+    } catch {
+      // JSONL format — the session metadata record is the first line
+      const nl = content.indexOf('\n');
+      data = JSON.parse(nl === -1 ? content : content.slice(0, nl));
+    }
+    const id = data?.sessionId;
     return typeof id === 'string' && isValidGuid(id) ? id : null;
   } catch {
     return null;
@@ -406,13 +416,20 @@ export interface SessionFileCandidate {
  * List all session-file candidates for a provider+cwd, newest-first (feature 080).
  * Used by relink so it can walk candidates instead of blindly taking the newest
  * file — Codex multi-agent runs put sub-agent rollouts in the same directory.
+ *
+ * `excludeFiles` (feature 081): the spawn-time before-files snapshot, in the
+ * same identifier format as listProviderSessionFiles (Claude: bare GUIDs;
+ * Codex/Gemini: filenames). Entries present at spawn are skipped so the
+ * detection watch can consume candidates instead of the old unsorted diff.
  */
 export async function listProviderSessionCandidates(
   providerId: string,
-  cwd: string
+  cwd: string,
+  excludeFiles?: string[]
 ): Promise<SessionFileCandidate[]> {
   const dir = getProviderSessionDir(providerId, cwd);
   if (!dir) return [];
+  const exclude = new Set(excludeFiles || []);
 
   const statMs = async (file: string): Promise<number | null> => {
     try {
@@ -428,12 +445,14 @@ export async function listProviderSessionCandidates(
     case 'claude': {
       // listSessionFiles returns bare GUIDs (filename minus .jsonl)
       for (const guid of await listSessionFiles(dir)) {
+        if (exclude.has(guid)) continue;
         candidates.push({ sessionId: guid, timestampMs: await statMs(`${guid}.jsonl`) });
       }
       break;
     }
     case 'codex': {
       for (const file of await listCodexSessionFiles(dir)) {
+        if (exclude.has(file)) continue;
         const sessionId = extractCodexSessionId(file);
         if (!sessionId) continue;
         candidates.push({
@@ -445,6 +464,7 @@ export async function listProviderSessionCandidates(
     }
     case 'gemini': {
       for (const file of await listGeminiSessionFiles(dir)) {
+        if (exclude.has(file)) continue;
         const sessionId = await extractGeminiSessionId(path.join(dir, file));
         if (!sessionId) continue;
         candidates.push({ sessionId, timestampMs: await statMs(file) });

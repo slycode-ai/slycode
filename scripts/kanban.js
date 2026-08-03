@@ -926,6 +926,43 @@ function writeKanban(data) {
   releaseBoardLock();
 }
 
+/**
+ * Parse a card-number reference: '#0274', '0274', or '274' → 274.
+ * Returns null for anything that isn't an optional '#' followed by digits
+ * only, so long IDs ('card-...') and titles can never mis-parse.
+ */
+function parseCardNumber(ref) {
+  if (typeof ref !== 'string') return null;
+  const m = /^#?(\d+)$/.exec(ref.trim());
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function formatCardNumber(number) {
+  return `#${String(number).padStart(number > 9999 ? 0 : 4, '0')}`;
+}
+
+/** Human-first card label for confirmations: '#0274 (card-123...)'. */
+function cardRefLabel(card) {
+  return card.number != null ? `${formatCardNumber(card.number)} (${card.id})` : card.id;
+}
+
+/**
+ * Not-found message for a card reference. Number-form refs get a distinct
+ * message so a number miss is unmistakable (numbers are never reused, so a
+ * miss usually means a typo or the wrong board).
+ */
+function cardMissMessage(cardId) {
+  const num = parseCardNumber(cardId);
+  if (num != null) return `No card with number ${formatCardNumber(num)}`;
+  return `Card '${cardId}' not found`;
+}
+
+/**
+ * Resolution precedence: exact long ID → card number ('#0274' / '0274') →
+ * exact title. Numbers win over digits-only titles by design. ID and number
+ * matches cover cold storage under includeArchived; title match stays
+ * hot + non-archived only.
+ */
 function findCard(kanban, cardId, includeArchived = false) {
   // First try exact ID match
   for (const stage of VALID_STAGES) {
@@ -939,6 +976,21 @@ function findCard(kanban, cardId, includeArchived = false) {
     }
   }
 
+  // Card-number match ('#0274' / '0274'), same archived semantics as ID match
+  const refNumber = parseCardNumber(cardId);
+  if (refNumber != null) {
+    for (const stage of VALID_STAGES) {
+      const cards = kanban.stages[stage] || [];
+      const card = cards.find(c => c.number === refNumber);
+      if (card) {
+        if (card.archived && !includeArchived) {
+          return null;
+        }
+        return { card, stage };
+      }
+    }
+  }
+
   // Fall back to exact title match (case-insensitive, non-archived only)
   const titleLower = cardId.toLowerCase();
   for (const stage of VALID_STAGES) {
@@ -949,13 +1001,15 @@ function findCard(kanban, cardId, includeArchived = false) {
     }
   }
 
-  // Cold-storage fallback (id match only — title match stays non-archived).
+  // Cold-storage fallback (id or number match — title match stays non-archived).
   // Mark the cold board dirty so a mutating caller's writeKanban persists the
   // mutation to the cold file; on read-only paths the flag is inert.
   if (includeArchived) {
     const cold = getCold(kanban);
     for (const stage of VALID_STAGES) {
-      const card = (cold.stages[stage] || []).find(c => c.id === cardId);
+      const card = (cold.stages[stage] || []).find(
+        c => c.id === cardId || (refNumber != null && c.number === refNumber)
+      );
       if (card) {
         markColdDirty(kanban);
         return { card, stage, cold: true };
@@ -1116,9 +1170,11 @@ function parseArgs(args) {
 function formatCard(card, stage, verbose = false) {
   const archived = card.archived ? ' [ARCHIVED]' : '';
   if (verbose) {
-    const cardNum = card.number != null ? ` (#${String(card.number).padStart(card.number > 9999 ? 0 : 4, '0')})` : '';
+    // Lead with the human-facing card number; long ID demoted to a detail
+    // line at the bottom (still the internal primary key).
+    const lead = card.number != null ? formatCardNumber(card.number) : card.id;
     let output = `
-ID: ${card.id}${cardNum}${archived}
+Card: ${lead}${archived}
 Title: ${card.title}
 Stage: ${stage}
 Type: ${card.type}
@@ -1204,12 +1260,15 @@ Priority: ${card.priority}
         output += `  #${note.id}  [${ts}]${agent}\n      ${note.text}\n`;
       }
     }
+    output += `\nID: ${card.id}`;
     output += `\nCreated: ${card.created_at}`;
     output += `\nUpdated: ${card.updated_at}`;
     return output;
   } else {
     const displayStage = card.automation ? 'automation' : stage;
-    return `${card.id}${archived}\t${displayStage}\t${card.type}\t${card.priority}\t${card.title}`;
+    // Number leads; long ID stays in the line (agents/scripts may parse it)
+    const num = card.number != null ? formatCardNumber(card.number) : '-';
+    return `${num}${archived}\t${card.id}\t${displayStage}\t${card.type}\t${card.priority}\t${card.title}`;
   }
 }
 
@@ -1287,7 +1346,7 @@ function cmdSearch(args) {
 
   const truncated = totalFound > limit;
   console.log(`Found ${totalFound} card(s)${truncated ? ` (showing first ${limit})` : ''}:\n`);
-  console.log('ID\tStage\tType\tPriority\tTitle');
+  console.log('Card\tID\tStage\tType\tPriority\tTitle');
   console.log('-'.repeat(80));
   for (const { card, stage } of results) {
     console.log(formatCard(card, stage));
@@ -1314,7 +1373,7 @@ function cmdShow(args) {
   const result = findCard(kanban, cardId, includeArchived);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found${includeArchived ? '' : ' (use --include-archived to see archived cards)'}`);
+    console.error(`Error: ${cardMissMessage(cardId)}${includeArchived ? '' : ' (use --include-archived to see archived cards)'}`);
     process.exit(1);
   }
 
@@ -1396,7 +1455,7 @@ function cmdCreate(args) {
   writeKanban(kanban);
   emitEvent('card_created', PROJECT_NAME, `Card '${newCard.title}' created in ${stage}`, newCard.id);
 
-  console.log(`Created card: ${newCard.id}`);
+  console.log(`Created card: ${cardRefLabel(newCard)}`);
   console.log(`  Title: ${newCard.title}`);
   console.log(`  Stage: ${stage}`);
   console.log(`  Type: ${newCard.type}`);
@@ -1425,7 +1484,7 @@ function cmdUpdate(args) {
   const result = findCard(kanban, cardId, true);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -1649,9 +1708,9 @@ function cmdUpdate(args) {
   card.updated_at = new Date().toISOString();
   card.last_modified_by = 'cli';
   writeKanban(kanban);
-  emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' updated: ${updates.join(', ')}`, cardId);
+  emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' updated: ${updates.join(', ')}`, card.id);
 
-  console.log(`Updated card: ${cardId}`);
+  console.log(`Updated card: ${cardRefLabel(card)}`);
   for (const update of updates) {
     console.log(`  ${update}`);
   }
@@ -1683,7 +1742,7 @@ function cmdMove(args) {
   const result = findCard(kanban, cardId, true);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -1694,8 +1753,8 @@ function cmdMove(args) {
     return;
   }
 
-  // Remove from old stage
-  kanban.stages[oldStage] = kanban.stages[oldStage].filter(c => c.id !== cardId);
+  // Remove from old stage (by resolved id — cardId may be a number or title ref)
+  kanban.stages[oldStage] = kanban.stages[oldStage].filter(c => c.id !== card.id);
 
   // Add to new stage (at end)
   const newStageCards = kanban.stages[newStage] || [];
@@ -1721,9 +1780,9 @@ function cmdMove(args) {
   kanban.stages[newStage].push(card);
 
   writeKanban(kanban);
-  emitEvent('card_moved', PROJECT_NAME, `Card '${card.title}' moved from ${oldStage} to ${newStage}`, cardId);
+  emitEvent('card_moved', PROJECT_NAME, `Card '${card.title}' moved from ${oldStage} to ${newStage}`, card.id);
 
-  console.log(`Moved card: ${cardId}`);
+  console.log(`Moved card: ${cardRefLabel(card)}`);
   console.log(`  From: ${oldStage}`);
   console.log(`  To: ${newStage}`);
   if (clearedStatus && !postMoveStatus) {
@@ -1755,7 +1814,7 @@ function cmdStatus(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId, true);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
   const { card } = result;
@@ -1782,7 +1841,7 @@ function cmdStatus(args) {
     card.updated_at = new Date().toISOString();
     card.last_modified_by = 'cli';
     writeKanban(kanban);
-    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
+    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, card.id);
     console.log(`Cleared status on card: ${cardId}`);
     return;
   }
@@ -1797,7 +1856,7 @@ function cmdStatus(args) {
     card.updated_at = new Date().toISOString();
     card.last_modified_by = 'cli';
     writeKanban(kanban);
-    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, cardId);
+    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status cleared`, card.id);
     console.log(`Cleared status on card: ${cardId} (input was empty after normalization)`);
     return;
   }
@@ -1805,7 +1864,7 @@ function cmdStatus(args) {
   card.updated_at = new Date().toISOString();
   card.last_modified_by = 'cli';
   writeKanban(kanban);
-  emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status set: ${normalized}`, cardId);
+  emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' status set: ${normalized}`, card.id);
 
   console.log(`Set status on card: ${cardId}`);
   console.log(`  "${normalized}"`);
@@ -1876,7 +1935,7 @@ function cmdArchive(args) {
 
     const result = findCard(kanban, cardId, true);
     if (!result) {
-      console.error(`Error: Card '${cardId}' not found`);
+      console.error(`Error: ${cardMissMessage(cardId)}`);
       process.exit(1);
     }
 
@@ -1903,9 +1962,9 @@ function cmdArchive(args) {
       }
 
       writeKanban(kanban);
-      emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' unarchived`, cardId);
+      emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' unarchived`, card.id);
 
-      console.log(`Unarchived card: ${cardId}`);
+      console.log(`Unarchived card: ${cardRefLabel(card)}`);
       console.log(`  Stage: ${stage}`);
       console.log(`  Title: ${card.title}`);
       return;
@@ -1925,9 +1984,9 @@ function cmdArchive(args) {
     // Don't bump updated_at — archiving is a status change, not a content change
     card.last_modified_by = 'cli';
     writeKanban(kanban);
-    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' archived`, cardId);
+    emitEvent('card_updated', PROJECT_NAME, `Card '${card.title}' archived`, card.id);
 
-    console.log(`Archived card: ${cardId}`);
+    console.log(`Archived card: ${cardRefLabel(card)}`);
     console.log(`  Stage: ${stage}`);
     console.log(`  Title: ${card.title}`);
   }
@@ -1954,7 +2013,7 @@ function cmdChecklist(args) {
   const result = findCard(kanban, cardId, true);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -2067,7 +2126,7 @@ function cmdProblem(args) {
   const result = findCard(kanban, cardId, true);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -2125,7 +2184,7 @@ function cmdProblem(args) {
       card.last_modified_by = 'cli';
       autoStatusProblemReported(card, severity);
       writeKanban(kanban);
-      emitEvent('problem_added', PROJECT_NAME, `Problem added to '${card.title}': ${description}`, cardId);
+      emitEvent('problem_added', PROJECT_NAME, `Problem added to '${card.title}': ${description}`, card.id);
       console.log(`Added problem: ${newProblem.id}`);
       console.log(`  Severity: ${severity}`);
       console.log(`  Description: ${description}`);
@@ -2152,7 +2211,7 @@ function cmdProblem(args) {
       const remainingOpen = card.problems.filter(p => !p.resolved_at).length;
       autoStatusProblemResolved(card, remainingOpen);
       writeKanban(kanban);
-      emitEvent('problem_resolved', PROJECT_NAME, `Problem resolved on '${card.title}': ${prob.description}`, cardId);
+      emitEvent('problem_resolved', PROJECT_NAME, `Problem resolved on '${card.title}': ${prob.description}`, card.id);
       console.log(`Resolved problem: ${resolveId}`);
       console.log(`  Description: ${prob.description}`);
       break;
@@ -2261,7 +2320,7 @@ function cmdNotes(args) {
   const result = findCard(kanban, cardId, true);
 
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -2579,7 +2638,7 @@ function cmdAutomation(args) {
       const kanban = readKanban();
       const result = findCard(kanban, cardId, true);
       if (!result) {
-        console.error(`Error: Card '${cardId}' not found`);
+        console.error(`Error: ${cardMissMessage(cardId)}`);
         process.exit(1);
       }
 
@@ -2632,7 +2691,7 @@ function cmdAutomation(args) {
       card.updated_at = new Date().toISOString();
       card.last_modified_by = 'cli';
       writeKanban(kanban);
-      emitEvent('card_updated', PROJECT_NAME, `Automation configured on '${card.title}': ${updates.join(', ')}`, cardId);
+      emitEvent('card_updated', PROJECT_NAME, `Automation configured on '${card.title}': ${updates.join(', ')}`, card.id);
 
       console.log(`Configured automation: ${cardId}`);
       for (const u of updates) {
@@ -2651,7 +2710,7 @@ function cmdAutomation(args) {
       const kanban = readKanban();
       const result = findCard(kanban, cardId, true);
       if (!result) {
-        console.error(`Error: Card '${cardId}' not found`);
+        console.error(`Error: ${cardMissMessage(cardId)}`);
         process.exit(1);
       }
 
@@ -2664,7 +2723,7 @@ function cmdAutomation(args) {
       result.card.updated_at = new Date().toISOString();
       result.card.last_modified_by = 'cli';
       writeKanban(kanban);
-      emitEvent('card_updated', PROJECT_NAME, `Automation enabled on '${result.card.title}'`, cardId);
+      emitEvent('card_updated', PROJECT_NAME, `Automation enabled on '${result.card.title}'`, result.card.id);
       console.log(`Automation enabled: ${cardId}`);
       break;
     }
@@ -2679,7 +2738,7 @@ function cmdAutomation(args) {
       const kanban = readKanban();
       const result = findCard(kanban, cardId, true);
       if (!result) {
-        console.error(`Error: Card '${cardId}' not found`);
+        console.error(`Error: ${cardMissMessage(cardId)}`);
         process.exit(1);
       }
 
@@ -2692,7 +2751,7 @@ function cmdAutomation(args) {
       result.card.updated_at = new Date().toISOString();
       result.card.last_modified_by = 'cli';
       writeKanban(kanban);
-      emitEvent('card_updated', PROJECT_NAME, `Automation disabled on '${result.card.title}'`, cardId);
+      emitEvent('card_updated', PROJECT_NAME, `Automation disabled on '${result.card.title}'`, result.card.id);
       console.log(`Automation disabled: ${cardId}`);
       break;
     }
@@ -2707,7 +2766,7 @@ function cmdAutomation(args) {
       const kanban = readKanban();
       const result = findCard(kanban, cardId, true);
       if (!result) {
-        console.error(`Error: Card '${cardId}' not found`);
+        console.error(`Error: ${cardMissMessage(cardId)}`);
         process.exit(1);
       }
 
@@ -2836,7 +2895,7 @@ function cmdAutomation(args) {
       const kanban = readKanban();
       const result = findCard(kanban, cardId, true);
       if (!result) {
-        console.error(`Error: Card '${cardId}' not found`);
+        console.error(`Error: ${cardMissMessage(cardId)}`);
         process.exit(1);
       }
 
@@ -2882,15 +2941,16 @@ function cmdAutomation(args) {
       }
 
       console.log(`Found ${automationCards.length} automation card(s):\n`);
-      console.log('ID\tEnabled\tSchedule\tProvider\tLast Run\tTitle');
+      console.log('Card\tID\tEnabled\tSchedule\tProvider\tLast Run\tTitle');
       console.log('-'.repeat(100));
       for (const { card } of automationCards) {
         const auto = card.automation;
+        const num = card.number != null ? formatCardNumber(card.number) : '-';
         const enabled = auto.enabled ? 'YES' : 'no';
         const schedule = auto.schedule || '(none)';
         const provider = auto.provider || 'claude';
         const lastRun = auto.lastRun ? auto.lastRun.replace('T', ' ').slice(0, 16) : 'never';
-        console.log(`${card.id}\t${enabled}\t${schedule}\t${provider}\t${lastRun}\t${card.title}`);
+        console.log(`${num}\t${card.id}\t${enabled}\t${schedule}\t${provider}\t${lastRun}\t${card.title}`);
       }
       break;
     }
@@ -2967,7 +3027,8 @@ function cmdBoard(args) {
 
     if (compact) {
       cards.forEach((card, i) => {
-        console.log(`  ${i + 1}. ${card.id}  [${card.priority}]  ${card.title}`);
+        const num = card.number != null ? formatCardNumber(card.number) : card.id;
+        console.log(`  ${i + 1}. ${num}  [${card.priority}]  ${card.title}`);
       });
     } else {
       for (const card of cards) {
@@ -3002,9 +3063,12 @@ function cmdReorder(args) {
     .filter(c => !c.archived)
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-  // Helper: validate a card ID is in the specified stage
+  // Helper: validate a card reference (ID or #number) is in the specified stage
   function validateCardInStage(cardId) {
-    const inStage = stageCards.find(c => c.id === cardId);
+    const refNumber = parseCardNumber(cardId);
+    const inStage = stageCards.find(
+      c => c.id === cardId || (refNumber != null && c.number === refNumber)
+    );
     if (inStage) return inStage;
 
     // Check other stages for a helpful error
@@ -3012,7 +3076,7 @@ function cmdReorder(args) {
     if (elsewhere) {
       console.error(`Error: Card '${cardId}' is in '${elsewhere.stage}', not '${stage}'`);
     } else {
-      console.error(`Error: Card '${cardId}' not found`);
+      console.error(`Error: ${cardMissMessage(cardId)}`);
     }
     process.exit(1);
   }
@@ -3029,14 +3093,15 @@ function cmdReorder(args) {
 
     console.log(`Reordered ${stage}:`);
     orderedCards.forEach((card, i) => {
-      console.log(`  ${i + 1}. ${card.id} — ${card.title}`);
+      const num = card.number != null ? formatCardNumber(card.number) : card.id;
+      console.log(`  ${i + 1}. ${num} — ${card.title}`);
     });
   }
 
   // Mode A: --top <card-id>
   if (opts.top) {
     const card = validateCardInStage(opts.top);
-    const others = stageCards.filter(c => c.id !== opts.top);
+    const others = stageCards.filter(c => c.id !== card.id);
     applyAndConfirm([card, ...others]);
     return;
   }
@@ -3044,7 +3109,7 @@ function cmdReorder(args) {
   // Mode A: --bottom <card-id>
   if (opts.bottom) {
     const card = validateCardInStage(opts.bottom);
-    const others = stageCards.filter(c => c.id !== opts.bottom);
+    const others = stageCards.filter(c => c.id !== card.id);
     applyAndConfirm([...others, card]);
     return;
   }
@@ -3063,7 +3128,7 @@ function cmdReorder(args) {
       process.exit(1);
     }
     const card = validateCardInStage(cardId);
-    const others = stageCards.filter(c => c.id !== cardId);
+    const others = stageCards.filter(c => c.id !== card.id);
     // Clamp position to valid range
     const insertAt = Math.min(pos - 1, others.length);
     others.splice(insertAt, 0, card);
@@ -3079,11 +3144,11 @@ function cmdReorder(args) {
     process.exit(1);
   }
 
-  // Validate all card IDs exist in stage
+  // Validate all card refs (IDs or #numbers) exist in stage
   const listedCards = cardIds.map(id => validateCardInStage(id));
 
   // Unlisted cards keep relative order, sort after listed
-  const listedSet = new Set(cardIds);
+  const listedSet = new Set(listedCards.map(c => c.id));
   const unlistedCards = stageCards.filter(c => !listedSet.has(c.id));
 
   applyAndConfirm([...listedCards, ...unlistedCards]);
@@ -3147,6 +3212,8 @@ function _qIsAnswerFilled(item) {
     case 'multi_choice':
       return Array.isArray(item.answer) && item.answer.length > 0;
     case 'boolean':
+      // Boolean items accept an "Other: …" string when Yes/No doesn't fit.
+      if (typeof item.answer === 'string') return item.answer.trim().length > 0;
       return item.answer === true || item.answer === false;
     case 'scale':
     case 'number':
@@ -3181,6 +3248,7 @@ function _qFormatAnswer(item) {
     case 'multi_choice':
       return item.answer.map((v) => _qStripControlChars(v)).join(', ');
     case 'boolean':
+      if (typeof item.answer === 'string') return _qStripControlChars(item.answer);
       return item.answer ? 'true' : 'false';
     case 'scale':
     case 'number':
@@ -3312,7 +3380,7 @@ function _cmdQuestionnaireList(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId, true);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
   const card = result.card;
@@ -3347,7 +3415,7 @@ function _cmdQuestionnaireAnswers(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId, true);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
   try {
@@ -3384,7 +3452,7 @@ function _cmdQuestionnaireAnswer(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId, true);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -3442,7 +3510,7 @@ function cmdPrompt(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
 
@@ -3532,7 +3600,7 @@ function cmdPrompt(args) {
       const cardContextStatusLines = cardContextStatusObj
         ? '\n' + formatStatusForPromptCli(cardContextStatusObj).join('\n')
         : '';
-      const cardContext = `[Card: ${card.title} (${card.id})]
+      const cardContext = `[Card: ${card.title} (${card.number != null ? `${formatCardNumber(card.number)}, ` : ''}${card.id})]
 Stage: ${stage} | Type: ${card.type || 'unknown'} | Priority: ${card.priority || 'unknown'}
 Description: ${card.description || '(no description)'}${cardContextStatusLines}
 ---
@@ -3699,7 +3767,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         // For fire-and-forget, prompt was passed as CLI arg — we're done
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} via session creation.`);
-          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget, new session)`, cardId);
+          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget, new session)`, card.id);
           return;
         }
 
@@ -3740,7 +3808,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         // Fire-and-forget mode
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} (session: ${sessionName}).`);
-          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget)`, cardId);
+          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget)`, card.id);
           return;
         }
       }
@@ -3761,7 +3829,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
             if (pollData.status === 'received' && pollData.data) {
               // Happy path: response received
               console.log(pollData.data);
-              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): response received`, cardId);
+              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): response received`, card.id);
               return;
             }
           }
@@ -3815,7 +3883,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         console.error(`Session: ${sessionName}`);
       }
 
-      emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): timeout (active=${isActive})`, cardId);
+      emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): timeout (active=${isActive})`, card.id);
       process.exit(1);
 
     } catch (err) {
@@ -4105,7 +4173,7 @@ function cmdSession(args) {
   const kanban = readKanban();
   const result = findCard(kanban, cardId);
   if (!result) {
-    console.error(`Error: Card '${cardId}' not found`);
+    console.error(`Error: ${cardMissMessage(cardId)}`);
     process.exit(1);
   }
   const { card } = result;
@@ -4151,7 +4219,7 @@ function cmdSession(args) {
           console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
           process.exit(1);
         }
-        console.log(`Relinked ${provider} session on card ${card.id}`);
+        console.log(`Relinked ${provider} session on card ${cardRefLabel(card)}`);
         console.log(`  conversation: ${body.sessionId}${body.previous && body.previous !== body.sessionId ? ` (was: ${body.previous})` : ''}`);
       } else if (sub === 'link') {
         const guid = opts.guid;
@@ -4169,7 +4237,7 @@ function cmdSession(args) {
           console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
           process.exit(1);
         }
-        console.log(`Linked ${provider} session on card ${card.id}`);
+        console.log(`Linked ${provider} session on card ${cardRefLabel(card)}`);
         console.log(`  conversation: ${body.sessionId}${body.previous && body.previous !== body.sessionId ? ` (was: ${body.previous})` : ''}`);
         if (!body.fileFound) {
           console.log('  Warning: no matching conversation file found on disk — check the id if resume fails.');
@@ -4189,7 +4257,7 @@ function cmdSession(args) {
           console.error(`Error: ${body.error || `Bridge returned ${res.status}`}`);
           process.exit(1);
         }
-        console.log(`Stopped ${provider} session on card ${card.id}`);
+        console.log(`Stopped ${provider} session on card ${cardRefLabel(card)}`);
       }
     } catch (err) {
       if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {

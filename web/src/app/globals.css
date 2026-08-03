@@ -308,6 +308,61 @@ body {
   }
 }
 
+/* ========== Unseen-activity marker (feature 082) ========== */
+
+/*
+ * "Work finished here and you haven't looked yet." Deliberately quieter than
+ * the priority glow — a cue, not an alarm — and shape-distinct from the
+ * green/orange/grey session dots so it can never be misread as a session state.
+ *
+ * Colour is taken from the card's lane (see .unseen-lane-* below). This carries
+ * no information on its own (the card is already in the lane) — it is a
+ * harmony choice, made knowingly during design.
+ */
+.unseen-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  background: linear-gradient(225deg, rgb(var(--unseen-rgb)) 0 50%, transparent 50%);
+  /*
+   * Follow the card's own rounded-lg (8px) corner. The card can't use
+   * overflow-hidden to clip this — its `before:` priority accent sits at
+   * -left-[3px], outside the box, and would be clipped away with it.
+   */
+  border-top-right-radius: 8px;
+}
+
+/*
+ * Backlight — SEPARABLE BY DESIGN. Greg may switch this off after living with
+ * it, leaving the corner fold alone (judged sufficient during design). To drop
+ * it: delete this rule and the `unseen-card-backlight` class in
+ * KanbanCardItem.tsx. Nothing else references it.
+ *
+ * Uses background-image rather than background-color so it layers OVER the
+ * card's Tailwind glass background instead of replacing it.
+ */
+.unseen-card-backlight {
+  background-image: linear-gradient(rgba(var(--unseen-rgb), 0.10), rgba(var(--unseen-rgb), 0.10));
+}
+
+/* Lane accents — dark theme */
+.unseen-lane-backlog       { --unseen-rgb: 144, 150, 163; }
+.unseen-lane-design        { --unseen-rgb: 51, 205, 255; }
+.unseen-lane-implementation{ --unseen-rgb: 0, 191, 255; }
+.unseen-lane-testing       { --unseen-rgb: 255, 106, 51; }
+.unseen-lane-done          { --unseen-rgb: 34, 197, 94; }
+
+/* Lane accents — light theme (darker, so the fold reads on a pale card) */
+:root:not(.dark) .unseen-lane-backlog        { --unseen-rgb: 107, 112, 128; }
+:root:not(.dark) .unseen-lane-design         { --unseen-rgb: 0, 136, 179; }
+:root:not(.dark) .unseen-lane-implementation { --unseen-rgb: 0, 163, 217; }
+:root:not(.dark) .unseen-lane-testing        { --unseen-rgb: 217, 74, 21; }
+:root:not(.dark) .unseen-lane-done           { --unseen-rgb: 22, 163, 74; }
+
 /* Automation card session glow - neon orange pulse */
 .active-glow-automation {
   animation: neon-pulse-card-orange 2s ease-in-out infinite;

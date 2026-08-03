@@ -35,6 +35,11 @@ function getAllCards(kanban: KanbanBoard): KanbanCard[] {
   return cards;
 }
 
+/** Display form of a card number: 274 → '#0274'. Mirrors scripts/kanban.js. */
+export function formatCardNumber(num: number): string {
+  return `#${String(num).padStart(num > 9999 ? 0 : 4, '0')}`;
+}
+
 export function ensureCardNumbers(kanban: KanbanBoard): void {
   const allCards = getAllCards(kanban);
   allCards.sort(

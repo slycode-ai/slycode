@@ -172,7 +172,6 @@
       "imgOptTimeoutInSeconds": 7,
       "imgOptMaxInputPixels": 268402689,
       "imgOptSequentialRead": null,
-      "imgOptSkipMetadata": null,
       "isrFlushToDisk": true,
       "workerThreads": false,
       "optimizeCss": false,
@@ -195,6 +194,7 @@
       "webpackMemoryOptimizations": false,
       "optimizeServerReact": true,
       "strictRouteTypes": false,
+      "useTypeScriptCli": false,
       "viewTransition": false,
       "removeUncaughtErrorAndRejectionListeners": false,
       "validateRSCRequestHeaders": false,
@@ -315,6 +315,7 @@
   "appDir": "/home/ec2-user/projects/claude_master/web",
   "relativeAppDir": "",
   "files": [
+    ".next/package.json",
     ".next/routes-manifest.json",
     ".next/server/pages-manifest.json",
     ".next/build-manifest.json",

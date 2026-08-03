@@ -68,3 +68,6 @@ temp/
 
 # Kanban backups (auto-generated)
 documentation/archive/kanban*.json
+
+# Board view state (per-user "which cards have I looked at" markers)
+documentation/board-view-state.json

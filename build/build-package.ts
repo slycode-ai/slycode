@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import { syncStoreToUpdates } from './sync-updates';
+import { syncStoreToUpdates, checkContextPrimingTemplate } from './sync-updates';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -452,20 +452,48 @@ function copyTemplates(): void {
 }
 
 async function main(): Promise<void> {
-  console.log('Building SlyCode npm package');
+  // --templates-only: skip the service builds and refresh just the shipped
+  // template/store content (sync guard included). Used to iterate on or verify
+  // store/template packaging without a full rebuild — notably it never runs
+  // `next build`, which would clobber web/.next under a running dev server.
+  const templatesOnly = process.argv.includes('--templates-only');
+
+  console.log(templatesOnly
+    ? 'Refreshing SlyCode package templates (--templates-only)'
+    : 'Building SlyCode npm package');
   console.log('============================');
   console.log('');
 
-  clean();
+  // Fail fast before any cleaning/building if shipped skill content is invalid.
+  checkContextPrimingTemplate(ROOT);
 
-  console.log('Building services:');
-  buildCli();
-  buildCreateSlycode();
-  buildBridge();
-  buildMessaging();
-  buildWeb();
+  if (templatesOnly) {
+    // Wipe only what this mode regenerates: templates/ plus the dist/ subtrees
+    // copyTemplates() rebuilds (copyDirRecursive never deletes stale extras).
+    // The rest of dist/ holds service artifacts from the last full build.
+    if (fs.existsSync(TEMPLATES_DIR)) {
+      fs.rmSync(TEMPLATES_DIR, { recursive: true, force: true });
+    }
+    fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
+    for (const sub of ['store', path.join('data', 'scaffold-templates')]) {
+      const dir = path.join(DIST_DIR, sub);
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  } else {
+    clean();
 
-  console.log('');
+    console.log('Building services:');
+    buildCli();
+    buildCreateSlycode();
+    buildBridge();
+    buildMessaging();
+    buildWeb();
+
+    console.log('');
+  }
+
   console.log('Syncing store → updates:');
   const syncResult = syncStoreToUpdates(ROOT);
   console.log(`  ✓ Skills: synced ${syncResult.skills.synced}/${syncResult.skills.total}`);
@@ -476,11 +504,13 @@ async function main(): Promise<void> {
   copyTemplates();
 
   console.log('');
-  console.log('Build complete!');
-  console.log('');
-  console.log('Next steps:');
-  console.log('  cd packages/slycode && npm publish');
-  console.log('  cd packages/create-slycode && npm publish');
+  console.log(templatesOnly ? 'Template refresh complete!' : 'Build complete!');
+  if (!templatesOnly) {
+    console.log('');
+    console.log('Next steps:');
+    console.log('  cd packages/slycode && npm publish');
+    console.log('  cd packages/create-slycode && npm publish');
+  }
 }
 
 main().catch((err) => {

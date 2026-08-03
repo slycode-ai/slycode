@@ -26,7 +26,7 @@
     "diff": "^8.0.3",
     "ebml": "^3.0.0",
     "monaco-editor": "^0.55.1",
-    "next": "16.2.6",
+    "next": "16.2.12",
     "openai": "^6.23.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -54,6 +54,10 @@
     "flatted": "3.4.2",
     "minimatch": "9.0.9",
     "picomatch@2": "2.3.2",
-    "picomatch@4": "4.0.4"
+    "picomatch@4": "4.0.4",
+    "brace-expansion@2": "^2.1.4",
+    "js-yaml@4": "^4.3.1",
+    "postcss": "^8.5.25",
+    "sharp": "^0.35.3"
   }
 }

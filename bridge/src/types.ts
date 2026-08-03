@@ -44,6 +44,13 @@ export interface Session {
   guidDetectionLastArmedAt?: number;
   // Cancel GUID detection when session stops/exits
   guidDetectionCancelled?: boolean;
+  // Assigned-id verification state (feature 081): true until the bridge sees
+  // the provider actually create the transcript for the --session-id it passed.
+  // If the id provably never materializes, the id is nulled and detection
+  // re-arms (fallback for a future CLI dropping/ignoring the flag).
+  assignedIdUnverified?: boolean;
+  assignedIdVerifyLastAt?: number;
+  assignedIdVerifyFailures?: number;
   // For disconnect grace period (race condition fix)
   lastClientDisconnect?: string;
   // For event-driven stopSession

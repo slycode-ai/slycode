@@ -24,6 +24,7 @@ export interface ProviderConfig {
     install: string;
     permissions: ProviderPermissions;
     resume: ProviderResume;
+    sessionIdFlag?: string;
     prompt: ProviderPrompt;
     instructionFile?: string;
     altInstructionFile?: string;
@@ -61,6 +62,7 @@ export interface BuildArgsOptions {
     skipPermissions: boolean;
     resume: boolean;
     sessionId?: string | null;
+    assignSessionId?: string;
     prompt?: string;
     model?: string;
 }

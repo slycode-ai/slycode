@@ -59,7 +59,12 @@ export interface BooleanItem {
   type: 'boolean';
   id: string;
   question: string;
-  answer: boolean | null;
+  allow_other?: boolean;
+  /**
+   * `true`/`false` for a plain Yes/No, or an `"Other: …"` string when Yes/No
+   * doesn't cut it. Same escape hatch as single_choice — see isValidChoice.
+   */
+  answer: boolean | string | null;
 }
 
 export interface ScaleItem {
@@ -254,9 +259,14 @@ function validateItem(raw: unknown, index: number, seenIds: Set<string>): void {
       }
       break;
     case 'boolean':
-      if (item.answer !== null && typeof item.answer !== 'boolean') {
+      if (item.allow_other !== undefined && typeof item.allow_other !== 'boolean') {
         throw new QuestionnaireValidationError(
-          `items[${index}] (${item.id}).answer must be a boolean or null`
+          `items[${index}] (${item.id}).allow_other must be boolean`
+        );
+      }
+      if (item.answer !== null && typeof item.answer !== 'boolean' && !isOtherAnswer(item.answer)) {
+        throw new QuestionnaireValidationError(
+          `items[${index}] (${item.id}).answer must be a boolean, an "Other: …" string, or null`
         );
       }
       break;
@@ -335,7 +345,9 @@ export function validateAnswerValue(item: QuestionnaireItem, value: unknown): vo
       }
       break;
     case 'boolean':
-      if (typeof value !== 'boolean') throw new QuestionnaireValidationError(`${item.id}: answer must be boolean`);
+      if (typeof value !== 'boolean' && !isOtherAnswer(value)) {
+        throw new QuestionnaireValidationError(`${item.id}: answer must be boolean or "Other: …"`);
+      }
       break;
     case 'scale':
       if (!isFiniteNumber(value) || value < item.min || value > item.max) {
@@ -367,6 +379,11 @@ function isValidChoice(value: string, options: string[]): boolean {
   if (options.includes(value)) return true;
   if (value.startsWith('Other:')) return true;
   return false;
+}
+
+/** True for the `"Other: …"` free-text escape hatch (used by boolean items). */
+export function isOtherAnswer(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('Other:');
 }
 
 // ---------------------------------------------------------------------------
@@ -500,6 +517,7 @@ export function isAnswerFilled(item: AnswerableItem): boolean {
     case 'multi_choice':
       return Array.isArray(item.answer) && item.answer.length > 0;
     case 'boolean':
+      if (typeof item.answer === 'string') return item.answer.trim().length > 0;
       return item.answer === true || item.answer === false;
     case 'scale':
     case 'number':
@@ -566,7 +584,8 @@ function formatAnswerForMessage(item: AnswerableItem): string {
     case 'multi_choice':
       return (item.answer as string[]).map((v) => stripControlChars(v)).join(', ');
     case 'boolean':
-      return (item.answer as boolean) ? 'true' : 'false';
+      if (typeof item.answer === 'string') return stripControlChars(item.answer);
+      return item.answer ? 'true' : 'false';
     case 'scale':
     case 'number':
       return String(item.answer);

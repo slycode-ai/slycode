@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { KanbanCard, KanbanStage } from '@/lib/types';
 import { readStatus, type CardStatus } from '@/lib/status';
+import { formatCardNumber } from '@/lib/kanban-numbering';
 
 // Status panel: single static text with ellipsis at rest.
 // On hover, IF the text overflows the container, fade in a marquee overlay
@@ -74,6 +75,8 @@ interface KanbanCardItemProps {
   card: KanbanCard;
   sessionStatus: CardSessionStatus;
   isActivelyWorking?: boolean;
+  /** Session output arrived that you haven't opened the card since (feature 082). */
+  isUnseen?: boolean;
   stage?: KanbanStage;
   /** Force tags to render even in compact (Done) mode. Done-lane tag toggle. */
   showTags?: boolean;
@@ -185,11 +188,7 @@ function ChecklistProgress({ completed, total }: { completed: number; total: num
   );
 }
 
-function formatCardNumber(num: number): string {
-  return `#${String(num).padStart(num > 9999 ? 0 : 4, '0')}`;
-}
-
-export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false, stage, showTags = false, onClick, onContextMenu, onDragStart, onDragEnd }: KanbanCardItemProps) {
+export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false, isUnseen = false, stage, showTags = false, onClick, onContextMenu, onDragStart, onDragEnd }: KanbanCardItemProps) {
   const unresolvedProblems = card.problems.filter((p) => !p.resolved_at).length;
   const checklistTotal = card.checklist?.length || 0;
   const checklistCompleted = card.checklist?.filter((item) => item.done).length || 0;
@@ -267,6 +266,14 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
   const showDoneTags = isCompact && showTags && card.tags.length > 0;
   const hasFooterContent = hasTags || !!status || showDoneTags;
 
+  // Unseen-activity marker (feature 082): a 10px lane-coloured corner fold plus
+  // a lane-tinted backlight. The lane class supplies --unseen-rgb (light/dark
+  // variants live in globals.css). Drop 'unseen-card-backlight' here and its
+  // rule in globals.css to keep the fold alone.
+  const unseenClasses = isUnseen && stage
+    ? `unseen-card unseen-card-backlight unseen-lane-${stage}`
+    : '';
+
   return (
     <>
       <div
@@ -285,7 +292,7 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`group relative cursor-pointer rounded-lg border-l-4 border-t border-t-white/50 backdrop-blur-lg bg-white/55 px-3 pt-3 pb-2 shadow-(--shadow-card) ring-1 ring-transparent transition-[transform,ring-color,box-shadow] duration-200 hover:translate-y-0.5 hover:ring-[rgba(var(--glow-color),0.4)] before:pointer-events-none before:absolute before:inset-y-1 before:-left-[3px] before:w-px before:rounded-full before:bg-white/0 before:transition-colors before:duration-200 dark:border-t-white/10 dark:backdrop-blur-xl dark:bg-[#20232a]/55 dark:hover:ring-[rgba(var(--glow-color),0.25)] ${priority.border} ${priority.hoverGlow} ${isActivelyWorking ? 'active-glow-card' : ''}`}
+        className={`group relative cursor-pointer rounded-lg border-l-4 border-t border-t-white/50 backdrop-blur-lg bg-white/55 px-3 pt-3 pb-2 shadow-(--shadow-card) ring-1 ring-transparent transition-[transform,ring-color,box-shadow] duration-200 hover:translate-y-0.5 hover:ring-[rgba(var(--glow-color),0.4)] before:pointer-events-none before:absolute before:inset-y-1 before:-left-[3px] before:w-px before:rounded-full before:bg-white/0 before:transition-colors before:duration-200 dark:border-t-white/10 dark:backdrop-blur-xl dark:bg-[#20232a]/55 dark:hover:ring-[rgba(var(--glow-color),0.25)] ${priority.border} ${priority.hoverGlow} ${isActivelyWorking ? 'active-glow-card' : ''} ${unseenClasses}`}
       >
         {/* Header: title on left, number + dot on right */}
         <div className="flex items-start justify-between gap-2">

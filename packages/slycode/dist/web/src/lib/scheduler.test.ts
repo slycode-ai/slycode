@@ -150,6 +150,47 @@ test('one-shot: target in the future → does not fire', () => {
 });
 
 // ---------------------------------------------------------------------------
+// One-shot re-fire guard (card-1784368870444, item 1)
+//
+// A past-due one-shot reports due on every tick until enabled:false is
+// persisted, which only lands after the kickoff resolves. In-process
+// activeKickoffs covers that, but a restart (HMR) loses it — so the persistent
+// re-fire guard must apply to one-shots too, not just recurring cards.
+// ---------------------------------------------------------------------------
+
+function baseOneShot(overrides: Partial<AutomationConfig> = {}): AutomationConfig {
+  return baseRecurring({
+    scheduleType: 'one-shot',
+    schedule: new Date(Date.now() - 5 * MINUTE).toISOString(),
+    ...overrides,
+  });
+}
+
+test('one-shot: no lastRun → still fires (first fire must not regress)', () => {
+  assert.equal(isDue(baseOneShot()), true);
+});
+
+test('one-shot: THE FIX — lastRun seconds ago → suppressed after a restart mid-kickoff', () => {
+  assert.equal(isDue(baseOneShot({ lastRun: new Date(Date.now() - 5000).toISOString() })), false);
+});
+
+test('one-shot: still suppressed 30s into the kickoff window', () => {
+  assert.equal(isDue(baseOneShot({ lastRun: new Date(Date.now() - 30_000).toISOString() })), false);
+});
+
+test('one-shot: guard expires past the window → fires again (documented residual gap)', () => {
+  assert.equal(isDue(baseOneShot({ lastRun: new Date(Date.now() - 90_000).toISOString() })), true);
+});
+
+test('one-shot: unparseable lastRun does not wedge the guard', () => {
+  assert.equal(isDue(baseOneShot({ lastRun: 'not-a-date' })), true);
+});
+
+test('one-shot: unparseable schedule never fires (no throw)', () => {
+  assert.equal(isDue(baseOneShot({ schedule: 'not-a-date' })), false);
+});
+
+// ---------------------------------------------------------------------------
 // Disable / empty-schedule guards
 // ---------------------------------------------------------------------------
 

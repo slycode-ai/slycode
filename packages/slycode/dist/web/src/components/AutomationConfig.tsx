@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { AutomationConfig as AutomationConfigType } from '@/lib/types';
-import { cronToHumanReadable } from '@/lib/cron-utils';
+import { useState, useEffect, useCallback } from 'react';
+import type { AutomationConfig as AutomationConfigType, AutomationLogEntry } from '@/lib/types';
+import { cronToHumanReadable, isoToDatetimeLocal, datetimeLocalToIso } from '@/lib/cron-utils';
+import { formatDateTime } from '@/lib/date-format';
 
 interface AutomationConfigProps {
   config: AutomationConfigType;
@@ -111,12 +112,40 @@ interface ProviderOption {
   displayName: string;
 }
 
+const RUN_HISTORY_LIMIT = 20;
+
+/** Humanise a run duration: 840 -> "0.8s", 64200 -> "1m 4s". */
+function formatElapsed(ms: number | undefined): string {
+  if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}m ${s}s`;
+}
+
 export function AutomationConfig({ config, cardId, projectId, onChange }: AutomationConfigProps) {
   const [showAdvancedCron, setShowAdvancedCron] = useState(false);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [runNowLoading, setRunNowLoading] = useState(false);
   const [runNowResult, setRunNowResult] = useState<'success' | 'error' | null>(null);
   const [timezoneAbbr, setTimezoneAbbr] = useState<string>('');
+  const [runs, setRuns] = useState<AutomationLogEntry[]>([]);
+  const [runsLoaded, setRunsLoaded] = useState(false);
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+
+  // Run history is diagnostic, not load-bearing — a failed fetch leaves the
+  // section empty rather than surfacing an error into the config modal.
+  const loadRuns = useCallback(() => {
+    fetch(`/api/scheduler/log?cardId=${encodeURIComponent(cardId)}&limit=${RUN_HISTORY_LIMIT}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data?.runs) setRuns(data.runs); })
+      .catch(() => {})
+      .finally(() => setRunsLoaded(true));
+  }, [cardId]);
+
+  useEffect(() => { loadRuns(); }, [loadRuns]);
 
   // Parse current cron into builder state
   const parsed = parseCronToBuilder(config.schedule);
@@ -377,8 +406,8 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             <span className={labelClass}>Date & Time:</span>
             <input
               type="datetime-local"
-              value={config.schedule ? config.schedule.slice(0, 16) : ''}
-              onChange={(e) => onChange({ ...config, schedule: new Date(e.target.value).toISOString(), nextRun: undefined })}
+              value={isoToDatetimeLocal(config.schedule)}
+              onChange={(e) => onChange({ ...config, schedule: datetimeLocalToIso(e.target.value), nextRun: undefined })}
               className={inputClass}
             />
             {timezoneAbbr && (
@@ -397,7 +426,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
           <div className="mt-2 flex gap-4 text-xs text-void-500 dark:text-void-400">
             {config.lastRun && (
               <span>
-                Last run: {new Date(config.lastRun).toLocaleString()}
+                Last run: {formatDateTime(config.lastRun)}
                 {config.lastResult && (
                   <span className={config.lastResult === 'success' ? ' text-green-600 dark:text-green-400' : ' text-red-600 dark:text-red-400'}>
                     {' '}({config.lastResult})
@@ -406,7 +435,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
               </span>
             )}
             {config.nextRun && (
-              <span>Next run: {new Date(config.nextRun).toLocaleString()}</span>
+              <span>Next run: {formatDateTime(config.nextRun)}</span>
             )}
           </div>
         )}
@@ -514,6 +543,8 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                   } finally {
                     setRunNowLoading(false);
                     setTimeout(() => setRunNowResult(null), 3000);
+                    // Surface the run we just triggered without reopening the modal
+                    loadRuns();
                   }
                 }}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
@@ -546,6 +577,102 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Recent Runs Section */}
+      <div className="rounded-lg border border-orange-400/20 bg-orange-50/50 p-3 dark:bg-orange-950/10">
+        <div className="mb-3 flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-orange-700 dark:text-orange-400">Recent runs</h4>
+          <button
+            type="button"
+            onClick={loadRuns}
+            className="rounded px-2 py-0.5 text-xs text-void-500 hover:bg-orange-400/10 hover:text-orange-600 dark:text-void-400 dark:hover:text-orange-400"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {runs.length === 0 ? (
+          <p className="text-xs text-void-500 dark:text-void-400">
+            {runsLoaded ? 'No runs recorded yet.' : 'Loading run history...'}
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {runs.map((run, i) => {
+              const key = `${run.timestamp}-${i}`;
+              const isExpanded = expandedRun === key;
+              const failed = run.outcome === 'error';
+              return (
+                <div
+                  key={key}
+                  className="overflow-hidden rounded-lg border border-orange-400/20 bg-white/50 dark:bg-void-800/50"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRun(isExpanded ? null : key)}
+                    aria-expanded={isExpanded}
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-orange-400/5"
+                  >
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                      failed
+                        ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                        : 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                    }`}>
+                      {failed ? 'Err' : 'OK'}
+                    </span>
+                    <span className="text-xs text-void-700 dark:text-void-300">
+                      {formatDateTime(run.timestamp)}
+                    </span>
+                    <span className="rounded bg-void-100 px-1.5 py-0.5 text-[11px] text-void-500 dark:bg-void-700/50 dark:text-void-400">
+                      {run.trigger}
+                    </span>
+                    <span className="text-[11px] text-void-500 dark:text-void-400">
+                      {formatElapsed(run.elapsedMs)}
+                    </span>
+                    {failed && run.error && (
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-red-600 dark:text-red-400">
+                        {run.error}
+                      </span>
+                    )}
+                    <span className="ml-auto flex-shrink-0 text-[11px] text-void-400">
+                      {isExpanded ? '−' : '+'}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <dl className="space-y-1 border-t border-orange-400/20 px-2 py-2 text-[11px]">
+                      {[
+                        ['Provider', run.provider],
+                        ['Session', run.sessionName],
+                        ['Fresh session', run.fresh ? 'yes' : 'no'],
+                        ['Bridge', run.bridgeRequest
+                          ? `status ${run.bridgeRequest.status}${run.bridgeRequest.resumed ? ' (resumed)' : ''}${run.bridgeRequest.pid ? ` pid ${run.bridgeRequest.pid}` : ''}${run.bridgeRequest.error ? ` — ${run.bridgeRequest.error}` : ''}`
+                          : null],
+                        ['Liveness', run.livenessCheck
+                          ? `${run.livenessCheck.type}: ${run.livenessCheck.result}${typeof run.livenessCheck.exitCode === 'number' ? ` (exit ${run.livenessCheck.exitCode})` : ''}`
+                          : null],
+                        ['Delivery', run.delivery
+                          ? `${run.delivery.outcome} — ${run.delivery.attempts} attempt(s), ${run.delivery.resends} resend(s)${run.delivery.reason ? ` — ${run.delivery.reason}` : ''}`
+                          : null],
+                      ].map(([label, value]) => value ? (
+                        <div key={label as string} className="flex gap-2">
+                          <dt className="w-24 flex-shrink-0 text-void-500 dark:text-void-400">{label}</dt>
+                          <dd className="min-w-0 break-words text-void-700 dark:text-void-300">{value}</dd>
+                        </div>
+                      ) : null)}
+                      {run.error && (
+                        <div className="flex gap-2">
+                          <dt className="w-24 flex-shrink-0 text-void-500 dark:text-void-400">Error</dt>
+                          <dd className="min-w-0 break-words text-red-600 dark:text-red-400">{run.error}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

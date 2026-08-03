@@ -106,7 +106,45 @@ export interface AutomationConfig {
   reportViaMessaging: boolean;             // Auto-append messaging instructions to prompt
   lastRun?: string;                        // ISO timestamp of last kickoff
   lastResult?: 'success' | 'error';        // Result of last kickoff attempt
+  lastError?: string;                      // Error text from the last failed kickoff; cleared on success
   nextRun?: string;                        // ISO timestamp of next scheduled run
+}
+
+/** Mirror of the bridge's DeliveryResult (feature 070) — kept loose so an older/newer bridge can't break logging. */
+export interface DeliveryInfo {
+  outcome: 'delivered' | 'failed' | 'ambiguous' | 'blocked';
+  verified: boolean;
+  mode: string;
+  attempts: number;
+  resends: number;
+  warnings: string[];
+  reason?: string;
+  polls?: string[];
+  elapsedMs?: number;
+}
+
+/**
+ * One automation run, as appended to ~/.slycode/logs/automation.log.
+ *
+ * Lives here rather than in scheduler.ts because the run-history UI is a client
+ * component: scheduler.ts pulls in fs/os/child_process, and a client module
+ * should not reach into it even for a type-only import.
+ */
+export interface AutomationLogEntry {
+  timestamp: string;
+  cardId: string;
+  cardTitle: string;
+  projectId: string;
+  trigger: 'scheduled' | 'manual';
+  provider: string;
+  sessionName: string;
+  fresh: boolean;
+  bridgeRequest: { status: number; resumed?: boolean; pid?: number; error?: string } | null;
+  livenessCheck: { type: string; result: string; delayMs?: number; exitCode?: number; exitedAt?: string } | null;
+  delivery?: DeliveryInfo | null;
+  outcome: 'success' | 'error';
+  error: string | null;
+  elapsedMs: number;
 }
 
 export interface KanbanCard {

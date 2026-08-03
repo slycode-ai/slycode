@@ -110,7 +110,10 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
               <SearchBar
                 contextProjectId={projectId}
                 onResultClick={(result) => {
-                  router.push(`/project/${result.projectId}?card=${result.cardId}`);
+                  // Archived hits need the board in archived mode or the card
+                  // isn't loaded and the deep-link silently finds nothing.
+                  const archived = result.isArchived ? '&archived=1' : '';
+                  router.push(`/project/${result.projectId}?card=${result.cardId}${archived}`);
                 }}
               />
             </div>
@@ -255,7 +258,8 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
                 contextProjectId={projectId}
                 onResultClick={(result) => {
                   setShowMobileSearch(false);
-                  router.push(`/project/${result.projectId}?card=${result.cardId}`);
+                  const archived = result.isArchived ? '&archived=1' : '';
+                  router.push(`/project/${result.projectId}?card=${result.cardId}${archived}`);
                 }}
               />
             </div>

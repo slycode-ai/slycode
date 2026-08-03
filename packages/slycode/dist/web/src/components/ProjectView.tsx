@@ -60,6 +60,17 @@ export function ProjectView({ project, projectPath }: ProjectViewProps) {
     }
   }, []);
 
+  // Archived deep-links (feature 082): search results for cold-storage cards
+  // arrive with ?archived=1. Without this the board loads without archived
+  // cards, the deep-link finds nothing, and the click does nothing at all.
+  // Same window.location approach as the view=code effect above — no Suspense.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('archived') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowArchived(true);
+    }
+  }, []);
+
   // Side effects (URL sync, sibling-mode resets) live in the event handler,
   // NOT inside the setState updater — updaters run during render, and
   // history.replaceState there re-enters the Router mid-render.
@@ -123,6 +134,14 @@ export function ProjectView({ project, projectPath }: ProjectViewProps) {
               setShowAutomations(false);
             }}
             onRefreshReady={(fn) => { refreshRef.current = fn; }}
+            onRequestArchived={() => {
+              // A deep-link named a card that isn't on the live board — it may
+              // be in cold storage (feature 082). Entering archived mode makes
+              // the board refetch with includeArchived, and the deep-link
+              // effect re-runs against the merged stages.
+              setShowArchived(true);
+              setShowAutomations(false);
+            }}
           />
         </Suspense>
       )}

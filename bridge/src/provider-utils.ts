@@ -33,6 +33,11 @@ export interface ProviderConfig {
   install: string;
   permissions: ProviderPermissions;
   resume: ProviderResume;
+  // CLI flag to assign a bridge-generated session id at fresh spawn (feature
+  // 081). Present = attribution is definitional and detection never arms for
+  // that spawn; absent = provider falls back to file detection. Removing the
+  // field from providers.json is the rollback path.
+  sessionIdFlag?: string;
   prompt: ProviderPrompt;
   instructionFile?: string;
   altInstructionFile?: string;
@@ -95,6 +100,7 @@ export interface BuildArgsOptions {
   skipPermissions: boolean;
   resume: boolean;
   sessionId?: string | null; // For Claude GUID-based resume
+  assignSessionId?: string;  // Bridge-generated id for FRESH spawns (feature 081); requires provider.sessionIdFlag
   prompt?: string;
   model?: string;            // Model id to pass via provider's model flag
 }
@@ -104,7 +110,7 @@ export interface BuildArgsOptions {
  * Returns { command, args } since Codex resume changes the base command.
  */
 export function buildProviderCommand(opts: BuildArgsOptions): { command: string; args: string[] } {
-  const { provider, skipPermissions, resume, sessionId, prompt, model } = opts;
+  const { provider, skipPermissions, resume, sessionId, assignSessionId, prompt, model } = opts;
   const args: string[] = [];
   let command = provider.command;
 
@@ -147,6 +153,13 @@ export function buildProviderCommand(opts: BuildArgsOptions): { command: string;
       // No GUID — just pass the flag (Gemini resumes latest)
       args.push(provider.resume.flag!);
     }
+  }
+
+  // Assigned session id — FRESH spawns only (feature 081). Claude hard-errors
+  // when the id already exists, so callers must generate a new UUID per spawn
+  // attempt, never reuse a persisted one.
+  if (!resume && assignSessionId && provider.sessionIdFlag) {
+    args.push(provider.sessionIdFlag, assignSessionId);
   }
 
   // Initial prompt (Claude accepts prompt alongside --resume; Codex handled by early return above)
