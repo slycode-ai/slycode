@@ -452,6 +452,7 @@ export interface UpdateEntry {
   storePath: string;             // relative path in store/ (e.g. "skills/checkpoint")
   filesAffected: string[];       // list of files in the update package
   changedFiles: string[];        // files that differ from the store copy (all files when status is 'new')
+  seedOnlyFiles: string[];       // files NOT in the skill's `updatable:` allowlist — deploys seed them when missing but never overwrite
   skillMdOnly: boolean;          // true if only SKILL.md is in the update
 }
 

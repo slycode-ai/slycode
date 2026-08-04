@@ -1,5 +1,5 @@
 var R=require("../../../chunks/[turbopack]_runtime.js")("server/app/api/kanban/route.js")
-R.c("server/chunks/[root-of-the-server]__1e95j2a._.js")
+R.c("server/chunks/[root-of-the-server]__0zdimm8._.js")
 R.c("server/chunks/[root-of-the-server]__1z1th2u._.js")
 R.c("server/chunks/node_modules_croner_dist_croner_04fr0gk.js")
 R.c("server/chunks/node_modules_next_dist_esm_build_templates_app-route_07br1bo.js")

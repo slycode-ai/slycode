@@ -169,7 +169,9 @@ export function UpdatesView({
                   )}
                 </div>
 
-                {/* File tree for multi-file skills */}
+                {/* File tree for multi-file skills — each file's push fate:
+                    updatable files overwrite, seed-only files never touch an
+                    existing project copy (they only fill gaps) */}
                 {hasExtraFiles && (
                   <div className="mt-3 ml-8 rounded-md border border-void-700 bg-void-900/60 px-3 py-2">
                     <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-400/70">Push to projects will include:</p>
@@ -180,10 +182,16 @@ export function UpdatesView({
                         .sort()
                         .map((file, i, arr) => {
                           const isLast = i === arr.length - 1;
+                          const seedOnly = entry.seedOnlyFiles?.includes(file) ?? false;
                           return (
-                            <div key={file} className="text-amber-400/70">
+                            <div key={file} className={seedOnly ? 'text-void-500' : 'text-amber-400/70'}>
                               <span className="text-void-600">{isLast ? '└── ' : '├── '}</span>
                               {file}
+                              {seedOnly && (
+                                <span className="ml-2 text-[10px] text-void-500" title="Not in the skill's updatable list — copied only to projects missing it, existing copies are never overwritten">
+                                  seed only
+                                </span>
+                              )}
                             </div>
                           );
                         })}
@@ -246,18 +254,24 @@ export function UpdatesView({
                       <span className="text-[10px] font-medium uppercase tracking-wider text-void-400 dark:text-void-500">
                         Changed
                       </span>
-                      {entry.changedFiles.map(file => (
-                        <span
-                          key={file}
-                          className={`font-mono text-[11px] ${
-                            file === 'SKILL.md'
-                              ? 'text-void-500 dark:text-void-400'
-                              : 'text-amber-600 dark:text-amber-400/90'
-                          }`}
-                        >
-                          {file}
-                        </span>
-                      ))}
+                      {entry.changedFiles.map(file => {
+                        const seedOnly = entry.seedOnlyFiles?.includes(file) ?? false;
+                        return (
+                          <span
+                            key={file}
+                            title={seedOnly ? "Seed-only: pushes never overwrite a project's existing copy of this file" : undefined}
+                            className={`font-mono text-[11px] ${
+                              file === 'SKILL.md'
+                                ? 'text-void-500 dark:text-void-400'
+                                : seedOnly
+                                  ? 'text-void-400 dark:text-void-500'
+                                  : 'text-amber-600 dark:text-amber-400/90'
+                            }`}
+                          >
+                            {file}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

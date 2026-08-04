@@ -25,6 +25,7 @@ import { getSlycodeRoot } from './paths';
 import { getProviderAssetDir, getProviderAssetFilePath } from './provider-paths';
 import { validateAssetName, assertInside } from './asset-path-guard';
 import { hashSkillDir, diffSkillDirs } from './skill-dir-digest';
+import { copySkillDirGated, readUpdatableList, isUpdatable } from './updatable-files';
 
 // SlyCode root path — derived, not hardcoded
 const MASTER_PATH = getSlycodeRoot();
@@ -394,8 +395,9 @@ export function copyAsset(
         fs.copyFileSync(srcSkillMd, dstSkillMd);
       }
     } else {
-      // Copy entire skill directory
-      copyDirRecursive(srcPath, dstPath);
+      // Full-folder deploy honours the skill's `updatable:` allowlist:
+      // undeclared files seed when missing but never overwrite project copies
+      copySkillDirGated(srcPath, dstPath);
     }
   } else {
     // Copy single file
@@ -647,7 +649,9 @@ export function copyStoreAssetToProject(
         fs.copyFileSync(srcSkillMd, dstSkillMd);
       }
     } else {
-      copyDirRecursive(storeSkillDir, dstPath);
+      // Full-folder deploy honours the skill's `updatable:` allowlist:
+      // undeclared files seed when missing but never overwrite project copies
+      copySkillDirGated(storeSkillDir, dstPath);
     }
   } else {
     const storeFile = path.join(root, 'store', typeDir, `${assetName}.md`);
@@ -948,6 +952,11 @@ export function buildUpdatesMatrix(
       return a.localeCompare(b);
     });
 
+    // Files outside the skill's `updatable:` allowlist: deploys seed them when
+    // missing but never overwrite a project copy (see updatable-files.ts)
+    const updatableList = readUpdatableList(upstreamDir);
+    const seedOnlyFiles = filesAffected.filter(f => !isUpdatable(f, updatableList));
+
     if (storeAsset) {
       const store = hashSkillDir(path.join(root, 'store', 'skills', updateAsset.name));
 
@@ -975,6 +984,7 @@ export function buildUpdatesMatrix(
         storePath: `skills/${updateAsset.name}`,
         filesAffected,
         changedFiles: diffSkillDirs(upstream, store),
+        seedOnlyFiles,
         skillMdOnly: filesAffected.length === 1 && filesAffected[0] === 'SKILL.md',
       });
     } else {
@@ -989,6 +999,7 @@ export function buildUpdatesMatrix(
         storePath: `skills/${updateAsset.name}`,
         filesAffected,
         changedFiles: filesAffected,
+        seedOnlyFiles,
         skillMdOnly: filesAffected.length === 1 && filesAffected[0] === 'SKILL.md',
       });
     }

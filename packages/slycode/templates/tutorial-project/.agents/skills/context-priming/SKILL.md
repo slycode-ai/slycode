@@ -1,8 +1,10 @@
 ---
 provider: claude
 name: context-priming
-version: 1.1.8
-updated: 2026-03-09
+version: 1.2.0
+updated: 2026-07-19
+updatable:
+  - references/maintenance.md
 description: Dynamic context provider for codebase knowledge. This skill should be used when working on code, answering questions about architecture, or making changes that require understanding of project structure. Maintains area-specific reference files that are loaded on demand. Self-updating based on observed drift between references and actual code. Load this skill early in work sessions - it contains essential workflow and update protocols.
 ---
 

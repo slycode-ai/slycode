@@ -60,6 +60,29 @@ test('buildUpdatesMatrix — reference-only edit surfaces as an update with the 
   assert.deepEqual(entries[0].changedFiles, ['references/guide.md']);
   assert.deepEqual(entries[0].filesAffected, ['SKILL.md', 'references/guide.md']);
   assert.equal(entries[0].skillMdOnly, false);
+  // No `updatable:` declaration → every non-SKILL.md file is seed-only
+  assert.deepEqual(entries[0].seedOnlyFiles, ['references/guide.md']);
+});
+
+test('buildUpdatesMatrix — declared updatable files are excluded from seedOnlyFiles', async () => {
+  const { buildUpdatesMatrix } = await import('./asset-scanner');
+
+  const gatedSkillMd = '---\nname: gated\nversion: 1.0.0\nupdatable:\n  - references/maintenance.md\n---\nbody\n';
+  writeFiles(path.join(ROOT, 'updates', 'skills', 'gated'), {
+    'SKILL.md': gatedSkillMd,
+    'references/maintenance.md': 'doctrine v2\n',
+    'references/area-index.md': 'template index\n',
+  });
+  writeFiles(path.join(ROOT, 'store', 'skills', 'gated'), {
+    'SKILL.md': gatedSkillMd,
+    'references/maintenance.md': 'doctrine v1\n',
+    'references/area-index.md': 'template index\n',
+  });
+
+  const entries = buildUpdatesMatrix([asset('gated', '1.0.0')], [asset('gated', '1.0.0')], {});
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].changedFiles, ['references/maintenance.md']);
+  assert.deepEqual(entries[0].seedOnlyFiles, ['references/area-index.md']);
 });
 
 test('buildUpdatesMatrix — identical dirs lazy-record the digest and stay silent', async () => {

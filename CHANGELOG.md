@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-04
+
+### Fixed
+- Deploying a skill to your project no longer risks overwriting your project-specific reference files. Skills now declare which files are safe to update via an `updatable:` list in their SKILL.md frontmatter — everything else is copied only when missing and is never touched again on future deploys. Default-deny: if a skill author forgets to declare a file, at worst the update silently doesn't propagate (which is visible and recoverable); it can never silently clobber curated project data.
+
+### Added
+- The Updates view now labels each file in a deploy preview: files on the skill's updatable list appear normally (they'll be overwritten), while everything else shows dimmed with a "seed only" tag and a tooltip explaining that existing project copies are never touched.
+
+### Changed
+- context-priming skill v1.2.0 — only `references/maintenance.md` is now marked updatable. Your area references and area-index stay put on future deploys.
+
 ## [0.4.3] - 2026-08-03
 
 ### Added
