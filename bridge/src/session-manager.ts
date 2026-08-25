@@ -45,6 +45,7 @@ import {
   classifyInputRegion,
   extractInputRegion,
   decideNextAction,
+  countMatchingPlaceholders,
   type SubmitProvider,
   type InputRegionClassification,
 } from './submit-verify.js';
@@ -2009,10 +2010,12 @@ export class SessionManager {
       const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
       const isActive = this.isSessionActive(resolvedName) || false;
       if (delivery.outcome !== 'delivered') {
-        return {
-          success: false, sessionStatus: session.status, isActive, delivery,
-          error: `Prompt delivery ${delivery.outcome}${delivery.reason ? ` (${delivery.reason})` : ''}.`,
-        };
+        console.warn(`[submit] cross-card prompt to ${resolvedName} not delivered: ${delivery.outcome}${delivery.reason ? ` (${delivery.reason})` : ''} id=${delivery.correlationId} polls=${(delivery.polls || []).join(',')}`);
+        const ref = delivery.correlationId ? ` Diagnostics: grep ${delivery.correlationId} in the bridge log.` : '';
+        const error = delivery.outcome === 'ambiguous'
+          ? `Prompt delivery ambiguous${delivery.reason ? ` (${delivery.reason})` : ''}: the screen could not be read, but the prompt MAY have been delivered. Check the session (web terminal or GET /sessions/<name>/snapshot) before retrying — --force can deliver a second copy and --fresh discards the conversation.${ref}`
+          : `Prompt delivery ${delivery.outcome}${delivery.reason ? ` (${delivery.reason})` : ''}.${ref}`;
+        return { success: false, sessionStatus: session.status, isActive, delivery, error };
       }
       return { success: true, sessionStatus: session.status, isActive, delivery };
     } finally {
@@ -2027,6 +2030,15 @@ export class SessionManager {
   /** Post-Enter poll ladder (cumulative ~1s/3s/6s) — spike observed legitimate submits clearing as late as ~5s. */
   private static readonly VERIFY_POLL_DELAYS_MS = [1000, 2000, 3000];
   private static readonly VERIFY_MAX_RESENDS = 2;
+  /**
+   * Per-provider Enter-resend cap. Post-submit double-Enter was validated
+   * harmless only on Claude (spike 2026-06-06); Codex/Gemini get a single
+   * resend until validated there (card #0336 review decision).
+   */
+  private static readonly VERIFY_MAX_RESENDS_BY_PROVIDER: Record<SubmitProvider, number> = { claude: 2, codex: 1, gemini: 1 };
+  /** Bounded diagnostic snippet: last N lines / max chars written to bridge.log (never returned to callers). */
+  private static readonly DIAG_SNIPPET_LINES = 12;
+  private static readonly DIAG_SNIPPET_CHARS = 400;
   /**
    * Post-paste confirm settle-retry (extra re-check delays beyond the paste's
    * own settle). The paste render can lag, and a transient screen state (agent
@@ -2192,18 +2204,38 @@ export class SessionManager {
     const startedAt = Date.now();
     const warnings: string[] = [];
     const pollsLog: string[] = [];
+    // Correlation id: tags every bridge-log diagnostic line for this run so a
+    // caller holding only the CLI error can `grep <id> bridge.log`. Raw screen
+    // text never travels back in the result (it is another card's terminal).
+    const correlationId = randomUUID().slice(0, 8);
+    let outputSinceEnter: boolean | undefined;
+    const snapshotText = () => this.getSnapshot(resolvedName, SessionManager.VERIFY_SNAPSHOT_LINES)?.content || '';
+    const diag = (stage: string, extra: Record<string, unknown> = {}) => {
+      const lines = snapshotText().split('\n').slice(-SessionManager.DIAG_SNIPPET_LINES).join('\n');
+      const snippet = lines.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SessionManager.DIAG_SNIPPET_CHARS);
+      console.warn(`[submit-verify] ${JSON.stringify({
+        id: correlationId, stage, session: resolvedName, provider: session.provider,
+        payloadLen: { utf16: prompt.length, codePoints: Array.from(prompt).length, utf8: Buffer.byteLength(prompt, 'utf8'), lines: prompt.split('\n').length },
+        polls: pollsLog, warnings, outputSinceEnter, ...extra, snippet,
+      })}`);
+    };
 
-    const mk = (outcome: DeliveryResult['outcome'], extra: Partial<DeliveryResult> & { verified?: boolean; mode?: DeliveryResult['mode'] } = {}, attempts = 0, resends = 0): DeliveryResult => ({
-      outcome,
-      verified: extra.verified ?? true,
-      mode: extra.mode ?? 'verified_paste',
-      attempts,
-      resends,
-      warnings,
-      reason: extra.reason,
-      polls: pollsLog.length ? pollsLog : undefined,
-      elapsedMs: Date.now() - startedAt,
-    });
+    const mk = (outcome: DeliveryResult['outcome'], extra: Partial<DeliveryResult> & { verified?: boolean; mode?: DeliveryResult['mode'] } = {}, attempts = 0, resends = 0): DeliveryResult => {
+      if (outcome !== 'delivered' && extra.verified !== false) diag(`outcome_${outcome}`, { reason: extra.reason, attempts, resends });
+      return {
+        outcome,
+        verified: extra.verified ?? true,
+        mode: extra.mode ?? 'verified_paste',
+        attempts,
+        resends,
+        warnings,
+        reason: extra.reason,
+        polls: pollsLog.length ? pollsLog : undefined,
+        elapsedMs: Date.now() - startedAt,
+        correlationId,
+        outputSinceEnter,
+      };
+    };
 
     {
       const classifiable = session.provider === 'claude' || session.provider === 'codex' || session.provider === 'gemini';
@@ -2236,7 +2268,15 @@ export class SessionManager {
         return mk('blocked', { reason: 'blocked_dialog_before_paste' });
       }
       if (pre === null) warnings.push('pre_paste_snapshot_unavailable');
-      if (pre === 'unrecognized') warnings.push('pre_paste_unrecognized');
+      if (pre === 'unrecognized') {
+        warnings.push('pre_paste_unrecognized');
+        diag('pre_paste_unrecognized'); // chrome drift evidence — bridge.log only
+      }
+      // Layout-independent paste signal (card #0336): count placeholders that
+      // corroborate our payload BEFORE pasting; a NEW occurrence afterwards
+      // means the paste landed even when the composer chrome is unreadable.
+      const prePlaceholders = countMatchingPlaceholders(snapshotText(), prompt);
+      let noveltyConfirmed = false;
       if (pre === 'queued_ours' || pre === 'queued_other') {
         const region = extractInputRegion(session.provider as SubmitProvider, this.getSnapshot(resolvedName, SessionManager.VERIFY_SNAPSHOT_LINES)?.content || '');
         const snippet = region.text.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
@@ -2254,8 +2294,18 @@ export class SessionManager {
       await paste();
       let post = this.verifySnapshotClassify(resolvedName, prompt);
       let repasted = false;
+      const confirmQueued = (): boolean => {
+        if (post === 'queued_ours') return true;
+        if (post !== 'no_input_region' && countMatchingPlaceholders(snapshotText(), prompt) > prePlaceholders) {
+          noveltyConfirmed = true;
+          warnings.push('paste_confirmed_by_placeholder_novelty');
+          post = 'queued_ours';
+          return true;
+        }
+        return false;
+      };
       for (const extraDelay of SessionManager.POST_PASTE_CONFIRM_DELAYS_MS) {
-        if (post === 'queued_ours') break;                 // settled + matched
+        if (confirmQueued()) break;                        // settled + matched (composer or novelty)
         if (post === 'no_input_region') {
           // A dialog swallowed the paste. Do NOT send Enter — it could accept it.
           return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
@@ -2273,6 +2323,7 @@ export class SessionManager {
         await new Promise(r => setTimeout(r, extraDelay));
         post = this.verifySnapshotClassify(resolvedName, prompt);
       }
+      confirmQueued(); // final look after the last settle delay
 
       if (post === 'no_input_region') {
         return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
@@ -2302,6 +2353,11 @@ export class SessionManager {
       let attempts = 0;
       let resends = 0;
       const dropFirstEnter = process.env.SLYCODE_TEST_DROP_ENTER === '1';
+      // Telemetry only (never a verdict input): did the PTY emit anything after
+      // our Enter? A --force paste into a working turn has spinner output
+      // regardless of whether Enter landed, so this cannot prove delivery.
+      const outputBaseline = session.lastOutputAt;
+      const maxResends = SessionManager.VERIFY_MAX_RESENDS_BY_PROVIDER[session.provider as SubmitProvider] ?? SessionManager.VERIFY_MAX_RESENDS;
       if (dropFirstEnter) {
         warnings.push('test_drop_enter_active');
         attempts++; // simulate an OS-dropped Enter: attempted, never written
@@ -2328,13 +2384,23 @@ export class SessionManager {
               return mk('ambiguous', { reason: 'snapshot_unavailable' }, attempts, resends);
             }
           }
+          outputSinceEnter = live.lastOutputAt !== outputBaseline;
+          if (c === 'unrecognized' && noveltyConfirmed
+              && countMatchingPlaceholders(snapshotText(), prompt) <= prePlaceholders) {
+            // Composer chrome unreadable, but the placeholder our paste
+            // introduced has LEFT the screen — it went in and went away.
+            // Permissive on "delivered" by design (a wrong delivered costs
+            // the caller a timeout; a wrong resend is the double-fire).
+            if (!warnings.includes('delivered_by_placeholder_novelty')) warnings.push('delivered_by_placeholder_novelty');
+            c = 'empty';
+          }
           ladder.push(c);
           pollsLog.push(c);
           action = decideNextAction({
             polls: ladder,
             maxPolls: SessionManager.VERIFY_POLL_DELAYS_MS.length,
             resends,
-            maxResends: SessionManager.VERIFY_MAX_RESENDS,
+            maxResends,
           });
           if (action !== 'wait') break;
         }
@@ -2349,6 +2415,16 @@ export class SessionManager {
           const live = this.sessions.get(resolvedName);
           if (!live?.pty) {
             return mk('failed', { reason: 'session_stopped' }, attempts, resends);
+          }
+          // Immediate pre-resend recheck: the resend is the one dangerous
+          // action, so it needs our payload STILL positively visible right now.
+          const recheck = this.verifySnapshotClassify(resolvedName, prompt);
+          if (recheck !== 'queued_ours') {
+            if (recheck === 'unrecognized' || recheck === null) {
+              return mk('ambiguous', { reason: 'pre_resend_recheck_unreadable' }, attempts, resends);
+            }
+            warnings.push('resend_skipped_payload_gone');
+            return mk('delivered', {}, attempts, resends);
           }
           writeToPty(live.pty, '\r');
           attempts++;

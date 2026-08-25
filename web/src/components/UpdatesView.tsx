@@ -8,7 +8,7 @@ interface UpdatesViewProps {
   entries: UpdateEntry[];
   onAccept: (entry: UpdateEntry) => Promise<void>;
   onDismiss: (entry: UpdateEntry) => void;
-  onPushToProjects: (entry: UpdateEntry, fullSkillFolder: boolean) => void;
+  onPushToProjects: (entry: UpdateEntry) => void;
   onPushDeclined?: () => void;
 }
 
@@ -106,9 +106,8 @@ export function UpdatesView({
               setJustAccepted(prev => { const next = new Set(prev); next.delete(key); return next; });
               setAcceptedEntries(prev => { const next = new Map(prev); next.delete(key); return next; });
             };
-            const hasExtraFiles = !entry.skillMdOnly;
-
-            // Show post-accept state with push option
+            // Show post-accept state with push option — the review modal
+            // (opened by onPushToProjects) shows the per-file plan
             return (
               <div
                 key={key}
@@ -127,77 +126,25 @@ export function UpdatesView({
                       </span>
                     </div>
                   </div>
-                  {!hasExtraFiles ? (
-                    /* SKILL.md only — simple push prompt */
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-void-400">Push to all projects?</span>
-                      <button
-                        onClick={() => { onPushToProjects(entry, false); clearAccepted(); }}
-                        className="rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-400/25"
-                      >
-                        Yes
-                      </button>
-                      <button
-                        onClick={() => { clearAccepted(); onPushDeclined?.(); }}
-                        className="rounded-md border border-void-600 bg-void-800 px-3 py-1 text-xs font-medium text-void-300 hover:bg-void-700"
-                      >
-                        No
-                      </button>
-                    </div>
-                  ) : (
-                    /* Has additional files — buttons on the right */
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { onPushToProjects(entry, false); clearAccepted(); }}
-                        className="rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-400/25"
-                      >
-                        SKILL.md only
-                      </button>
-                      <button
-                        onClick={() => { onPushToProjects(entry, true); clearAccepted(); }}
-                        className="rounded-md border border-amber-400/40 bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-400 hover:bg-amber-400/25"
-                      >
-                        All files
-                      </button>
-                      <button
-                        onClick={() => { clearAccepted(); onPushDeclined?.(); }}
-                        className="rounded-md border border-void-600 bg-void-800 px-3 py-1 text-xs font-medium text-void-300 hover:bg-void-700"
-                      >
-                        Skip
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* File tree for multi-file skills — each file's push fate:
-                    updatable files overwrite, seed-only files never touch an
-                    existing project copy (they only fill gaps) */}
-                {hasExtraFiles && (
-                  <div className="mt-3 ml-8 rounded-md border border-void-700 bg-void-900/60 px-3 py-2">
-                    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-400/70">Push to projects will include:</p>
-                    <div className="font-mono text-xs text-void-400">
-                      <div className="text-emerald-400">SKILL.md</div>
-                      {entry.filesAffected
-                        .filter(f => f !== 'SKILL.md')
-                        .sort()
-                        .map((file, i, arr) => {
-                          const isLast = i === arr.length - 1;
-                          const seedOnly = entry.seedOnlyFiles?.includes(file) ?? false;
-                          return (
-                            <div key={file} className={seedOnly ? 'text-void-500' : 'text-amber-400/70'}>
-                              <span className="text-void-600">{isLast ? '└── ' : '├── '}</span>
-                              {file}
-                              {seedOnly && (
-                                <span className="ml-2 text-[10px] text-void-500" title="Not in the skill's updatable list — copied only to projects missing it, existing copies are never overwritten">
-                                  seed only
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                    </div>
+                  {/* Push goes through the deploy review modal (feature 084):
+                      per-file fates against every installed project/provider,
+                      so no blind SKILL.md-only / All-files decision here. */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-void-400">Push to all projects?</span>
+                    <button
+                      onClick={() => { onPushToProjects(entry); clearAccepted(); }}
+                      className="rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-400/25"
+                    >
+                      Review push…
+                    </button>
+                    <button
+                      onClick={() => { clearAccepted(); onPushDeclined?.(); }}
+                      className="rounded-md border border-void-600 bg-void-800 px-3 py-1 text-xs font-medium text-void-300 hover:bg-void-700"
+                    >
+                      Skip
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
             );
           }

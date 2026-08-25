@@ -46,5 +46,8 @@ if (!atlasScript) {
 // the script's job is to locate its data via CWD-based resolution.
 process.env.SLYCODE_HOME = workspace;
 
-// Execute the atlas script in-process
-require(atlasScript);
+// Execute the atlas script in-process. atlas.js is also imported as a library
+// (web parity tests), so it only self-dispatches when it is the process entry
+// point — which it isn't here (require.main is this wrapper). Call its
+// exported main() explicitly.
+require(atlasScript).main(process.argv.slice(2));

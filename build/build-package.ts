@@ -30,7 +30,7 @@ const TUTORIAL_TEMPLATE_DEST = path.join(TEMPLATES_DIR, 'tutorial-project');
 function run(cmd: string, cwd: string, label: string): void {
   console.log(`  Building ${label}...`);
   try {
-    execSync(cmd, { cwd, stdio: 'pipe' });
+    execSync(cmd, { cwd, stdio: 'pipe', windowsHide: true });
     console.log(`  \u2713 ${label}`);
   } catch (err) {
     console.error(`  \u2717 ${label} failed`);

@@ -1,6 +1,16 @@
 import type { ResponseEntry } from './types.js';
 
-const RESPONSE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// Two-window expiry model (card #0332). Each entry has:
+//  - a LOCK window: createdAt + effectiveTimeout + LOCK_GRACE_MS. Past this the
+//    entry no longer call-locks its target session (a hard-killed caller that
+//    never posted /timeout must not wedge the target), but it stays deliverable.
+//  - a DELIVERY window: createdAt + effectiveTimeout + DELIVERY_GRACE_MS. Only
+//    past this is the entry removed (envelope kept in recentlyExpired).
+// effectiveTimeout is the caller's registered --wait timeout, falling back to
+// DEFAULT_TIMEOUT_MS for registrations from older CLIs that send none.
+export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;        // 10 minutes (legacy lock bound)
+export const LOCK_GRACE_MS = 60 * 1000;                   // 60 seconds
+export const DELIVERY_GRACE_MS = 24 * 60 * 60 * 1000;     // 24 hours
 const CLEANUP_INTERVAL_MS = 60 * 1000;  // 60 seconds
 const RECENTLY_EXPIRED_MAX = 200;
 
@@ -18,12 +28,14 @@ export interface ExpiredResponseMetadata {
   issuedAt: number;
   expiredAt: number;
   targetSession: string;
+  callingSession: string;   // retained so an expired respond can still late-inject
 }
 
 export type ExpiryHint = {
   reason: 'expired' | 'consumed' | 'unknown';
   issuedAt?: number;
   expiredAt?: number;
+  callingSession?: string;
 };
 
 /**
@@ -31,11 +43,16 @@ export type ExpiryHint = {
  * Manages the response callback protocol: register → poll → deliver.
  * Handles call locking and late response injection tracking.
  *
- * Delivery is multi-shot within TTL: a second `deliver()` call overwrites
- * the previous payload (the latest delivery wins). For a still-polling caller
- * the recovery window is bounded by the 2 s polling cadence; for a timed-out
- * caller the late-injection path fires on every successful delivery, which
- * gives the caller a full-TTL recovery window via PTY injection.
+ * Delivery is multi-shot within the delivery window: a second `deliver()`
+ * call overwrites the previous payload (the latest delivery wins). For a
+ * still-polling caller the recovery window is bounded by the 2 s polling
+ * cadence; for a timed-out caller the late-injection path fires on every
+ * successful delivery.
+ *
+ * Lock lifetime and delivery lifetime are decoupled (see the window
+ * constants above): an entry stops call-locking its target shortly after
+ * the caller's own wait must have ended, but remains deliverable for a
+ * generous grace so long-running agent work is never lost at the door.
  */
 export class ResponseStore {
   private responses = new Map<string, ResponseEntry>();
@@ -56,15 +73,32 @@ export class ResponseStore {
   /**
    * Register a pending response for a --wait prompt.
    * Also acts as a call lock on the target session.
+   * `timeoutMs` is the caller's --wait timeout; both expiry windows derive
+   * from it (older CLIs omit it → DEFAULT_TIMEOUT_MS).
    */
-  register(responseId: string, callingSession: string, targetSession: string): void {
+  register(responseId: string, callingSession: string, targetSession: string, timeoutMs?: number): void {
     this.responses.set(responseId, {
       responseId,
       callingSession,
       targetSession,
       status: 'pending',
       createdAt: Date.now(),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
+  }
+
+  private effectiveTimeoutMs(entry: ResponseEntry): number {
+    return entry.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
+  /** Past this, the entry no longer call-locks its target session. */
+  private isLockStale(entry: ResponseEntry, now: number): boolean {
+    return now - entry.createdAt > this.effectiveTimeoutMs(entry) + LOCK_GRACE_MS;
+  }
+
+  /** Past this, the entry is removed by cleanup (envelope retained). */
+  private isDeliveryExpired(entry: ResponseEntry, now: number): boolean {
+    return now - entry.createdAt > this.effectiveTimeoutMs(entry) + DELIVERY_GRACE_MS;
   }
 
   /**
@@ -110,6 +144,7 @@ export class ResponseStore {
         reason: found.reason,
         issuedAt: found.issuedAt,
         expiredAt: found.expiredAt,
+        callingSession: found.callingSession,
       };
     }
     return { reason: 'unknown' };
@@ -122,6 +157,7 @@ export class ResponseStore {
       issuedAt: entry.createdAt,
       expiredAt: Date.now(),
       targetSession: entry.targetSession,
+      callingSession: entry.callingSession,
     });
     if (this.recentlyExpired.length > RECENTLY_EXPIRED_MAX) {
       this.recentlyExpired.length = RECENTLY_EXPIRED_MAX;
@@ -144,11 +180,14 @@ export class ResponseStore {
 
   /**
    * Check if a session is locked by an active --wait call.
+   * Entries past their lock window never lock — a hard-killed caller that
+   * never posted /timeout must not wedge the target session.
    */
-  isSessionLocked(sessionName: string, excludeResponseId?: string): boolean {
+  isSessionLocked(sessionName: string, excludeResponseId?: string, now: number = Date.now()): boolean {
     for (const entry of this.responses.values()) {
       if (entry.responseId === excludeResponseId) continue; // a submission never locks itself
-      if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut) {
+      if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut
+          && !this.isLockStale(entry, now)) {
         return true;
       }
     }
@@ -158,10 +197,11 @@ export class ResponseStore {
   /**
    * Get the active lock info for a session (for error messages).
    */
-  getActiveLock(sessionName: string, excludeResponseId?: string): { callingSession: string; lockedAt: number } | null {
+  getActiveLock(sessionName: string, excludeResponseId?: string, now: number = Date.now()): { callingSession: string; lockedAt: number } | null {
     for (const entry of this.responses.values()) {
       if (entry.responseId === excludeResponseId) continue;
-      if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut) {
+      if (entry.targetSession === sessionName && entry.status === 'pending' && !entry.callerTimedOut
+          && !this.isLockStale(entry, now)) {
         return { callingSession: entry.callingSession, lockedAt: entry.createdAt };
       }
     }
@@ -169,14 +209,14 @@ export class ResponseStore {
   }
 
   /**
-   * Remove expired entries (older than TTL). Before deleting, push a small
+   * Remove entries past their delivery window. Before deleting, push a small
    * envelope into the recentlyExpired ring-buffer so subsequent delivery
-   * attempts can be told *why* they failed.
+   * attempts can still late-inject (and be told why the live entry is gone).
+   * `now` is injectable for tests.
    */
-  private cleanup(): void {
-    const now = Date.now();
+  cleanup(now: number = Date.now()): void {
     for (const [id, entry] of this.responses) {
-      if (now - entry.createdAt > RESPONSE_TTL_MS) {
+      if (this.isDeliveryExpired(entry, now)) {
         this.pushExpired(entry, 'expired');
         this.responses.delete(id);
       }

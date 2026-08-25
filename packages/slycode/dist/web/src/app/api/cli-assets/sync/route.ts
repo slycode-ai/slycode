@@ -3,6 +3,8 @@
  *
  * Deploy or remove assets to/from projects in a batch.
  * Accepts { changes: PendingChange[] } and executes copy/remove operations.
+ * Skill deploys are always gated by the skill's `updatable:` allowlist —
+ * preview what a batch will do via POST /api/cli-assets/sync/plan.
  * Emits events for each action and returns the updated CLI assets matrix.
  */
 
@@ -19,8 +21,7 @@ import {
 } from '@/lib/asset-scanner';
 import { getStoreAssets } from '@/lib/store-scanner';
 import { getProviderAssetFilePath } from '@/lib/provider-paths';
-import { validateAssetName } from '@/lib/asset-path-guard';
-import { compareVersions } from '@/lib/version-compare';
+import { createSyncContext, resolveChange, newerCopyError } from '@/lib/sync-resolve';
 import { parseMcpFromStore, activateMcp, deactivateMcp } from '@/lib/mcp-common';
 import { getSlycodeRoot } from '@/lib/paths';
 import { appendEvent } from '@/lib/event-log';
@@ -32,7 +33,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const changes: PendingChange[] = body.changes;
-    const fullSkillFolder: boolean = body.fullSkillFolder === true;
 
     if (!Array.isArray(changes) || changes.length === 0) {
       return NextResponse.json(
@@ -42,71 +42,26 @@ export async function POST(request: NextRequest) {
     }
 
     const registry = await loadRegistry();
-    const projectMap = new Map(registry.projects.map(p => [p.id, p]));
     const masterPath = getRepoRoot();
+    // Shared with /api/cli-assets/sync/plan so preview and apply agree
+    const ctx = createSyncContext(registry.projects, masterPath);
 
     const results: { change: PendingChange; success: boolean; error?: string }[] = [];
 
-    // Per-request scan cache for the newer-copy guard (key: `${path}:${provider}`)
-    const providerScanCache = new Map<string, AssetInfo[]>();
-    const scanCached = (projectPath: string, provider: ProviderId): AssetInfo[] => {
-      const key = `${projectPath}:${provider}`;
-      let assets = providerScanCache.get(key);
-      if (!assets) {
-        assets = scanProviderAssets(projectPath, provider);
-        providerScanCache.set(key, assets);
-      }
-      return assets;
-    };
-
-    /**
-     * Newer-copy guard: a deploy must not silently overwrite a project copy
-     * whose version is newer than the source copy. The client's push warning
-     * sets `overwriteNewer: true` on explicitly included targets; anything
-     * else is rejected here. Missing/unparsable versions compare equal and
-     * pass — this is a warn-with-consent guard, not a hard block.
-     * Returns an error string when the deploy must be rejected.
-     */
-    const checkNewerCopy = (change: PendingChange, projectPath: string): string | null => {
-      if (change.action !== 'deploy') return null;
-      if (change.assetType !== 'skill' && change.assetType !== 'agent') return null;
-      if (change.overwriteNewer === true) return null;
-
-      const provider = change.provider || 'claude';
-      const sourceAssets = change.source === 'store'
-        ? getStoreAssets()
-        : scanCached(masterPath, 'claude');
-      const sourceVersion = sourceAssets.find(
-        a => a.name === change.assetName && a.type === change.assetType
-      )?.frontmatter?.version as string | undefined;
-      const projectVersion = scanCached(projectPath, provider).find(
-        a => a.name === change.assetName && a.type === change.assetType
-      )?.frontmatter?.version as string | undefined;
-
-      if (compareVersions(projectVersion, sourceVersion) > 0) {
-        return `Project copy of '${change.assetName}' is newer (v${projectVersion} > v${sourceVersion ?? '?'}) — deploy requires overwriteNewer consent`;
-      }
-      return null;
-    };
-
     for (const change of changes) {
-      const project = projectMap.get(change.projectId);
-      if (!project) {
-        results.push({ change, success: false, error: `Project ${change.projectId} not found` });
+      const resolved = resolveChange(change, ctx);
+      if (!resolved.ok) {
+        results.push({ change, success: false, error: resolved.error });
         continue;
       }
+      const { project } = resolved;
 
-      // Traversal guard: every change's assetName feeds copyAsset / removeAsset
-      // / getProviderAssetFilePath / a store path.join. mcp names also index a
-      // `${assetName}.json` store file, so guard all types.
-      if (!validateAssetName(change.assetName)) {
-        results.push({ change, success: false, error: `Invalid asset name: ${String(change.assetName)}` });
-        continue;
-      }
-
-      const newerCopyError = checkNewerCopy(change, project.path);
-      if (newerCopyError) {
-        results.push({ change, success: false, error: newerCopyError });
+      // Newer-copy guard: a deploy must not silently overwrite a project copy
+      // whose version is newer than the source. The review modal sets
+      // `overwriteNewer: true` on explicitly included targets; anything else
+      // is rejected here.
+      if (resolved.newerConflict && change.overwriteNewer !== true) {
+        results.push({ change, success: false, error: newerCopyError(change, resolved.newerConflict) });
         continue;
       }
 
@@ -140,27 +95,19 @@ export async function POST(request: NextRequest) {
           });
         } else if (change.action === 'deploy') {
           if (change.source === 'store' && change.provider) {
-            // Deploy from flat canonical store to project using provider-specific paths
-            const allStoreAssets = getStoreAssets();
-            const storeAsset = allStoreAssets.find(
-              a => a.name === change.assetName && a.type === change.assetType
+            // Deploy from flat canonical store to project using provider-
+            // specific paths. Always gated by the skill's `updatable:`
+            // allowlist (feature 084 removed the SKILL.md-only mode); source
+            // existence was verified by resolveChange.
+            copyStoreAssetToProject(
+              project.path,
+              change.provider,
+              change.assetType,
+              change.assetName,
             );
-            if (storeAsset) {
-              const skillMainOnly = change.assetType === 'skill' && !fullSkillFolder;
-              copyStoreAssetToProject(
-                project.path,
-                change.provider,
-                change.assetType,
-                change.assetName,
-                { skillMainOnly },
-              );
-            } else {
-              throw new Error(`Asset '${change.assetName}' not found in store`);
-            }
           } else {
-            // Deploy from master (existing behavior)
-            const skillMainOnly = change.assetType === 'skill' && !fullSkillFolder;
-            copyAsset(masterPath, project.path, change.assetType, change.assetName, { skillMainOnly });
+            // Deploy from master (existing behavior), same gating
+            copyAsset(masterPath, project.path, change.assetType, change.assetName);
           }
           const providerLabel = change.provider ? ` (${change.provider})` : '';
           appendEvent({

@@ -8,6 +8,7 @@
 import { promises as fs } from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';
+import { atomicWriteFile } from './atomic-write';
 import type {
   Registry,
   Project,
@@ -95,7 +96,7 @@ export async function loadRegistry(): Promise<Registry> {
  */
 export async function saveRegistry(registry: Registry): Promise<void> {
   const content = JSON.stringify(registry, null, 2) + '\n';
-  await fs.writeFile(REGISTRY_PATH, content, 'utf-8');
+  await atomicWriteFile(REGISTRY_PATH, content);
 }
 
 /**

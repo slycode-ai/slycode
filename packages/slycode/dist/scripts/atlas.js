@@ -1175,8 +1175,12 @@ Stretch artifacts (feature 079):
 All commands run relative to the enclosing SlyCode project (found via documentation/kanban.json).
 See the atlas skill (.claude/skills/atlas/SKILL.md) for the full workflow.`;
 
-if (require.main === module) {
-  const [cmd, ...rest] = process.argv.slice(2);
+// Command dispatch. Exported so the packaged bin wrapper
+// (packages/slycode/bin/sly-atlas.js) can invoke it explicitly after an
+// in-process require() — under the wrapper `require.main` is the wrapper,
+// not this file, so the guard below alone would silently run nothing.
+function main(argv) {
+  const [cmd, ...rest] = argv;
   switch (cmd) {
     case 'init': cmdInit(); break;
     case 'status': cmdStatus(rest); break;
@@ -1199,9 +1203,18 @@ if (require.main === module) {
   }
 }
 
+// Direct invocation (node scripts/atlas.js, dev symlink). Library imports
+// (web parity tests, the bin wrapper) get no side effects — the wrapper calls
+// main() itself.
+if (require.main === module) {
+  main(process.argv.slice(2));
+}
+
 // Exported for the web↔CLI lockstep parity test (schema.test.ts) and the
-// context-builder unit tests (contextMarkdown is pure).
+// context-builder unit tests (contextMarkdown is pure). `main` is for the
+// bin wrapper.
 module.exports = {
+  main,
   validateAtlasRoot, validateAtlasNode, validateNavEvent,
   validateDigest, validateTour, validateDbAnnotations,
   contextMarkdown,

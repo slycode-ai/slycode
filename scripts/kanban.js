@@ -2823,10 +2823,14 @@ function cmdAutomation(args) {
             // Session might already exist — try sending input directly
             if (createRes.status === 409) {
               console.log('  Session already exists, sending prompt...');
+              // Bracketed-paste wrap + control-char strip (card #0326): a raw
+              // multiline prompt would submit line-by-line, and embedded control
+              // sequences could drive the terminal. Keep \n and \t only.
+              const stripped = fullPrompt.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
               const inputRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}/input`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: fullPrompt + '\r' }),
+                body: JSON.stringify({ data: '\x1b[200~' + stripped + '\x1b[201~\r' }),
               });
               if (!inputRes.ok) {
                 console.error(`Error sending input: ${await inputRes.text()}`);
@@ -3651,6 +3655,9 @@ Either way, the CLI will print a success line with the byte count and a preview 
             responseId,
             callingSession: callingSessionForResponse,
             targetSession: sessionName,
+            // Bridge derives the respond-id's lock/delivery windows from this
+            // (card #0332) — omit for fire-and-forget, which never locks.
+            timeoutSeconds: wait ? timeout : undefined,
           }),
         });
         if (!regRes.ok) {
@@ -3819,12 +3826,20 @@ Either way, the CLI will print a success line with the byte count and a preview 
       const pollInterval = 2000; // 2 seconds
       const timeoutMs = timeout * 1000;
 
+      // Registration-gone detection: a 404 means the bridge no longer has this
+      // response entry (bridge restarted, or entry expired). Distinct from
+      // network errors, which stay silent retries. After a few consecutive
+      // 404s, abort — polling can never succeed again (card #0332).
+      let consecutive404s = 0;
+      const MAX_POLL_404S = 3;
+
       while (Date.now() - pollStart < timeoutMs) {
         await new Promise(r => setTimeout(r, pollInterval));
 
         try {
           const pollRes = await fetch(`${bridgeUrl}/responses/${responseId}`);
           if (pollRes.ok) {
+            consecutive404s = 0;
             const pollData = await pollRes.json();
             if (pollData.status === 'received' && pollData.data) {
               // Happy path: response received
@@ -3832,8 +3847,20 @@ Either way, the CLI will print a success line with the byte count and a preview 
               emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): response received`, card.id);
               return;
             }
+          } else if (pollRes.status === 404) {
+            consecutive404s++;
+            if (consecutive404s >= MAX_POLL_404S) {
+              console.error('[ABORTED] The bridge no longer has this response registration (it likely restarted).');
+              console.error('A response can no longer arrive through this wait — the worker\'s respond will be');
+              console.error('refused as an unknown id. Re-issue the prompt, or coordinate via card notes.');
+              console.error(`Session: ${sessionName}`);
+              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): aborted, registration lost`, card.id);
+              process.exit(1);
+            }
+          } else {
+            consecutive404s = 0;
           }
-        } catch { /* retry */ }
+        } catch { /* network error — retry */ }
       }
 
       // Timeout — determine which outcome
@@ -3980,11 +4007,11 @@ function formatRespondError(responseId, errBody) {
   if (reason === 'expired') {
     if (issuedAt) {
       const age = now - issuedAt;
-      let msg = `Response ID was issued ${formatDuration(age)} ago, exceeded the 10-minute TTL.`;
+      let msg = `Response ID was issued ${formatDuration(age)} ago and has exceeded its delivery window.`;
       if (expiredAt) msg += ` (Expired ${formatDuration(now - expiredAt)} ago.)`;
       return msg;
     }
-    return 'Response ID has expired (10-minute TTL exceeded).';
+    return 'Response ID has exceeded its delivery window.';
   }
 
   if (reason === 'consumed') {
@@ -3995,7 +4022,8 @@ function formatRespondError(responseId, errBody) {
   if (issuedAt) {
     const age = now - issuedAt;
     if (age > 10 * 60 * 1000) {
-      return `Response ID was issued ${formatDuration(age)} ago — likely expired (10-minute TTL).`;
+      // Older bridges enforced a fixed 10-minute TTL; keep the heuristic here only.
+      return `Response ID was issued ${formatDuration(age)} ago — likely expired (older bridges enforce a 10-minute TTL).`;
     }
     return `Response ID not recognised by the bridge (issued ${formatDuration(age)} ago) — typo, or the bridge restarted since it was issued.`;
   }
@@ -4094,7 +4122,12 @@ function cmdRespond(args) {
 
       const result = await res.json();
       const preview = sanitisePreview(responseData, 80);
-      const lateSuffix = result.lateInjection ? ' (late injection — caller had already timed out)' : '';
+      let lateSuffix = '';
+      if (result.expired) {
+        lateSuffix = ' (respond-id had expired — payload was still delivered to the caller\'s terminal as a late response)';
+      } else if (result.lateInjection) {
+        lateSuffix = ' (late injection — caller had already timed out)';
+      }
       console.log(`Response delivered. (${byteLength} bytes — preview: "${preview}")${lateSuffix}`);
     } catch (err) {
       if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {

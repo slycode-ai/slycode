@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { resolveWorkspaceOrExit, resolvePackageDir } from './workspace';
+import { copyFileNoFollow, copyDirNoFollow } from './copy-guard';
 
 export interface RefreshResult {
   refreshed: number;
@@ -61,21 +62,6 @@ export function hashSkillDirDigest(dir: string): string {
   return roll.digest('hex').slice(0, 12);
 }
 
-function copyDirRecursive(src: string, dest: string): void {
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
-}
-
 /**
  * Compare package templates/updates/skills/ vs workspace updates/skills/ by
  * whole-directory content digest. Copy when ANY file differs or skill is
@@ -129,7 +115,7 @@ export function refreshUpdates(workspace: string): RefreshResult {
       if (fs.existsSync(workspaceSkillDir)) {
         fs.rmSync(workspaceSkillDir, { recursive: true, force: true });
       }
-      copyDirRecursive(templateSkillDir, workspaceSkillDir);
+      copyDirNoFollow(templateSkillDir, workspaceSkillDir);
       result.refreshed++;
       result.details.push({ name: entry.name, from: workspaceVersion, to: templateVersion });
     } else {
@@ -185,7 +171,7 @@ export function refreshActionUpdates(workspace: string): RefreshResult {
       : '';
 
     if (templateContent !== workspaceContent) {
-      fs.copyFileSync(templatePath, workspacePath);
+      copyFileNoFollow(templatePath, workspacePath);
       const templateVersion = parseVersion(templatePath);
       const workspaceVersion = workspaceContent ? parseVersion(workspacePath) : '0.0.0';
       result.refreshed++;
@@ -256,7 +242,7 @@ export function refreshTerminalClasses(workspace: string): { seeded: boolean } {
   if (!fs.existsSync(templateFile)) return { seeded: false };
 
   fs.mkdirSync(path.join(workspace, 'documentation'), { recursive: true });
-  fs.copyFileSync(templateFile, workspaceFile);
+  copyFileNoFollow(templateFile, workspaceFile);
   return { seeded: true };
 }
 

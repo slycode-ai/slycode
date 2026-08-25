@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.15.0
-updated: 2026-07-29
+version: 1.16.0
+updated: 2026-08-13
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -628,6 +628,18 @@ Sends the prompt with an embedded callback instruction. The called card must run
 - Timeout + session idle → terminal snapshot showing what blocked it (exit 1)
 
 Late responses are automatically injected into the calling session's terminal even after timeout.
+
+**Respond-id lifetime:** the respond-id stays valid for the caller's full
+`--timeout` plus a generous grace (~24h) — pick a `--timeout` that matches the
+expected work; long-running tasks are safe. Even after expiry, a respond
+against a remembered id still delivers via late injection (flagged as such) —
+the payload is never lost while the bridge stays up. A **bridge restart** voids
+all outstanding respond-ids: the waiting caller aborts its wait early with a
+clear error (instead of blind-polling), and the worker's respond is refused as
+an unknown id — coordinate via card notes and re-issue the prompt in that case.
+The target session's call-lock is NOT held for the grace period: it releases
+when the response arrives, when the caller times out, or at latest ~60s after
+the caller's own `--timeout` elapses (so a killed caller can't wedge the card).
 
 ### Responding to a Prompt
 

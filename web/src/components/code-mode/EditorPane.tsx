@@ -9,17 +9,46 @@
  * registry (`path` prop); tabs + dirty tracking here; save = PUT
  * /api/atlas/file (Ctrl+S or button). Blame footer shows the current line's
  * last commit when toggled.
+ *
+ * Markdown preview (card #0328): .md files get a Preview toggle in the
+ * toolbar — rendered GFM (read-only, live buffer, frontmatter as a dim
+ * metadata block) vs raw Monaco. Sticky preference in localStorage
+ * ('slycode-md-preview', default rendered); a nav-target carrying a
+ * line/highlight transiently forces raw so highlights stay visible.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Editor, { loader } from '@monaco-editor/react';
+import Editor, { loader, type Monaco } from '@monaco-editor/react';
 import type { editor as MonacoEditorNS } from 'monaco-editor';
 import { useVoice } from '@/contexts/VoiceContext';
+import { MarkdownContent } from '@/components/MarkdownContent';
 import type { BlameLine, OpenTarget } from './types';
 import { formatDate } from '@/lib/date-format';
 
 // Self-host Monaco (module-level, once).
 loader.config({ paths: { vs: '/monaco/vs' } });
+
+/** Markdown preview toggle (card #0328): sticky preference, default rendered. */
+const MD_PREVIEW_KEY = 'slycode-md-preview';
+
+function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown)$/i.test(path);
+}
+
+/**
+ * Split YAML frontmatter (--- delimited block at file start) from the body.
+ * The preview shows frontmatter as a dim metadata block instead of letting
+ * react-markdown mangle it (--- renders as an hr, keys as paragraphs).
+ */
+function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
+  if (!content.startsWith('---')) return { frontmatter: null, body: content };
+  const endIdx = content.indexOf('\n---', 3);
+  if (endIdx === -1) return { frontmatter: null, body: content };
+  return {
+    frontmatter: content.slice(3, endIdx).trim(),
+    body: content.slice(endIdx + 4).trimStart(),
+  };
+}
 
 interface FileState {
   content: string;      // last loaded/saved content
@@ -54,7 +83,18 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
   // 'save': a save was refused (409, stale baseMtimeMs). 'external': disk
   // changed under a dirty buffer (found by a focus/nav refresh).
   const [conflict, setConflict] = useState<{ path: string; source: 'save' | 'external' } | null>(null);
+  // Markdown preview (card #0328). `mdPreviewPref` is the sticky user choice
+  // (localStorage, default rendered — reading is the common case). The
+  // override is a transient per-target escape: an atlas nav-target carrying a
+  // line/highlight forces raw so the Monaco highlight is actually visible; it
+  // never touches the stored preference.
+  const [mdPreviewPref, setMdPreviewPref] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem(MD_PREVIEW_KEY) !== 'raw';
+  });
+  const [mdPreviewOverride, setMdPreviewOverride] = useState<boolean | null>(null);
   const editorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
   const decorationsRef = useRef<MonacoEditorNS.IEditorDecorationsCollection | null>(null);
   // Bumped in onMount so the reveal effect re-runs once the editor exists.
   const [mountTick, setMountTick] = useState(0);
@@ -333,6 +373,45 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
     return blame.lines.find(l => l.line === cursorLine) ?? null;
   }, [blameOn, blame, activePath, cursorLine]);
 
+  // Markdown preview: reset the transient override when the file changes,
+  // then force raw when a nav-target carries a line/highlight (declared in
+  // this order so the suspend wins within the same commit).
+  useEffect(() => {
+    setMdPreviewOverride(null);
+  }, [activePath]);
+  useEffect(() => {
+    if (active && isMarkdownPath(active.path) && (active.line || active.highlight)) {
+      setMdPreviewOverride(false);
+    }
+  }, [active]);
+
+  const activeIsMarkdown = !!activePath && isMarkdownPath(activePath);
+  const showPreview = activeIsMarkdown && !current?.error && (mdPreviewOverride ?? mdPreviewPref);
+
+  const toggleMdPreview = useCallback(() => {
+    const next = !(mdPreviewOverride ?? mdPreviewPref);
+    setMdPreviewOverride(null);
+    setMdPreviewPref(next);
+    try { localStorage.setItem(MD_PREVIEW_KEY, next ? 'rendered' : 'raw'); } catch { /* private mode etc. */ }
+  }, [mdPreviewOverride, mdPreviewPref]);
+
+  // Preview renders the LIVE buffer (unsaved edits included). A dirty buffer
+  // lives in the Monaco model, not `files` — look the model up by URI (sync,
+  // works even though the hidden editor's model switch is async).
+  const previewDoc = useMemo(() => {
+    if (!showPreview || !activePath) return null;
+    let text = current?.content ?? '';
+    if (current?.dirty) {
+      const model = monacoRef.current?.editor
+        .getModels()
+        .find((m: MonacoEditorNS.ITextModel) =>
+          decodeURIComponent(m.uri.authority).toLowerCase() === projectId.toLowerCase() &&
+          decodeURIComponent(m.uri.path).replace(/^\//, '') === activePath);
+      if (model) text = model.getValue();
+    }
+    return splitFrontmatter(text);
+  }, [showPreview, activePath, current, projectId]);
+
   if (!activePath) return null;
 
   return (
@@ -383,6 +462,17 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
               title={hasSelection ? 'Explain the selected code in the Atlas terminal' : 'Explain the word/line at the cursor in the Atlas terminal'}
             >
               {hasSelection ? '✦ Explain selection' : '✦ Explain'}
+            </button>
+          )}
+          {activeIsMarkdown && (
+            <button
+              onClick={toggleMdPreview}
+              className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+                showPreview ? 'border-(--cm-atlas) text-(--cm-atlas)' : 'border-(--cm-line) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
+              }`}
+              title={showPreview ? 'Showing rendered Markdown — switch to raw source to edit' : 'Show rendered Markdown (read-only)'}
+            >
+              Preview
             </button>
           )}
           <button
@@ -453,6 +543,24 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
         {current?.error ? (
           <p className="p-4 font-mono text-[12px] text-(--cm-stale)">{current.error}</p>
         ) : (
+          <>
+          {/* Rendered Markdown (read-only). The Monaco editor below stays
+              MOUNTED but display:none while previewing — unmounting would
+              dispose models/view state for every open file. */}
+          {showPreview && previewDoc && (
+            <div className="h-full overflow-y-auto">
+              <div className="mx-auto max-w-[94ch] px-8 py-8">
+                {previewDoc.frontmatter && (
+                  <div className="mb-6 rounded border border-(--cm-line) bg-(--cm-panel) px-3 py-2">
+                    <p className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.15em] text-(--cm-faint)">frontmatter</p>
+                    <pre className="overflow-x-auto font-mono text-[11px] leading-relaxed text-(--cm-muted)">{previewDoc.frontmatter}</pre>
+                  </div>
+                )}
+                <MarkdownContent>{previewDoc.body}</MarkdownContent>
+              </div>
+            </div>
+          )}
+          <div className={showPreview ? 'hidden' : 'h-full'}>
           <Editor
             path={`slycode://${projectId}/${activePath}`}
             language={current?.language ?? 'plaintext'}
@@ -461,6 +569,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
             beforeMount={defineThemes}
             onMount={(editor, monaco) => {
               editorRef.current = editor;
+              monacoRef.current = monaco;
               editor.onDidChangeCursorPosition(e => setCursorLine(e.position.lineNumber));
               editor.onDidChangeCursorSelection(e => setHasSelection(!e.selection.isEmpty()));
               editor.addAction({
@@ -500,6 +609,8 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
               multiCursorModifier: 'ctrlCmd',
             }}
           />
+          </div>
+          </>
         )}
       </div>
 

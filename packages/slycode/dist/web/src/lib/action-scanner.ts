@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { getSlycodeRoot } from './paths';
 import { getIgnoredUpdates, saveIgnoredUpdates } from './asset-scanner';
 import { validateAssetName } from './asset-path-guard';
+import { copyFileNoFollow } from './copy-guard';
 import type { SlyActionsConfig } from './sly-actions';
 import type { Placement } from './types';
 
@@ -691,7 +692,7 @@ export function acceptActionUpdate(actionName: string): string | null {
     const backupDir = path.join(root, 'store', '.backups', 'actions');
     fs.mkdirSync(backupDir, { recursive: true });
     backupPath = path.join(backupDir, `${actionName}.md`);
-    fs.copyFileSync(storePath, backupPath);
+    copyFileNoFollow(storePath, backupPath);
 
     // Read current for class merge
     const currentContent = fs.readFileSync(storePath, 'utf-8');

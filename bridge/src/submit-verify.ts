@@ -114,12 +114,23 @@ export function extractInputRegion(provider: SubmitProvider, snapshot: string): 
   }
 
   if (provider === 'codex') {
-    // Input = lines from the last `›`-prefixed line down to the next blank or
-    // footer line. A model/footer line somewhere after the `›` line is REQUIRED —
-    // the trust dialog also renders a `›` choice line but has no footer.
+    // Composer marker drift: Codex ≤0.137 rendered the editable composer AND
+    // submitted history rows with `›` (U+203A). Codex 0.147 renders the live
+    // composer with `»` (U+00BB) and keeps `›` for history rows (live capture
+    // 2026-08-22, card #0336). So: prefer the LAST `»` line; fall back to the
+    // LAST `›` line only when no `»` exists. Picking a `›` row while a `»`
+    // composer is on screen would read already-submitted text as queued.
+    // Input = lines from the composer line down to the next blank or footer
+    // line. A model/footer line somewhere after it is REQUIRED — the trust
+    // dialog also renders a `›` choice line but has no footer.
     let promptIdx = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trimStart().startsWith('›')) { promptIdx = i; break; }
+      if (lines[i].trimStart().startsWith('»')) { promptIdx = i; break; }
+    }
+    if (promptIdx === -1) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trimStart().startsWith('›')) { promptIdx = i; break; }
+      }
     }
     if (promptIdx === -1) return { found: false, text: '' };
     const hasFooter = lines.slice(promptIdx + 1).some(l => CODEX_FOOTER.test(l));
@@ -130,7 +141,7 @@ export function extractInputRegion(provider: SubmitProvider, snapshot: string): 
       if (i > promptIdx && (line.trim() === '' || CODEX_FOOTER.test(line))) break;
       region.push(line);
     }
-    const text = region.join('\n').replace(/›/g, '');
+    const text = region.join('\n').replace(/[›»]/g, '');
     return { found: true, text };
   }
 
@@ -171,6 +182,13 @@ export function parsePastePlaceholder(text: string): PastePlaceholder | null {
   return null;
 }
 
+/** Unicode code-point length (Codex's placeholder count unit; String.length is UTF-16). */
+export function codePointLength(text: string): number {
+  let n = 0;
+  for (const _ of text) n++;
+  return n;
+}
+
 /** How many normalized leading characters of the payload we try to find. */
 const PREFIX_LEN = 48;
 /** Minimum normalized region length for the viewport-window (region ⊂ payload) match — short generic text must not claim ownership. */
@@ -192,8 +210,11 @@ function payloadQueued(regionText: string, expected: string): boolean {
       return normExpected.length >= 40;
     }
     if (placeholder.kind === 'chars') {
-      // Codex: exact payload char count observed in spike; allow tiny tolerance.
-      return Math.abs(placeholder.count - expected.length) <= 2;
+      // Codex counts Unicode CODE POINTS (live capture 2026-08-22: a CRLF +
+      // emoji payload of 1093 UTF-16 units / 1077 code points / 1178 UTF-8
+      // bytes rendered "[Pasted Content 1077 chars]"). `String.length` is
+      // UTF-16 and over-counts astral characters (emoji) → use code points.
+      return Math.abs(placeholder.count - codePointLength(expected)) <= 2;
     }
     // Claude reports payloadLines-1 ("+21 lines" for 22), Gemini payloadLines.
     const payloadLines = expected.split('\n').length;
@@ -218,6 +239,34 @@ function payloadQueued(regionText: string, expected: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Count paste placeholders ANYWHERE in a snapshot whose count corroborates
+ * `expected` (same tolerance rules as payloadQueued). Layout-independent —
+ * used as a TEMPORAL signal only: the caller compares pre-paste vs post-paste
+ * counts and treats a newly introduced occurrence as "our paste landed", and
+ * its later disappearance as "it left the box". Absolute presence is never a
+ * verdict: transcript/tool output can legitimately contain placeholder text
+ * (a review on card #0336 quoted "[Pasted Content 3199 chars]" verbatim).
+ */
+export function countMatchingPlaceholders(snapshot: string, expected: string): number {
+  const n = normalizeForMatch(snapshot).toLowerCase();
+  const payloadLines = expected.split('\n').length;
+  let count = 0;
+  const expectedCodePoints = codePointLength(expected);
+  for (const m of n.matchAll(/\[pastedcontent(\d+)chars\]/g)) {
+    if (Math.abs(parseInt(m[1], 10) - expectedCodePoints) <= 2) count++;
+  }
+  for (const m of n.matchAll(/\[pastedtext#?\d*\+(\d+)lines?\]/g)) {
+    const c = parseInt(m[1], 10);
+    if (c >= payloadLines - 2 && c <= payloadLines + 1) count++;
+  }
+  for (const m of n.matchAll(/\[pastedtext:(\d+)lines?\]/g)) {
+    const c = parseInt(m[1], 10);
+    if (c >= payloadLines - 2 && c <= payloadLines + 1) count++;
+  }
+  return count;
 }
 
 /**
@@ -283,7 +332,14 @@ export function decideNextAction(input: VerifyDecisionInput): VerifyAction {
   if (polls.length === 0) return 'wait';
   const last = polls[polls.length - 1];
 
-  if (last === 'unrecognized') return 'ambiguous';
+  if (last === 'unrecognized') {
+    // No observation — NOT evidence the paste disappeared, and NOT evidence
+    // it is still queued. Keep looking while the ladder has polls left; an
+    // unreadable screen at ladder end is an honest 'ambiguous' (card #0336:
+    // a single unreadable 1s glance used to bail straight to ambiguous while
+    // the prompt had in fact landed). Never resends from here.
+    return polls.length < maxPolls ? 'wait' : 'ambiguous';
+  }
   if (last === 'no_input_region') {
     // Queued content gone, dialog now showing. The paste was confirmed queued
     // BEFORE Enter, so a post-Enter dialog means the submit was accepted and
@@ -293,9 +349,15 @@ export function decideNextAction(input: VerifyDecisionInput): VerifyAction {
   }
   if (last !== 'queued_ours') return 'delivered';
 
-  // Still queued.
+  // Still queued (positively observed).
   if (polls.length < maxPolls) return 'wait';
-  // Full ladder exhausted with the prompt still sitting in the input box.
+  // Full ladder exhausted. A resend is the one dangerous action (a second
+  // Enter into a box that DID submit is the historical double-fire), so it
+  // needs EVERY poll of the ladder to have positively shown our payload —
+  // a ladder like [unrecognized, unrecognized, queued_ours] is one late
+  // repaint, not proof, and must not resend.
+  const allQueued = polls.every(p => p === 'queued_ours');
+  if (!allQueued) return 'ambiguous';
   if (resends < maxResends) return 'resend_enter';
   return 'failed';
 }

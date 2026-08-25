@@ -435,6 +435,19 @@ function deployStoreAndSkills(dir: string): void {
   }
 }
 
+/**
+ * Symlink-refusing copy primitives (card #0326, security audit 2026-08-12).
+ * `fs.copyFileSync` dereferences symlinks — a symlink planted in a template
+ * tree would copy the TARGET's content into the scaffolded workspace. Skip
+ * symlinks entirely (defense-in-depth; no legitimate template contains any).
+ * Inline mirror of web/src/lib/copy-guard.ts (single-file CLI, no shared lib).
+ */
+function copyFileNoFollow(src: string, dest: string): boolean {
+  if (fs.lstatSync(src).isSymbolicLink()) return false;
+  fs.copyFileSync(src, dest);
+  return true;
+}
+
 function copyDirRecursive(src: string, dest: string): void {
   if (!fs.existsSync(dest)) {
     fs.mkdirSync(dest, { recursive: true });
@@ -442,9 +455,10 @@ function copyDirRecursive(src: string, dest: string): void {
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
       copyDirRecursive(srcPath, destPath);
-    } else {
+    } else if (entry.isFile()) {
       fs.copyFileSync(srcPath, destPath);
     }
   }
@@ -483,7 +497,7 @@ function seedTutorialWorkspaceContent(dir: string): void {
 
   const tutorialEvents = path.join(tutorialTemplate, 'documentation', 'events.json');
   if (fs.existsSync(tutorialEvents)) {
-    fs.copyFileSync(tutorialEvents, path.join(dir, 'documentation', 'events.json'));
+    copyFileNoFollow(tutorialEvents, path.join(dir, 'documentation', 'events.json'));
   }
 
   console.log('  \u2713 Tutorial content seeded into workspace root');
@@ -517,7 +531,7 @@ function deployStoreActions(dir: string): void {
     if (!entry.endsWith('.md')) continue;
     const dest = path.join(storeDir, entry);
     if (!fs.existsSync(dest)) {
-      fs.copyFileSync(path.join(srcDir, entry), dest);
+      copyFileNoFollow(path.join(srcDir, entry), dest);
     }
   }
 }
@@ -535,7 +549,7 @@ function copyCLAUDEmd(dir: string): void {
   const src = findTemplateFile(dir, 'CLAUDE.md');
   const dest = path.join(dir, 'CLAUDE.md');
   if (src && !fs.existsSync(dest)) {
-    fs.copyFileSync(src, dest);
+    copyFileNoFollow(src, dest);
   }
 }
 
@@ -695,7 +709,7 @@ export async function main(args: string[]): Promise<void> {
   if (providersTemplate) {
     const providersDest = path.join(resolvedDir, 'data', 'providers.json');
     if (!fs.existsSync(providersDest)) {
-      fs.copyFileSync(providersTemplate, providersDest);
+      copyFileNoFollow(providersTemplate, providersDest);
     }
   }
 
@@ -705,7 +719,7 @@ export async function main(args: string[]): Promise<void> {
     const tcDest = path.join(resolvedDir, 'documentation', 'terminal-classes.json');
     if (!fs.existsSync(tcDest)) {
       fs.mkdirSync(path.join(resolvedDir, 'documentation'), { recursive: true });
-      fs.copyFileSync(tcTemplate, tcDest);
+      copyFileNoFollow(tcTemplate, tcDest);
     }
   }
 

@@ -247,6 +247,12 @@ export async function ensureInstructionFile(providerId: string, cwd: string): Pr
 
     const src = path.join(cwd, check.copySource);
     const dest = path.join(cwd, check.targetFile);
+    // Refuse symlink sources — copyFile dereferences them, which would pull
+    // the link target's content into the workspace (card #0326).
+    if ((await fs.lstat(src)).isSymbolicLink()) {
+      console.warn(`[instruction-file] Skipping symlink source ${src}`);
+      return { created: false };
+    }
     await fs.copyFile(src, dest);
     console.log(`[instruction-file] Created ${check.targetFile} from ${check.copySource} in ${cwd}`);
     return { created: true, targetFile: check.targetFile, copiedFrom: check.copySource };

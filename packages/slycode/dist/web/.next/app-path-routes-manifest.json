@@ -28,6 +28,7 @@
   "/api/cli-assets/route": "/api/cli-assets",
   "/api/cli-assets/store/preview/route": "/api/cli-assets/store/preview",
   "/api/cli-assets/store/route": "/api/cli-assets/store",
+  "/api/cli-assets/sync/plan/route": "/api/cli-assets/sync/plan",
   "/api/cli-assets/sync/route": "/api/cli-assets/sync",
   "/api/cli-assets/updates/route": "/api/cli-assets/updates",
   "/api/dashboard/route": "/api/dashboard",

@@ -235,6 +235,15 @@ export declare class SessionManager {
     private static readonly VERIFY_POLL_DELAYS_MS;
     private static readonly VERIFY_MAX_RESENDS;
     /**
+     * Per-provider Enter-resend cap. Post-submit double-Enter was validated
+     * harmless only on Claude (spike 2026-06-06); Codex/Gemini get a single
+     * resend until validated there (card #0336 review decision).
+     */
+    private static readonly VERIFY_MAX_RESENDS_BY_PROVIDER;
+    /** Bounded diagnostic snippet: last N lines / max chars written to bridge.log (never returned to callers). */
+    private static readonly DIAG_SNIPPET_LINES;
+    private static readonly DIAG_SNIPPET_CHARS;
+    /**
      * Post-paste confirm settle-retry (extra re-check delays beyond the paste's
      * own settle). The paste render can lag, and a transient screen state (agent
      * output still repainting, a redraw) can momentarily read as queued_other/

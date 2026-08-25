@@ -254,6 +254,10 @@ export interface DeliveryResult {
   /** Post-Enter classifications observed, for diagnostics/logging. */
   polls?: string[];
   elapsedMs?: number;
+  /** Short id tagging the bridge-log diagnostic lines for a non-delivered / unreadable run (card #0336). */
+  correlationId?: string;
+  /** Telemetry only: PTY output was observed after the Enter write. Never a verdict input. */
+  outputSinceEnter?: boolean;
 }
 
 export interface VerifiedSubmitResult {
@@ -277,7 +281,8 @@ export interface ResponseEntry {
   targetSession: string;    // session name being prompted (for call locking)
   data?: string;            // response data (set by respond)
   status: 'pending' | 'received' | 'expired';
-  createdAt: number;        // Date.now() for TTL
+  createdAt: number;        // Date.now() for expiry windows
+  timeoutMs?: number;       // caller's --wait timeout; drives lock staleness + delivery expiry
   callerTimedOut?: boolean; // set when caller stops polling
 }
 
@@ -285,6 +290,7 @@ export interface RegisterResponseRequest {
   responseId: string;
   callingSession: string;
   targetSession: string;
+  timeoutSeconds?: number;  // caller's --wait timeout (absent for fire-and-forget / older CLIs)
 }
 
 export interface DeliverResponseRequest {

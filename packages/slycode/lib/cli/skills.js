@@ -38,6 +38,7 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const readline = __importStar(require("readline"));
 const workspace_1 = require("./workspace");
+const copy_guard_1 = require("./copy-guard");
 const USAGE = `
 Usage: slycode skills <action>
 
@@ -112,21 +113,6 @@ function getTemplateSkills(workspace) {
         }
     }
     return map;
-}
-function copyDirRecursive(src, dest) {
-    if (!fs.existsSync(dest)) {
-        fs.mkdirSync(dest, { recursive: true });
-    }
-    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        if (entry.isDirectory()) {
-            copyDirRecursive(srcPath, destPath);
-        }
-        else {
-            fs.copyFileSync(srcPath, destPath);
-        }
-    }
 }
 async function confirm(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -223,7 +209,7 @@ async function addSkill(workspace, name, all) {
             if (!installed.has(skillName)) {
                 const src = path.join(templatesDir, skillName);
                 const dest = path.join(skillsDir, skillName);
-                copyDirRecursive(src, dest);
+                (0, copy_guard_1.copyDirNoFollow)(src, dest);
                 console.log(`  \u2713 Added ${skillName}`);
                 added++;
             }
@@ -248,7 +234,7 @@ async function addSkill(workspace, name, all) {
         console.error('Use "slycode skills reset" to overwrite with the upstream version.');
         process.exit(1);
     }
-    copyDirRecursive(src, dest);
+    (0, copy_guard_1.copyDirNoFollow)(src, dest);
     console.log(`\u2713 Added skill: ${name}`);
 }
 async function resetSkill(workspace, name) {
@@ -274,7 +260,7 @@ async function resetSkill(workspace, name) {
         // Remove existing
         fs.rmSync(dest, { recursive: true, force: true });
     }
-    copyDirRecursive(src, dest);
+    (0, copy_guard_1.copyDirNoFollow)(src, dest);
     console.log(`\u2713 Reset skill: ${name}`);
 }
 async function skills(args) {

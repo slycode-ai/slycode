@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-08-25
+
+### Added
+- Deploy review modal — every store→project skill deploy now shows exactly what will happen before anything is written. Clicking **Apply Changes** on the CLI Assets screen (or **Review push…** after accepting a store update) opens a per-file preview for each target project — files marked *overwrite* (store-owned), *new* (missing, will be created), *unchanged*, or *kept* (project-owned, never touched). The global "Copy entire skill folder" checkbox and SKILL.md-only deploys are gone: deploys always follow the skill's own `updatable:` contract, and multi-file skills arrive complete on first install. Projects whose copy is newer than the store's are excluded by default with an explicit include toggle.
+- Markdown preview in Code Mode — `.md` and `.markdown` files now get a **Preview** toggle in the editor. The preview renders GitHub-flavoured Markdown (tables, task lists, strikethroughs) and shows the frontmatter as a dim metadata block instead of mangling it. Your Preview/Raw choice sticks per-user across files.
+
+### Fixed
+- Cross-card prompts to Codex 0.147 sessions work again. Codex 0.147 changed its composer marker (from `›` to `»`) and started counting characters differently, which was breaking submit verification with an `input_region_unrecognized` error and mis-verifying pastes containing CRLF or emoji.
+- Cross-card `respond --wait` no longer expires mid-wait on long-running callbacks. Response IDs stay valid for the caller's chosen timeout plus a 24-hour late-delivery window, and any late responses still inject into the waiting session. Callers now abort promptly if the bridge restarts, instead of zombie-polling forever.
+- `sly-atlas` from an installed workspace works again. The packaged bin wrapper was silently exiting without running anything.
+- Security hardening: skill and asset copies now refuse to follow symlinks out of their intended tree; config writes are atomic (tmp+rename) so a crash mid-write can't leave a torn file; CLI-assets update and assistant routes validate asset names to prevent path traversal; dependency-tree vulnerabilities patched with fresh pins.
+
+### Changed
+- Kanban skill v1.16.0 — documents the extended respond-id lifetime and abort behaviour for cross-card callbacks.
+- `sly-dev.sh` cold-start fix — creates its tmux session before configuring hooks, and warns clearly if you attach to a foreign session by mistake.
+
 ## [0.4.4] - 2026-08-04
 
 ### Fixed

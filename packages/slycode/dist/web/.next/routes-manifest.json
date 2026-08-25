@@ -289,6 +289,12 @@
       "namedRegex": "^/api/cli\\-assets/sync(?:/)?$"
     },
     {
+      "page": "/api/cli-assets/sync/plan",
+      "regex": "^/api/cli\\-assets/sync/plan(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/cli\\-assets/sync/plan(?:/)?$"
+    },
+    {
       "page": "/api/cli-assets/updates",
       "regex": "^/api/cli\\-assets/updates(?:/)?$",
       "routeKeys": {},

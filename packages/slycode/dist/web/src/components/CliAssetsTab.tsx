@@ -9,8 +9,7 @@ import { StoreView } from './StoreView';
 import { UpdatesView } from './UpdatesView';
 import { AssetAssistant } from './AssetAssistant';
 import { StoreImportDiffViewer } from './StoreImportDiffViewer';
-import { PushOverwriteWarning, conflictKey, type OverwriteConflict } from './PushOverwriteWarning';
-import { compareVersions } from '@/lib/version-compare';
+import { DeployReviewModal } from './DeployReviewModal';
 
 interface ProjectInfo {
   id: string;
@@ -57,7 +56,6 @@ const providerTabs: { id: ProviderId; label: string }[] = [
 export function CliAssetsTab() {
   const [data, setData] = useState<CliAssetsResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [fullSkillFolder, setFullSkillFolder] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
   // Initial view honours ?focus=<skill> (updates) and ?skill=<name> (projects)
@@ -78,12 +76,12 @@ export function CliAssetsTab() {
   const [assistantTarget, setAssistantTarget] = useState<AssistantTarget | null>(null);
   const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
   const [updatesData, setUpdatesData] = useState<UpdatesData | null>(null);
-  // Push-to-all overwrite warning: set when some targets hold a newer copy
-  const [pushWarning, setPushWarning] = useState<{
-    skillName: string;
-    fullSkillFolder: boolean;
-    safeChanges: PendingChange[];
-    conflicts: (OverwriteConflict & { change: PendingChange })[];
+  // Deploy review modal (feature 084): every deploy batch is previewed here
+  // before anything is written — matrix Apply Changes and Updates push alike.
+  const [review, setReview] = useState<{
+    title: string;
+    subtitle?: string;
+    changes: PendingChange[];
   } | null>(null);
   const [expandedSections, setExpandedSections] = useState({
     skills: true,
@@ -205,14 +203,20 @@ export function CliAssetsTab() {
     });
   }
 
-  async function handleSync() {
+  // Apply Changes opens the review modal; the actual write happens in
+  // applyChanges once the user confirms the reviewed batch.
+  function handleSync() {
     if (pendingChanges.length === 0) return;
+    setReview({ title: 'Review changes', changes: pendingChanges });
+  }
+
+  async function applyChanges(changes: PendingChange[]) {
     setSyncing(true);
     try {
       const res = await fetch('/api/cli-assets/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ changes: pendingChanges, fullSkillFolder }),
+        body: JSON.stringify({ changes }),
       });
       if (res.ok) {
         setPendingChanges([]);
@@ -471,9 +475,11 @@ export function CliAssetsTab() {
               });
             });
           }}
-          onPushToProjects={async (entry: UpdateEntry, fullSkillFolder: boolean) => {
-            // Push the accepted asset from store → all projects that already have it
-            // Fetch each provider's matrix to find every project+provider where it's installed
+          onPushToProjects={async (entry: UpdateEntry) => {
+            // Push the accepted asset from store → all projects that already have it.
+            // Fetch each provider's matrix to find every project+provider where it's
+            // installed, then review the batch — the plan route classifies per-file
+            // fates and newer-copy conflicts (feature 084).
             const providers: ProviderId[] = ['claude', 'agents', 'codex', 'gemini'];
             const changes: PendingChange[] = [];
 
@@ -488,57 +494,35 @@ export function CliAssetsTab() {
               })
             );
 
-            const projectNames = new Map((data?.projects ?? []).map(p => [p.id, p.name]));
-            const conflicts: (OverwriteConflict & { change: PendingChange })[] = [];
-
             for (const { provider, rows } of matrices) {
               const matchingRow = rows.find(r => r.name === entry.name && r.type === entry.assetType);
               if (!matchingRow) continue;
               for (const cell of matchingRow.cells) {
                 if (cell.status === 'missing') continue;
-                const change: PendingChange = {
+                changes.push({
                   assetName: entry.name,
                   assetType: entry.assetType,
                   projectId: cell.projectId,
                   action: 'deploy' as const,
                   provider,
                   source: 'store' as const,
-                };
-                // Project copy newer than store — needs explicit opt-in to overwrite
-                if (compareVersions(cell.projectVersion, cell.masterVersion) > 0) {
-                  conflicts.push({
-                    change,
-                    projectId: cell.projectId,
-                    projectName: projectNames.get(cell.projectId) ?? cell.projectId,
-                    provider,
-                    projectVersion: cell.projectVersion,
-                    storeVersion: cell.masterVersion,
-                  });
-                } else {
-                  changes.push(change);
-                }
+                });
               }
             }
 
-            if (conflicts.length > 0) {
-              // Pause the push — the user decides per project in the warning dialog
-              setPushWarning({
-                skillName: entry.name,
-                fullSkillFolder,
-                safeChanges: changes,
-                conflicts,
-              });
+            if (changes.length === 0) {
+              // Installed nowhere — nothing to push
+              refreshCliAssets();
               return;
             }
 
-            if (changes.length > 0) {
-              await fetch('/api/cli-assets/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ changes, fullSkillFolder }),
-              });
-            }
-            refreshCliAssets();
+            setReview({
+              title: `Push ${entry.name} to projects`,
+              subtitle: entry.currentVersion
+                ? `v${entry.currentVersion} → v${entry.availableVersion}`
+                : `v${entry.availableVersion}`,
+              changes,
+            });
           }}
           onPushDeclined={() => refreshCliAssets()}
         />
@@ -655,24 +639,15 @@ export function CliAssetsTab() {
 
       </div>{/* end min-height wrapper */}
 
-      {/* Pending changes bar */}
+      {/* Pending changes bar — right-[480px] keeps its buttons clear of the
+          BranchTab git tag, which is fixed at right-[280px] and grows leftward
+          with the branch name (both are bottom-0 z-40; the tag renders on top) */}
       {pendingChanges.length > 0 && (
-        <div className="fixed bottom-0 left-4 right-72 z-40 flex h-12 items-center justify-between rounded-t-lg border border-neon-blue-400/30 bg-neon-blue-50 px-4 shadow-(--shadow-card) dark:border-neon-blue-400/30 dark:bg-void-850">
+        <div className="fixed bottom-0 left-4 right-[480px] z-40 flex h-12 items-center justify-between rounded-t-lg border border-neon-blue-400/30 bg-neon-blue-50 px-4 shadow-(--shadow-card) dark:border-neon-blue-400/30 dark:bg-void-850">
           <span className="text-sm font-medium text-neon-blue-700 dark:text-neon-blue-300">
             {pendingChanges.length} pending change{pendingChanges.length !== 1 ? 's' : ''}
           </span>
           <div className="flex items-center gap-3">
-            {pendingChanges.some(c => c.assetType === 'skill' && c.action === 'deploy') && (
-              <label className="flex items-center gap-1.5 text-xs text-void-600 dark:text-void-400">
-                <input
-                  type="checkbox"
-                  checked={fullSkillFolder}
-                  onChange={e => setFullSkillFolder(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-void-300 dark:border-void-600"
-                />
-                Copy entire skill folder
-              </label>
-            )}
             <button
               onClick={() => setPendingChanges([])}
               className="rounded px-4 py-1.5 text-sm text-void-600 hover:text-void-900 dark:text-void-400 dark:hover:text-void-200"
@@ -684,7 +659,7 @@ export function CliAssetsTab() {
               disabled={syncing}
               className="rounded bg-neon-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500 disabled:opacity-50"
             >
-              {syncing ? 'Syncing...' : 'Apply Changes'}
+              {syncing ? 'Applying...' : 'Review & apply'}
             </button>
           </div>
         </div>
@@ -725,32 +700,19 @@ export function CliAssetsTab() {
         />
       )}
 
-      {/* Push-to-all overwrite warning — some projects hold newer copies */}
-      {pushWarning && (
-        <PushOverwriteWarning
-          skillName={pushWarning.skillName}
-          conflicts={pushWarning.conflicts}
-          safeCount={pushWarning.safeChanges.length}
-          onConfirm={async (includedKeys) => {
-            const { safeChanges, conflicts, fullSkillFolder: pushFullFolder } = pushWarning;
-            setPushWarning(null);
-            const overwrites = conflicts
-              .filter(c => includedKeys.has(conflictKey(c)))
-              .map(c => ({ ...c.change, overwriteNewer: true }));
-            const allChanges = [...safeChanges, ...overwrites];
-            if (allChanges.length > 0) {
-              await fetch('/api/cli-assets/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ changes: allChanges, fullSkillFolder: pushFullFolder }),
-              });
-            }
-            refreshCliAssets();
+      {/* Deploy review modal (feature 084): per-file fates before any write.
+          Cancel leaves the pending queue intact so the user can adjust the
+          matrix and review again. */}
+      {review && (
+        <DeployReviewModal
+          title={review.title}
+          subtitle={review.subtitle}
+          changes={review.changes}
+          onConfirm={async (changes) => {
+            setReview(null);
+            await applyChanges(changes);
           }}
-          onCancel={() => {
-            setPushWarning(null);
-            refreshCliAssets();
-          }}
+          onClose={() => setReview(null)}
         />
       )}
     </div>

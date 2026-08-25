@@ -481,13 +481,19 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
 
   // Register a pending response
   router.post('/responses', (req, res) => {
-    const { responseId, callingSession, targetSession } = req.body as RegisterResponseRequest;
+    const { responseId, callingSession, targetSession, timeoutSeconds } = req.body as RegisterResponseRequest;
 
     if (!responseId || !callingSession || !targetSession) {
       return res.status(400).json({ error: 'responseId, callingSession, and targetSession are required' });
     }
 
-    responseStore.register(responseId, callingSession, targetSession);
+    // Caller's --wait timeout drives the entry's lock/delivery windows.
+    // Ignore anything that isn't a sane positive number (older CLIs omit it).
+    const timeoutMs = (typeof timeoutSeconds === 'number' && Number.isFinite(timeoutSeconds) && timeoutSeconds > 0)
+      ? timeoutSeconds * 1000
+      : undefined;
+
+    responseStore.register(responseId, callingSession, targetSession, timeoutMs);
     res.json({ success: true, responseId });
   });
 
@@ -512,9 +518,34 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
       return res.status(400).json({ error: 'data is required and must be a string' });
     }
 
+    // Late response injection: inject into the calling session's PTY.
+    // Uses submitPrompt for reliable delivery (bracketed paste + delay + Enter + double-submit)
+    const injectLate = (callingSession: string, expired: boolean) => {
+      const safeData = sanitiseInjectedPayload(data);
+      const context = expired
+        ? 'A cross-card prompt whose respond-id had expired has received a response:'
+        : 'A previously timed-out cross-card prompt has received a response:';
+      const lateMessage = `[LATE RESPONSE received]\n${context}\n---\n${safeData}\n---`;
+      sessionManager.submitPrompt(callingSession, { prompt: lateMessage, force: true }).then(result => {
+        if (result.success) {
+          console.log(`[responses] Late response injected into ${callingSession} for response ${id}`);
+        } else {
+          console.warn(`[responses] Late response injection failed for ${callingSession}: ${result.error}`);
+        }
+      }).catch(err => {
+        console.warn(`[responses] Late response injection error:`, err);
+      });
+    };
+
     const entry = responseStore.deliver(id, data);
     if (!entry) {
       const hint = responseStore.getExpiryHint(id);
+      // Known-expired id: the live entry is gone but we still know who was
+      // waiting — degrade to late injection instead of losing the payload.
+      if ((hint.reason === 'expired' || hint.reason === 'consumed') && hint.callingSession) {
+        injectLate(hint.callingSession, true);
+        return res.json({ success: true, lateInjection: true, expired: true });
+      }
       return res.status(404).json({
         error: 'Response not found or expired',
         reason: hint.reason,
@@ -523,20 +554,8 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
       });
     }
 
-    // Late response injection: if caller has timed out, inject into calling session's PTY
-    // Uses submitPrompt for reliable delivery (bracketed paste + delay + Enter + double-submit)
     if (entry.callerTimedOut && entry.callingSession) {
-      const safeData = sanitiseInjectedPayload(data);
-      const lateMessage = `[LATE RESPONSE received]\nA previously timed-out cross-card prompt has received a response:\n---\n${safeData}\n---`;
-      sessionManager.submitPrompt(entry.callingSession, { prompt: lateMessage, force: true }).then(result => {
-        if (result.success) {
-          console.log(`[responses] Late response injected into ${entry.callingSession} for response ${id}`);
-        } else {
-          console.warn(`[responses] Late response injection failed for ${entry.callingSession}: ${result.error}`);
-        }
-      }).catch(err => {
-        console.warn(`[responses] Late response injection error:`, err);
-      });
+      injectLate(entry.callingSession, false);
     }
 
     res.json({ success: true, lateInjection: entry.callerTimedOut || false });

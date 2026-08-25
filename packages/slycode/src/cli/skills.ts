@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as readline from 'readline';
 import { resolveWorkspaceOrExit, resolvePackageDir } from './workspace';
+import { copyDirNoFollow } from './copy-guard';
 
 const USAGE = `
 Usage: slycode skills <action>
@@ -86,23 +87,6 @@ function getTemplateSkills(workspace: string): Map<string, SkillMeta> {
   }
 
   return map;
-}
-
-function copyDirRecursive(src: string, dest: string): void {
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
-
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
 }
 
 async function confirm(question: string): Promise<boolean> {
@@ -215,7 +199,7 @@ async function addSkill(workspace: string, name: string, all: boolean): Promise<
       if (!installed.has(skillName)) {
         const src = path.join(templatesDir, skillName);
         const dest = path.join(skillsDir, skillName);
-        copyDirRecursive(src, dest);
+        copyDirNoFollow(src, dest);
         console.log(`  \u2713 Added ${skillName}`);
         added++;
       }
@@ -243,7 +227,7 @@ async function addSkill(workspace: string, name: string, all: boolean): Promise<
     process.exit(1);
   }
 
-  copyDirRecursive(src, dest);
+  copyDirNoFollow(src, dest);
   console.log(`\u2713 Added skill: ${name}`);
 }
 
@@ -276,7 +260,7 @@ async function resetSkill(workspace: string, name: string): Promise<void> {
     fs.rmSync(dest, { recursive: true, force: true });
   }
 
-  copyDirRecursive(src, dest);
+  copyDirNoFollow(src, dest);
   console.log(`\u2713 Reset skill: ${name}`);
 }
 

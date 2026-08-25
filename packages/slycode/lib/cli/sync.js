@@ -43,6 +43,7 @@ const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const crypto = __importStar(require("crypto"));
 const workspace_1 = require("./workspace");
+const copy_guard_1 = require("./copy-guard");
 function parseVersion(skillMdPath) {
     if (!fs.existsSync(skillMdPath))
         return '0.0.0';
@@ -92,21 +93,6 @@ function hashSkillDirDigest(dir) {
     }
     return roll.digest('hex').slice(0, 12);
 }
-function copyDirRecursive(src, dest) {
-    if (!fs.existsSync(dest)) {
-        fs.mkdirSync(dest, { recursive: true });
-    }
-    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        if (entry.isDirectory()) {
-            copyDirRecursive(srcPath, destPath);
-        }
-        else {
-            fs.copyFileSync(srcPath, destPath);
-        }
-    }
-}
 /**
  * Compare package templates/updates/skills/ vs workspace updates/skills/ by
  * whole-directory content digest. Copy when ANY file differs or skill is
@@ -151,7 +137,7 @@ function refreshUpdates(workspace) {
             if (fs.existsSync(workspaceSkillDir)) {
                 fs.rmSync(workspaceSkillDir, { recursive: true, force: true });
             }
-            copyDirRecursive(templateSkillDir, workspaceSkillDir);
+            (0, copy_guard_1.copyDirNoFollow)(templateSkillDir, workspaceSkillDir);
             result.refreshed++;
             result.details.push({ name: entry.name, from: workspaceVersion, to: templateVersion });
         }
@@ -197,7 +183,7 @@ function refreshActionUpdates(workspace) {
             ? fs.readFileSync(workspacePath, 'utf-8')
             : '';
         if (templateContent !== workspaceContent) {
-            fs.copyFileSync(templatePath, workspacePath);
+            (0, copy_guard_1.copyFileNoFollow)(templatePath, workspacePath);
             const templateVersion = parseVersion(templatePath);
             const workspaceVersion = workspaceContent ? parseVersion(workspacePath) : '0.0.0';
             result.refreshed++;
@@ -261,7 +247,7 @@ function refreshTerminalClasses(workspace) {
     if (!fs.existsSync(templateFile))
         return { seeded: false };
     fs.mkdirSync(path.join(workspace, 'documentation'), { recursive: true });
-    fs.copyFileSync(templateFile, workspaceFile);
+    (0, copy_guard_1.copyFileNoFollow)(templateFile, workspaceFile);
     return { seeded: true };
 }
 async function sync(_args) {

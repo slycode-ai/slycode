@@ -19,6 +19,7 @@ import {
   scanActionUpdates,
   acceptActionUpdate,
 } from '@/lib/action-scanner';
+import { validateAssetName } from '@/lib/asset-path-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
+    }
+
     if (assetType === 'action') {
       const backupPath = acceptActionUpdate(assetName);
       return NextResponse.json({ success: true, backedUp: backupPath });
@@ -88,6 +93,10 @@ export async function DELETE(request: NextRequest) {
         { error: 'assetType, assetName, and contentHash are required' },
         { status: 400 },
       );
+    }
+
+    if (!validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
     }
 
     const dismissValue = contentHash;

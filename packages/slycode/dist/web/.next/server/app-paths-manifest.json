@@ -28,6 +28,7 @@
   "/api/cli-assets/route": "app/api/cli-assets/route.js",
   "/api/cli-assets/store/preview/route": "app/api/cli-assets/store/preview/route.js",
   "/api/cli-assets/store/route": "app/api/cli-assets/store/route.js",
+  "/api/cli-assets/sync/plan/route": "app/api/cli-assets/sync/plan/route.js",
   "/api/cli-assets/sync/route": "app/api/cli-assets/sync/route.js",
   "/api/cli-assets/updates/route": "app/api/cli-assets/updates/route.js",
   "/api/dashboard/route": "app/api/dashboard/route.js",

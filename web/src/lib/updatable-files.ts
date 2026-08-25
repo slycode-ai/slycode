@@ -20,6 +20,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import { copyFileNoFollow } from './copy-guard';
+import type { DeployFileFate } from './types';
 
 /**
  * Parse the `updatable:` list from SKILL.md content. Returns [] when absent.
@@ -95,14 +98,45 @@ export interface GatedCopyResult {
   kept: string[];
 }
 
+/** One file in a gated-deploy plan. Mirrors DeployPlanFile (types.ts). */
+export interface GatedPlanEntry {
+  path: string;          // '/'-separated, relative to the skill root
+  fate: DeployFileFate;
+  updatable: boolean;
+}
+
+function sha256File(abs: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
+}
+
+/** Byte-identity check; any read/stat failure counts as "different". */
+export function filesIdentical(a: string, b: string): boolean {
+  try {
+    if (fs.statSync(a).size !== fs.statSync(b).size) return false;
+    return sha256File(a) === sha256File(b);
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Copy a skill directory respecting the source's `updatable:` declaration:
- * SKILL.md + declared files always copy; everything else copies only when
- * missing at the destination. Never deletes destination files.
+ * Read-only plan of what copySkillDirGated would do: walk the SOURCE tree and
+ * classify each file against the destination's actual on-disk state. Never
+ * writes. Fates:
+ * - updatable + dst missing            → 'seed'   (new file)
+ * - updatable + dst identical          → 'unchanged'
+ * - updatable + dst differs            → 'overwrite'
+ * - not updatable + dst missing        → 'seed'
+ * - not updatable + dst exists         → 'keep'   (never touched)
+ * - symlinked source entry             → 'skipped' (copy-guard refuses it)
+ *
+ * Output is sorted SKILL.md-first, then by path (matches the changedFiles
+ * convention). copySkillDirGated executes exactly this plan, so a preview
+ * rendered from it cannot drift from what the copy does.
  */
-export function copySkillDirGated(srcDir: string, dstDir: string): GatedCopyResult {
+export function planSkillDirGated(srcDir: string, dstDir: string): GatedPlanEntry[] {
   const updatable = readUpdatableList(srcDir);
-  const result: GatedCopyResult = { updated: [], seeded: [], kept: [] };
+  const entries: GatedPlanEntry[] = [];
 
   const walk = (rel: string): void => {
     const srcAbs = rel ? path.join(srcDir, ...rel.split('/')) : srcDir;
@@ -114,21 +148,58 @@ export function copySkillDirGated(srcDir: string, dstDir: string): GatedCopyResu
       }
       const srcFile = path.join(srcAbs, entry.name);
       const dstFile = path.join(dstDir, ...entryRel.split('/'));
-      if (isUpdatable(entryRel, updatable)) {
-        fs.mkdirSync(path.dirname(dstFile), { recursive: true });
-        fs.copyFileSync(srcFile, dstFile);
-        result.updated.push(entryRel);
-      } else if (!fs.existsSync(dstFile)) {
-        fs.mkdirSync(path.dirname(dstFile), { recursive: true });
-        fs.copyFileSync(srcFile, dstFile);
-        result.seeded.push(entryRel);
-      } else {
-        result.kept.push(entryRel);
+      const isUp = isUpdatable(entryRel, updatable);
+      if (entry.isSymbolicLink()) {
+        entries.push({ path: entryRel, fate: 'skipped', updatable: isUp });
+        continue;
       }
+      const dstExists = fs.existsSync(dstFile);
+      let fate: DeployFileFate;
+      if (!dstExists) {
+        fate = 'seed';
+      } else if (isUp) {
+        fate = filesIdentical(srcFile, dstFile) ? 'unchanged' : 'overwrite';
+      } else {
+        fate = 'keep';
+      }
+      entries.push({ path: entryRel, fate, updatable: isUp });
     }
   };
 
-  fs.mkdirSync(dstDir, { recursive: true });
   walk('');
+  entries.sort((a, b) =>
+    a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path));
+  return entries;
+}
+
+/**
+ * Copy a skill directory respecting the source's `updatable:` declaration:
+ * SKILL.md + declared files always copy; everything else copies only when
+ * missing at the destination. Never deletes destination files.
+ *
+ * Implemented as plan-then-execute over planSkillDirGated so preview and
+ * apply agree by construction. Result buckets keep their historical
+ * semantics: `updated` = files the copy owns (updatable — overwritten,
+ * rewritten-identical, or freshly written), `seeded` = undeclared files
+ * created because they were missing, `kept` = undeclared files left alone.
+ */
+export function copySkillDirGated(srcDir: string, dstDir: string): GatedCopyResult {
+  const plan = planSkillDirGated(srcDir, dstDir);
+  const result: GatedCopyResult = { updated: [], seeded: [], kept: [] };
+
+  fs.mkdirSync(dstDir, { recursive: true });
+  for (const entry of plan) {
+    if (entry.fate === 'skipped') continue;
+    if (entry.fate === 'keep') {
+      result.kept.push(entry.path);
+      continue;
+    }
+    // overwrite | unchanged | seed → copy
+    const srcFile = path.join(srcDir, ...entry.path.split('/'));
+    const dstFile = path.join(dstDir, ...entry.path.split('/'));
+    fs.mkdirSync(path.dirname(dstFile), { recursive: true });
+    if (!copyFileNoFollow(srcFile, dstFile)) continue;
+    (entry.updatable ? result.updated : result.seeded).push(entry.path);
+  }
   return result;
 }

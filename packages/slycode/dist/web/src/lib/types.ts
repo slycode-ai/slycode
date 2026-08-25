@@ -435,6 +435,46 @@ export interface PendingChange {
 }
 
 // ============================================================================
+// Deploy Plan Types (feature 084 — deploy review modal)
+// ============================================================================
+
+/**
+ * Per-file outcome of a gated store→project deploy, computed read-only
+ * against the target's actual on-disk state:
+ * - overwrite: updatable file (SKILL.md or `updatable:`-declared) exists at
+ *   the target and differs — will be replaced
+ * - unchanged: updatable file exists and is byte-identical — copy is a no-op
+ * - seed: file missing at the target — will be created
+ * - keep: undeclared file already exists at the target — left untouched
+ * - skipped: symlinked source entry — the copy refuses it (copy-guard)
+ */
+export type DeployFileFate = 'overwrite' | 'unchanged' | 'seed' | 'keep' | 'skipped';
+
+export interface DeployPlanFile {
+  path: string;          // '/'-separated, relative to the skill root
+  fate: DeployFileFate;
+  updatable: boolean;    // SKILL.md or matched by the `updatable:` allowlist
+}
+
+/** One queued change resolved against a concrete project/provider target. */
+export interface DeployTargetPlan {
+  change: PendingChange;
+  projectName: string;
+  targetDir: string;     // project-relative destination, '/'-separated
+  exists: boolean;       // destination (dir for skills, file for agents) present
+  files: DeployPlanFile[];  // empty for removes / mcp / errored targets
+  upToDate: boolean;     // deploy would change nothing on disk
+  /** Set when the project copy is NEWER than the source — sync rejects the
+   *  deploy unless the change carries overwriteNewer: true. */
+  conflict?: { projectVersion?: string; storeVersion?: string };
+  error?: string;        // resolution failed (unknown project/asset, …)
+}
+
+export interface DeployPlanResponse {
+  targets: DeployTargetPlan[];
+}
+
+// ============================================================================
 // Update Delivery Types
 // ============================================================================
 

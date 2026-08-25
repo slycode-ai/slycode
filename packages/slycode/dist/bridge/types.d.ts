@@ -208,6 +208,10 @@ export interface DeliveryResult {
     /** Post-Enter classifications observed, for diagnostics/logging. */
     polls?: string[];
     elapsedMs?: number;
+    /** Short id tagging the bridge-log diagnostic lines for a non-delivered / unreadable run (card #0336). */
+    correlationId?: string;
+    /** Telemetry only: PTY output was observed after the Enter write. Never a verdict input. */
+    outputSinceEnter?: boolean;
 }
 export interface VerifiedSubmitResult {
     success: boolean;
@@ -229,12 +233,14 @@ export interface ResponseEntry {
     data?: string;
     status: 'pending' | 'received' | 'expired';
     createdAt: number;
+    timeoutMs?: number;
     callerTimedOut?: boolean;
 }
 export interface RegisterResponseRequest {
     responseId: string;
     callingSession: string;
     targetSession: string;
+    timeoutSeconds?: number;
 }
 export interface DeliverResponseRequest {
     data: string;

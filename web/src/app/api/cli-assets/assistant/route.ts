@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getSlycodeRoot } from '@/lib/paths';
+import { validateAssetName } from '@/lib/asset-path-guard';
 import type { ProviderId, AssetType } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
@@ -42,6 +43,12 @@ export async function POST(request: NextRequest) {
         { error: 'assetName is required for modify mode' },
         { status: 400 },
       );
+    }
+
+    // assetName is path-joined into store/ below (including the mcp branch) —
+    // reject traversal names before building any path.
+    if (assetName !== undefined && !validateAssetName(assetName)) {
+      return NextResponse.json({ error: 'Invalid asset name' }, { status: 400 });
     }
 
     const root = getSlycodeRoot();

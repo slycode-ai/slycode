@@ -19,13 +19,15 @@ import type {
   ProviderId,
   UpdateEntry,
   IgnoredUpdates,
+  DeployPlanFile,
 } from './types';
 
 import { getSlycodeRoot } from './paths';
 import { getProviderAssetDir, getProviderAssetFilePath } from './provider-paths';
 import { validateAssetName, assertInside } from './asset-path-guard';
 import { hashSkillDir, diffSkillDirs } from './skill-dir-digest';
-import { copySkillDirGated, readUpdatableList, isUpdatable } from './updatable-files';
+import { copySkillDirGated, planSkillDirGated, filesIdentical, readUpdatableList, isUpdatable } from './updatable-files';
+import { copyFileNoFollow, copyDirNoFollow } from './copy-guard';
 
 // SlyCode root path — derived, not hardcoded
 const MASTER_PATH = getSlycodeRoot();
@@ -368,8 +370,10 @@ export function getAssetPath(projectPath: string, assetType: AssetType, assetNam
 
 /**
  * Copy an asset from source to destination project.
- * For skills (directories), copies the entire directory unless skillMainOnly is true,
- * in which case only the main SKILL.md file is copied (preserving project-specific references/).
+ * For skills (directories), the copy honours the skill's `updatable:`
+ * allowlist (SKILL.md + declared files overwrite; undeclared files seed when
+ * missing but never overwrite project copies) — feature 084 removed the
+ * SKILL.md-only deploy mode.
  * For commands/agents (files), copies the single file.
  */
 export function copyAsset(
@@ -377,7 +381,6 @@ export function copyAsset(
   dstProjectPath: string,
   assetType: AssetType,
   assetName: string,
-  options?: { skillMainOnly?: boolean },
 ): void {
   const srcPath = getAssetPath(srcProjectPath, assetType, assetName);
   const dstPath = getAssetPath(dstProjectPath, assetType, assetName);
@@ -387,21 +390,10 @@ export function copyAsset(
   fs.mkdirSync(dstDir, { recursive: true });
 
   if (assetType === 'skill') {
-    if (options?.skillMainOnly) {
-      // Only copy the main SKILL.md file, preserving project-specific content
-      const srcSkillMd = path.join(srcPath, 'SKILL.md');
-      const dstSkillMd = path.join(dstPath, 'SKILL.md');
-      if (fs.existsSync(srcSkillMd)) {
-        fs.copyFileSync(srcSkillMd, dstSkillMd);
-      }
-    } else {
-      // Full-folder deploy honours the skill's `updatable:` allowlist:
-      // undeclared files seed when missing but never overwrite project copies
-      copySkillDirGated(srcPath, dstPath);
-    }
+    copySkillDirGated(srcPath, dstPath);
   } else {
     // Copy single file
-    fs.copyFileSync(srcPath, dstPath);
+    copyFileNoFollow(srcPath, dstPath);
   }
 }
 
@@ -420,22 +412,6 @@ export function removeAsset(
   } else {
     if (fs.existsSync(assetPath)) {
       fs.unlinkSync(assetPath);
-    }
-  }
-}
-
-function copyDirRecursive(src: string, dst: string): void {
-  fs.mkdirSync(dst, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const srcEntry = path.join(src, entry.name);
-    const dstEntry = path.join(dst, entry.name);
-
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcEntry, dstEntry);
-    } else {
-      fs.copyFileSync(srcEntry, dstEntry);
     }
   }
 }
@@ -629,7 +605,6 @@ export function copyStoreAssetToProject(
   provider: ProviderId,
   assetType: AssetType,
   assetName: string,
-  options?: { skillMainOnly?: boolean },
 ): void {
   const dstPath = getProviderAssetFilePath(projectPath, provider, assetType, assetName);
   if (!dstPath) {
@@ -641,23 +616,102 @@ export function copyStoreAssetToProject(
 
   if (assetType === 'skill') {
     const storeSkillDir = path.join(root, 'store', 'skills', assetName);
-    if (options?.skillMainOnly) {
-      fs.mkdirSync(dstPath, { recursive: true });
-      const srcSkillMd = path.join(storeSkillDir, 'SKILL.md');
-      const dstSkillMd = path.join(dstPath, 'SKILL.md');
-      if (fs.existsSync(srcSkillMd)) {
-        fs.copyFileSync(srcSkillMd, dstSkillMd);
-      }
-    } else {
-      // Full-folder deploy honours the skill's `updatable:` allowlist:
-      // undeclared files seed when missing but never overwrite project copies
-      copySkillDirGated(storeSkillDir, dstPath);
-    }
+    // Deploy honours the skill's `updatable:` allowlist: undeclared files
+    // seed when missing but never overwrite project copies (feature 084
+    // removed the SKILL.md-only deploy mode).
+    copySkillDirGated(storeSkillDir, dstPath);
   } else {
     const storeFile = path.join(root, 'store', typeDir, `${assetName}.md`);
     fs.mkdirSync(path.dirname(dstPath), { recursive: true });
-    fs.copyFileSync(storeFile, dstPath);
+    copyFileNoFollow(storeFile, dstPath);
   }
+}
+
+/** Read-only deploy plan for one asset against one project/provider target. */
+export interface AssetDeployPlan {
+  targetDir: string;   // project-relative destination, '/'-separated
+  exists: boolean;     // destination (dir for skills, file for agents) present
+  files: DeployPlanFile[];
+}
+
+function relTarget(projectPath: string, absTarget: string): string {
+  return path.relative(projectPath, absTarget).split(path.sep).join('/');
+}
+
+/** Single-file plan for agent assets: seed / unchanged / overwrite. */
+function planSingleFileDeploy(srcFile: string, dstFile: string): DeployPlanFile[] {
+  const name = path.basename(dstFile);
+  if (!fs.existsSync(dstFile)) return [{ path: name, fate: 'seed', updatable: true }];
+  return [{
+    path: name,
+    fate: filesIdentical(srcFile, dstFile) ? 'unchanged' : 'overwrite',
+    updatable: true,
+  }];
+}
+
+/**
+ * Plan (never write) what deploying a store asset to a project would do —
+ * the read-only twin of copyStoreAssetToProject. mcp assets are a JSON
+ * merge, not a copy: callers must not ask for a plan for them.
+ */
+export function planStoreAssetDeploy(
+  projectPath: string,
+  provider: ProviderId,
+  assetType: AssetType,
+  assetName: string,
+): AssetDeployPlan {
+  if (assetType === 'mcp') {
+    throw new Error('mcp deploys are a config merge — no file plan exists');
+  }
+  const dstPath = getProviderAssetFilePath(projectPath, provider, assetType, assetName);
+  if (!dstPath) {
+    throw new Error(`Provider '${provider}' does not support asset type '${assetType}'`);
+  }
+  const root = getSlycodeRoot();
+  if (assetType === 'skill') {
+    const storeSkillDir = path.join(root, 'store', 'skills', assetName);
+    return {
+      targetDir: relTarget(projectPath, dstPath),
+      exists: fs.existsSync(dstPath),
+      files: planSkillDirGated(storeSkillDir, dstPath),
+    };
+  }
+  const storeFile = path.join(root, 'store', 'agents', `${assetName}.md`);
+  return {
+    targetDir: relTarget(projectPath, path.dirname(dstPath)),
+    exists: fs.existsSync(dstPath),
+    files: planSingleFileDeploy(storeFile, dstPath),
+  };
+}
+
+/**
+ * Plan (never write) what deploying a master-repo asset to a project would
+ * do — the read-only twin of copyAsset. Same source resolution (getAssetPath
+ * on the master path).
+ */
+export function planMasterAssetDeploy(
+  masterPath: string,
+  projectPath: string,
+  assetType: AssetType,
+  assetName: string,
+): AssetDeployPlan {
+  if (assetType === 'mcp') {
+    throw new Error('mcp deploys are a config merge — no file plan exists');
+  }
+  const srcPath = getAssetPath(masterPath, assetType, assetName);
+  const dstPath = getAssetPath(projectPath, assetType, assetName);
+  if (assetType === 'skill') {
+    return {
+      targetDir: relTarget(projectPath, dstPath),
+      exists: fs.existsSync(dstPath),
+      files: planSkillDirGated(srcPath, dstPath),
+    };
+  }
+  return {
+    targetDir: relTarget(projectPath, path.dirname(dstPath)),
+    exists: fs.existsSync(dstPath),
+    files: planSingleFileDeploy(srcPath, dstPath),
+  };
 }
 
 /**
@@ -700,17 +754,17 @@ export function importAssetToStore(
       const srcSkillMd = path.join(srcFilePath, 'SKILL.md');
       const dstSkillMd = path.join(dstDir, 'SKILL.md');
       if (fs.existsSync(srcSkillMd)) {
-        fs.copyFileSync(srcSkillMd, dstSkillMd);
+        copyFileNoFollow(srcSkillMd, dstSkillMd);
       } else {
         throw new Error(`SKILL.md not found in ${srcFilePath}`);
       }
     } else {
-      copyDirRecursive(srcFilePath, dstDir);
+      copyDirNoFollow(srcFilePath, dstDir);
     }
   } else {
     fs.mkdirSync(storePath, { recursive: true });
     const fileName = path.basename(srcFilePath);
-    fs.copyFileSync(srcFilePath, path.join(storePath, fileName));
+    copyFileNoFollow(srcFilePath, path.join(storePath, fileName));
   }
 }
 
@@ -1064,7 +1118,7 @@ export function acceptUpdate(
     }
 
     fs.mkdirSync(backupPath, { recursive: true });
-    copyDirRecursive(storePath, backupPath);
+    copyDirNoFollow(storePath, backupPath);
 
     // Remove existing store skill
     fs.rmSync(storePath, { recursive: true, force: true });
@@ -1072,7 +1126,7 @@ export function acceptUpdate(
 
   // Copy from updates/ → store/ (full replace)
   fs.mkdirSync(storePath, { recursive: true });
-  copyDirRecursive(updatesPath, storePath);
+  copyDirNoFollow(updatesPath, storePath);
 
   // Record upstream directory digest as accepted — prevents resurface if store
   // content diverges slightly from upstream. Clears automatically when upstream changes.

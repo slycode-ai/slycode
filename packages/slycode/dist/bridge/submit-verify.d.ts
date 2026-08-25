@@ -52,6 +52,18 @@ export declare function extractInputRegion(provider: SubmitProvider, snapshot: s
  * Matches all three providers' formats, whitespace-insensitively.
  */
 export declare function parsePastePlaceholder(text: string): PastePlaceholder | null;
+/** Unicode code-point length (Codex's placeholder count unit; String.length is UTF-16). */
+export declare function codePointLength(text: string): number;
+/**
+ * Count paste placeholders ANYWHERE in a snapshot whose count corroborates
+ * `expected` (same tolerance rules as payloadQueued). Layout-independent —
+ * used as a TEMPORAL signal only: the caller compares pre-paste vs post-paste
+ * counts and treats a newly introduced occurrence as "our paste landed", and
+ * its later disappearance as "it left the box". Absolute presence is never a
+ * verdict: transcript/tool output can legitimately contain placeholder text
+ * (a review on card #0336 quoted "[Pasted Content 3199 chars]" verbatim).
+ */
+export declare function countMatchingPlaceholders(snapshot: string, expected: string): number;
 /**
  * Classify the input region of a snapshot.
  *

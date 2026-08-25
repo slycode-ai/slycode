@@ -1,4 +1,7 @@
 import type { ResponseEntry } from './types.js';
+export declare const DEFAULT_TIMEOUT_MS: number;
+export declare const LOCK_GRACE_MS: number;
+export declare const DELIVERY_GRACE_MS: number;
 /**
  * Metadata for a response ID after its live entry has been removed. Kept
  * in a small ring-buffer so the API can give an actionable error to clients
@@ -13,22 +16,29 @@ export interface ExpiredResponseMetadata {
     issuedAt: number;
     expiredAt: number;
     targetSession: string;
+    callingSession: string;
 }
 export type ExpiryHint = {
     reason: 'expired' | 'consumed' | 'unknown';
     issuedAt?: number;
     expiredAt?: number;
+    callingSession?: string;
 };
 /**
  * In-memory store for cross-card prompt responses.
  * Manages the response callback protocol: register → poll → deliver.
  * Handles call locking and late response injection tracking.
  *
- * Delivery is multi-shot within TTL: a second `deliver()` call overwrites
- * the previous payload (the latest delivery wins). For a still-polling caller
- * the recovery window is bounded by the 2 s polling cadence; for a timed-out
- * caller the late-injection path fires on every successful delivery, which
- * gives the caller a full-TTL recovery window via PTY injection.
+ * Delivery is multi-shot within the delivery window: a second `deliver()`
+ * call overwrites the previous payload (the latest delivery wins). For a
+ * still-polling caller the recovery window is bounded by the 2 s polling
+ * cadence; for a timed-out caller the late-injection path fires on every
+ * successful delivery.
+ *
+ * Lock lifetime and delivery lifetime are decoupled (see the window
+ * constants above): an entry stops call-locking its target shortly after
+ * the caller's own wait must have ended, but remains deliverable for a
+ * generous grace so long-running agent work is never lost at the door.
  */
 export declare class ResponseStore {
     private responses;
@@ -39,8 +49,15 @@ export declare class ResponseStore {
     /**
      * Register a pending response for a --wait prompt.
      * Also acts as a call lock on the target session.
+     * `timeoutMs` is the caller's --wait timeout; both expiry windows derive
+     * from it (older CLIs omit it → DEFAULT_TIMEOUT_MS).
      */
-    register(responseId: string, callingSession: string, targetSession: string): void;
+    register(responseId: string, callingSession: string, targetSession: string, timeoutMs?: number): void;
+    private effectiveTimeoutMs;
+    /** Past this, the entry no longer call-locks its target session. */
+    private isLockStale;
+    /** Past this, the entry is removed by cleanup (envelope retained). */
+    private isDeliveryExpired;
     /**
      * Poll for a response by ID.
      */
@@ -69,19 +86,22 @@ export declare class ResponseStore {
     markCallerTimedOut(responseId: string): void;
     /**
      * Check if a session is locked by an active --wait call.
+     * Entries past their lock window never lock — a hard-killed caller that
+     * never posted /timeout must not wedge the target session.
      */
-    isSessionLocked(sessionName: string, excludeResponseId?: string): boolean;
+    isSessionLocked(sessionName: string, excludeResponseId?: string, now?: number): boolean;
     /**
      * Get the active lock info for a session (for error messages).
      */
-    getActiveLock(sessionName: string, excludeResponseId?: string): {
+    getActiveLock(sessionName: string, excludeResponseId?: string, now?: number): {
         callingSession: string;
         lockedAt: number;
     } | null;
     /**
-     * Remove expired entries (older than TTL). Before deleting, push a small
+     * Remove entries past their delivery window. Before deleting, push a small
      * envelope into the recentlyExpired ring-buffer so subsequent delivery
-     * attempts can be told *why* they failed.
+     * attempts can still late-inject (and be told why the live entry is gone).
+     * `now` is injectable for tests.
      */
-    private cleanup;
+    cleanup(now?: number): void;
 }

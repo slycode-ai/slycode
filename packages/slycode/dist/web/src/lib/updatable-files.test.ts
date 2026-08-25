@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseUpdatableList, isUpdatable, copySkillDirGated } from './updatable-files';
+import { parseUpdatableList, isUpdatable, copySkillDirGated, planSkillDirGated } from './updatable-files';
 
 function makeDir(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'updatable-'));
@@ -116,4 +116,101 @@ test('copySkillDirGated — fresh destination gets the full seed', () => {
   assert.deepEqual(result.updated, ['SKILL.md']);
   assert.deepEqual(result.seeded, ['references/area-index.md']);
   assert.deepEqual(result.kept, []);
+});
+
+// ---------------------------------------------------------------------------
+// planSkillDirGated (feature 084 — deploy review modal)
+// ---------------------------------------------------------------------------
+
+test('planSkillDirGated — classifies fates against the real destination', () => {
+  const src = makeDir({
+    'SKILL.md': '---\nname: demo\nversion: 2.0.0\nupdatable:\n  - references/maintenance.md\n  - references/identical.md\n---\nnew body',
+    'references/maintenance.md': 'new maintenance doctrine',
+    'references/identical.md': 'same bytes',
+    'references/area-index.md': 'EMPTY TEMPLATE INDEX',
+    'references/areas/starter.md': 'starter area template',
+  });
+  const dst = makeDir({
+    'SKILL.md': 'old skill body',
+    'references/maintenance.md': 'old maintenance',
+    'references/identical.md': 'same bytes',
+    'references/area-index.md': 'CURATED PROJECT INDEX — precious',
+    // no areas/starter.md — should plan as seed
+  });
+
+  const plan = planSkillDirGated(src, dst);
+  const byPath = Object.fromEntries(plan.map(e => [e.path, e]));
+
+  assert.deepEqual(byPath['SKILL.md'], { path: 'SKILL.md', fate: 'overwrite', updatable: true });
+  assert.deepEqual(byPath['references/maintenance.md'], { path: 'references/maintenance.md', fate: 'overwrite', updatable: true });
+  assert.deepEqual(byPath['references/identical.md'], { path: 'references/identical.md', fate: 'unchanged', updatable: true });
+  assert.deepEqual(byPath['references/area-index.md'], { path: 'references/area-index.md', fate: 'keep', updatable: false });
+  assert.deepEqual(byPath['references/areas/starter.md'], { path: 'references/areas/starter.md', fate: 'seed', updatable: false });
+
+  // SKILL.md first, then path order; nothing written
+  assert.equal(plan[0].path, 'SKILL.md');
+  assert.equal(read(dst, 'SKILL.md'), 'old skill body');
+});
+
+test('planSkillDirGated — fresh destination plans everything as seed', () => {
+  const src = makeDir({
+    'SKILL.md': 'skill',
+    'references/area-index.md': 'template index',
+  });
+  const dst = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'updatable-plan-fresh-')), 'skill');
+
+  const plan = planSkillDirGated(src, dst);
+  assert.deepEqual(plan.map(e => e.fate), ['seed', 'seed']);
+  assert.equal(plan[0].path, 'SKILL.md');
+  assert.equal(plan[0].updatable, true);
+  assert.equal(plan[1].updatable, false);
+  assert.equal(fs.existsSync(dst), false); // plan never creates the destination
+});
+
+test('planSkillDirGated — symlinked source entry is skipped, never copied', () => {
+  const src = makeDir({
+    'SKILL.md': 'skill',
+    'secret-target.md': 'outside content',
+  });
+  fs.symlinkSync(path.join(src, 'secret-target.md'), path.join(src, 'references-link.md'));
+  const dst = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'updatable-plan-sym-')), 'skill');
+
+  const plan = planSkillDirGated(src, dst);
+  const link = plan.find(e => e.path === 'references-link.md');
+  assert.equal(link?.fate, 'skipped');
+
+  const result = copySkillDirGated(src, dst);
+  assert.equal(fs.existsSync(path.join(dst, 'references-link.md')), false);
+  assert.equal([...result.updated, ...result.seeded, ...result.kept].includes('references-link.md'), false);
+});
+
+test('planSkillDirGated / copySkillDirGated — copy executes exactly the plan', () => {
+  const src = makeDir({
+    'SKILL.md': '---\nname: demo\nupdatable:\n  - references/maintenance.md\n---\nv2',
+    'references/maintenance.md': 'new doctrine',
+    'references/area-index.md': 'template index',
+    'references/areas/starter.md': 'starter',
+  });
+  const dst = makeDir({
+    'SKILL.md': 'v1',
+    'references/area-index.md': 'precious project index',
+  });
+
+  const plan = planSkillDirGated(src, dst);
+  const result = copySkillDirGated(src, dst);
+
+  // Agreement: `updated` = updatable files the copy owns (overwrite/unchanged/seed),
+  // `seeded` = non-updatable seeds, `kept` = keeps.
+  const expectUpdated = plan.filter(e => e.updatable && e.fate !== 'skipped').map(e => e.path).sort();
+  const expectSeeded = plan.filter(e => !e.updatable && e.fate === 'seed').map(e => e.path).sort();
+  const expectKept = plan.filter(e => !e.updatable && e.fate === 'keep').map(e => e.path).sort();
+  assert.deepEqual(result.updated.slice().sort(), expectUpdated);
+  assert.deepEqual(result.seeded.slice().sort(), expectSeeded);
+  assert.deepEqual(result.kept.slice().sort(), expectKept);
+
+  // And the disk matches the fates
+  assert.equal(read(dst, 'SKILL.md').includes('v2'), true);
+  assert.equal(read(dst, 'references/area-index.md'), 'precious project index');
+  assert.equal(read(dst, 'references/maintenance.md'), 'new doctrine');
+  assert.equal(read(dst, 'references/areas/starter.md'), 'starter');
 });

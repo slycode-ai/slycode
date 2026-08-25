@@ -184,7 +184,22 @@ function saveWorkspacePath(workspacePath) {
         }
     }
     config.home = path.resolve(workspacePath);
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n');
+    // Atomic write: a torn write here silently loses the workspace path,
+    // because the read path treats corrupt JSON as "start fresh".
+    const tmp = `${CONFIG_FILE}.tmp.${process.pid}`;
+    try {
+        fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n');
+        fs.renameSync(tmp, CONFIG_FILE);
+    }
+    catch (err) {
+        try {
+            fs.unlinkSync(tmp);
+        }
+        catch {
+            /* ignore */
+        }
+        throw err;
+    }
 }
 /**
  * Resolve the path to the slycode package (in node_modules).
