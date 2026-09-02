@@ -23,6 +23,16 @@
  * This module must stay dependency-free (no session-manager imports) so it can
  * be table-tested against fixture snapshots.
  */
+/**
+ * Providers whose TUI chrome this classifier understands. This list is
+ * inherently per-TUI (each entry has hand-captured fixtures and an
+ * extractInputRegion arm) — it is NOT the provider registry. A provider that
+ * is driven by a non-PTY transport (feature 085) never appears here.
+ */
+export const SUBMIT_PROVIDERS = ['claude', 'codex', 'gemini'];
+export function isSubmitProvider(provider) {
+    return !!provider && SUBMIT_PROVIDERS.includes(provider);
+}
 /** Strip ALL whitespace (incl. NBSP — covered by \s in JS) for tolerant matching. */
 export function normalizeForMatch(text) {
     return text.replace(/\s+/g, '');

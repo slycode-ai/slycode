@@ -11,9 +11,19 @@ export interface ProviderResume {
     lastFlag?: string;
     detectSession: boolean;
     sessionDir?: string;
+    requiresId?: boolean;
+}
+/** How the bridge drives this provider (feature 085). Default: pty-scrape. */
+export type ProviderTransport = 'pty-scrape' | 'opencode-api';
+export interface ProviderColor {
+    hex: string;
+    tailwind: {
+        bg: string;
+        text: string;
+    };
 }
 export interface ProviderPrompt {
-    type: 'positional' | 'flag';
+    type: 'positional' | 'flag' | 'transport';
     interactive?: string;
     nonInteractive?: string;
 }
@@ -28,6 +38,7 @@ export interface ProviderConfig {
     prompt: ProviderPrompt;
     instructionFile?: string;
     altInstructionFile?: string;
+    instructionFallbacks?: string[];
     model?: {
         flag: string;
         available: Array<{
@@ -35,6 +46,19 @@ export interface ProviderConfig {
             label: string;
             description?: string;
         }>;
+        refreshCommand?: string[];
+    };
+    transport?: ProviderTransport;
+    color?: ProviderColor;
+    agentIdentity?: string;
+    idPattern?: string;
+    auth?: {
+        check: string[];
+    };
+    extraArgs?: string[];
+    detect?: {
+        files?: string[];
+        dirs?: string[];
     };
 }
 export interface ProviderDefault {
@@ -82,7 +106,25 @@ export interface InstructionFileCheck {
     needed: boolean;
     targetFile?: string;
     copySource?: string;
+    /** The provider reads `copySource` natively — creating `targetFile` is optional (feature 085). */
+    nativelyReads?: boolean;
+    /** One plain sentence for the prompt UI, when nativelyReads. */
+    note?: string;
+    /** The user asked not to be prompted for this project + provider. */
+    suppressed?: boolean;
 }
+export type InstructionFilePrefs = Record<string, Record<string, boolean>>;
+export declare function instructionFilePrefsPath(): string;
+export declare function readInstructionFilePrefs(): Promise<InstructionFilePrefs>;
+export declare function isInstructionFileSuppressed(providerId: string, cwd: string): Promise<boolean>;
+/**
+ * Per-machine provider disable list (feature 085 stretch): the web UI's
+ * Provider Config modal writes data/provider-prefs.json; the bridge refuses
+ * to spawn a disabled provider. Read fresh (no cache) — the file changes at
+ * runtime and a spawn is not a hot path.
+ */
+export declare function isProviderDisabled(providerId: string): Promise<boolean>;
+export declare function setInstructionFileSuppressed(providerId: string, cwd: string, suppressed: boolean): Promise<void>;
 /**
  * Check if a provider's instruction file exists in the given directory.
  * Detection order:

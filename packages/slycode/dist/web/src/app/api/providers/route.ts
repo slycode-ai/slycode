@@ -3,6 +3,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { getSlycodeRoot } from '@/lib/paths';
 import { atomicWriteFile } from '@/lib/atomic-write';
+import { mergeRefreshedModels, readProviderModels } from '@/lib/provider-models.server';
+import { applyProviderPrefs, readProviderPrefs } from '@/lib/provider-prefs.server';
 
 function getProvidersPath(): string {
   return path.join(getSlycodeRoot(), 'data', 'providers.json');
@@ -11,7 +13,11 @@ function getProvidersPath(): string {
 export async function GET() {
   try {
     const data = await fs.readFile(getProvidersPath(), 'utf-8');
-    return NextResponse.json(JSON.parse(data));
+    // Per-machine overlays (feature 085), never written back into
+    // providers.json: refreshed model lists, then provider prefs (disabled
+    // providers omitted, order applied) so every selector obeys them.
+    const withModels = mergeRefreshedModels(JSON.parse(data), readProviderModels());
+    return NextResponse.json(applyProviderPrefs(withModels, readProviderPrefs()));
   } catch {
     return NextResponse.json({ error: 'providers.json not found' }, { status: 404 });
   }

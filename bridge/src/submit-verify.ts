@@ -24,7 +24,18 @@
  * be table-tested against fixture snapshots.
  */
 
-export type SubmitProvider = 'claude' | 'codex' | 'gemini';
+/**
+ * Providers whose TUI chrome this classifier understands. This list is
+ * inherently per-TUI (each entry has hand-captured fixtures and an
+ * extractInputRegion arm) — it is NOT the provider registry. A provider that
+ * is driven by a non-PTY transport (feature 085) never appears here.
+ */
+export const SUBMIT_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
+export type SubmitProvider = typeof SUBMIT_PROVIDERS[number];
+
+export function isSubmitProvider(provider: string | undefined | null): provider is SubmitProvider {
+  return !!provider && (SUBMIT_PROVIDERS as readonly string[]).includes(provider);
+}
 
 export type InputRegionClassification =
   | 'empty'            // input region present, no meaningful content (bare prompt char / known hint)

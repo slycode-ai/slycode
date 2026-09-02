@@ -248,6 +248,20 @@ export class BridgeClient {
     }
   }
 
+  /** "Don't ask again" for the missing-instruction-file prompt (feature 085). */
+  async setInstructionFileSuppressed(provider: string, cwd: string, suppressed: boolean): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/instruction-file-prefs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, cwd, suppressed }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck> {
     try {
       const res = await fetch(

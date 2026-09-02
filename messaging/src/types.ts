@@ -258,6 +258,10 @@ export interface InstructionFileCheck {
   needed: boolean;
   targetFile?: string;
   copySource?: string;
+  /** The provider reads `copySource` natively — creating `targetFile` is optional (feature 085). */
+  nativelyReads?: boolean;
+  note?: string;
+  suppressed?: boolean;
 }
 
 export interface PendingInstructionFileConfirm {

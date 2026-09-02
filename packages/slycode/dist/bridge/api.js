@@ -2,7 +2,8 @@ import { Router } from 'express';
 import path from 'path';
 import multer from 'multer';
 import { saveScreenshot } from './screenshot-utils.js';
-import { checkInstructionFile } from './provider-utils.js';
+import { checkInstructionFile, getProvider, setInstructionFileSuppressed } from './provider-utils.js';
+import { idPatternFor } from './provider-registry.js';
 import { getGitStatus } from './git-utils.js';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 /**
@@ -79,7 +80,8 @@ export function createApiRouter(sessionManager, responseStore) {
         catch (err) {
             const message = err.message;
             // Return 400 for validation errors (command not allowed, invalid CWD)
-            if (message.includes('not allowed') || message.includes('CWD') || message.includes('Maximum sessions')) {
+            if (message.includes('not allowed') || message.includes('CWD') || message.includes('Maximum sessions')
+                || message.startsWith('provider_not_connected') || message.startsWith('provider_disabled') || message.startsWith('Unknown provider')) {
                 return res.status(400).json({ error: message });
             }
             console.error('Error creating session:', err);
@@ -238,8 +240,13 @@ export function createApiRouter(sessionManager, responseStore) {
     router.post('/sessions/:name/link', async (req, res) => {
         const name = decodeURIComponent(req.params.name);
         const sessionId = req.body?.sessionId;
-        if (typeof sessionId !== 'string' || !/^[0-9a-f][0-9a-f-]{7,40}[0-9a-f]$/i.test(sessionId.trim())) {
-            return res.status(400).json({ error: 'sessionId (UUID) required in body' });
+        // Id shape is per provider (feature 085): UUID-ish by default, or the
+        // provider's declared idPattern (e.g. OpenCode's `ses_…`).
+        const providerId = sessionManager.getSessionInfo(name)?.provider;
+        const providerConfig = providerId ? await getProvider(providerId) : null;
+        const idPattern = idPatternFor(providerConfig);
+        if (typeof sessionId !== 'string' || !idPattern.test(sessionId.trim())) {
+            return res.status(400).json({ error: `sessionId required in body (expected ${providerConfig?.idPattern ? `to match ${providerConfig.idPattern}` : 'a UUID'})` });
         }
         try {
             const result = await sessionManager.linkSession(name, sessionId.trim());
@@ -306,6 +313,29 @@ export function createApiRouter(sessionManager, responseStore) {
             return res.status(404).json({ error: 'Session not found' });
         }
         res.json({ session: name, transitions });
+    });
+    // "Don't ask again" for the missing-instruction-file prompt (feature 085)
+    router.post('/instruction-file-prefs', async (req, res) => {
+        const provider = req.body?.provider;
+        const cwd = req.body?.cwd;
+        const suppressed = req.body?.suppressed;
+        if (typeof provider !== 'string' || !/^[a-z0-9-]+$/.test(provider)) {
+            return res.status(400).json({ error: 'provider is required' });
+        }
+        if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) {
+            return res.status(400).json({ error: 'cwd must be an absolute path' });
+        }
+        if (typeof suppressed !== 'boolean') {
+            return res.status(400).json({ error: 'suppressed must be a boolean' });
+        }
+        try {
+            await setInstructionFileSuppressed(provider, cwd, suppressed);
+            res.json({ provider, cwd, suppressed });
+        }
+        catch (err) {
+            console.error('Error saving instruction-file preference:', err);
+            res.status(500).json({ error: 'Failed to save preference' });
+        }
     });
     // Check if provider instruction file exists in project directory
     router.get('/check-instruction-file', async (req, res) => {

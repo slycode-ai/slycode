@@ -36,6 +36,10 @@ module.exports = {
     { src: 'scripts/kanban.js', dest: 'scripts/kanban.js' },
     { src: 'scripts/scaffold.js', dest: 'scripts/scaffold.js' },
 
+    // README media — the root README references these by relative path, so the
+    // public repo must carry them or the images 404 on GitHub.
+    { src: 'documentation/assets/readme/', dest: 'documentation/assets/readme/' },
+
     // Root files (with rename: CLAUDE.release.md becomes CLAUDE.md in public)
     { src: 'CLAUDE.release.md', dest: 'CLAUDE.md' },
     { src: 'README.md', dest: 'README.md' },

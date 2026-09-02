@@ -39,6 +39,14 @@
       "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/providers/[id]/models/refresh",
+      "regex": "^/api/providers/([^/]+?)/models/refresh(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/providers/(?<nxtPid>[^/]+?)/models/refresh(?:/)?$"
+    },
+    {
       "page": "/api/questionnaire/[projectId]",
       "regex": "^/api/questionnaire/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -371,6 +379,12 @@
       "regex": "^/api/providers(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/providers(?:/)?$"
+    },
+    {
+      "page": "/api/providers/prefs",
+      "regex": "^/api/providers/prefs(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/providers/prefs(?:/)?$"
     },
     {
       "page": "/api/scheduler",

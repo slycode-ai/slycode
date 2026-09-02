@@ -184,7 +184,7 @@ export function ClaudeTerminalPanel({
   sessionInfoRef.current = sessionInfo;
 
   // Instruction file check state
-  const [instructionFileCheck, setInstructionFileCheck] = useState<{ needed: boolean; targetFile?: string; copySource?: string } | null>(null);
+  const [instructionFileCheck, setInstructionFileCheck] = useState<{ needed: boolean; targetFile?: string; copySource?: string; nativelyReads?: boolean; note?: string } | null>(null);
   const [createInstructionFile, setCreateInstructionFile] = useState(true);
 
   // Build session name with provider segment. Same transform applied to primary
@@ -386,21 +386,57 @@ export function ClaudeTerminalPanel({
   }, [showRelinkConfirm]);
 
   // Instruction file warning UI (rendered below skip-permissions in both provider selector blocks)
+  // Two registers (feature 085): a provider that reads the sibling natively
+  // gets a calm, informative note and an unchecked box; one that would run
+  // without instructions keeps the amber warning and a checked box.
   const instructionFileWarning = instructionFileCheck?.needed ? (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-xs text-amber-400">
-        ⚠ {instructionFileCheck.targetFile} missing — will copy from {instructionFileCheck.copySource}
-      </span>
-      <label className="flex items-center gap-1.5 text-xs text-amber-400/80 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={createInstructionFile}
-          onChange={(e) => setCreateInstructionFile(e.target.checked)}
-          className="rounded border-amber-500/50"
-        />
-        Create {instructionFileCheck.targetFile}
-      </label>
-    </div>
+    instructionFileCheck.nativelyReads ? (
+      <div className="flex max-w-xs flex-col items-center gap-1 text-center">
+        <span className="text-xs text-void-400">
+          {instructionFileCheck.targetFile} not found. {instructionFileCheck.note}
+        </span>
+        <div className="flex items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-void-300">
+            <input
+              type="checkbox"
+              checked={createInstructionFile}
+              onChange={(e) => setCreateInstructionFile(e.target.checked)}
+              className="rounded border-void-500"
+            />
+            Create it from {instructionFileCheck.copySource}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              fetch(`${bridgeUrl}/instruction-file-prefs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: selectedProvider, cwd, suppressed: true }),
+              }).catch(() => {});
+              setInstructionFileCheck({ needed: false });
+            }}
+            className="text-xs text-void-500 underline-offset-2 hover:text-void-300 hover:underline"
+          >
+            Don't ask again for this project
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div className="flex flex-col items-center gap-1">
+        <span className="text-xs text-amber-400">
+          ⚠ {instructionFileCheck.targetFile} missing — will copy from {instructionFileCheck.copySource}
+        </span>
+        <label className="flex items-center gap-1.5 text-xs text-amber-400/80 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={createInstructionFile}
+            onChange={(e) => setCreateInstructionFile(e.target.checked)}
+            className="rounded border-amber-500/50"
+          />
+          Create {instructionFileCheck.targetFile}
+        </label>
+      </div>
+    )
   ) : null;
 
   // Shared provider selector (eliminates duplication between resume and fresh-start screens).
@@ -723,6 +759,12 @@ export function ClaudeTerminalPanel({
                 // exist when focus lands or the voice shortcut never arms.
                 onTerminalReady?.({ ...handle, sessionName: activeSessionName });
                 handle.focus();
+              }}
+              onDispose={() => {
+                // Handle is dead (InputQueue disposed) — tell voice claimants
+                // so a transcript can't be sent into a torn-down terminal.
+                terminalHandleRef.current = null;
+                onTerminalReady?.(null);
               }}
               onImagePaste={handleImagePaste}
             />

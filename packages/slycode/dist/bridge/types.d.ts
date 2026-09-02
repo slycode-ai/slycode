@@ -34,6 +34,7 @@ export interface Session {
     terminalDimensions: TerminalDimensions;
     claudeBeforeFiles?: string[];
     claudeDir?: string;
+    transportState?: Record<string, unknown>;
     guidDetectionInFlight?: boolean;
     guidDetectionLastArmedAt?: number;
     guidDetectionCancelled?: boolean;
@@ -107,6 +108,7 @@ export interface PersistedSession {
     exitedAt?: string;
     exitOutput?: string;
     pid?: number | null;
+    transportState?: Record<string, unknown>;
 }
 export interface PersistedState {
     sessions: Record<string, PersistedSession>;
@@ -198,7 +200,7 @@ export interface DeliveryResult {
     outcome: DeliveryOutcome;
     /** true when the input-region verify loop actually ran (false for CLI-arg spawn delivery or unclassifiable providers). */
     verified: boolean;
-    mode: 'verified_paste' | 'unverified_paste' | 'cli_arg' | 'deferred_paste';
+    mode: 'verified_paste' | 'unverified_paste' | 'cli_arg' | 'deferred_paste' | 'api';
     /** Enter attempts, including a test-dropped first Enter. */
     attempts: number;
     /** Enter resends beyond the first attempt. */

@@ -27,12 +27,34 @@ const AGENTS_DIR = path.join(STORE_DIR, 'agents');
 // Essential skills — required for SlyCode core functionality
 const ESSENTIAL_SKILLS = ['kanban', 'messaging'];
 
-// Provider definitions — skillsDir is where skills get deployed for each provider
-const PROVIDERS = {
-  claude: { filename: 'CLAUDE.md', name: 'Claude Code', overlay: 'claude.md', skillsDir: '.claude/skills', agentsDir: '.claude/agents' },
-  codex:  { filename: 'AGENTS.md', name: 'OpenAI Codex', overlay: 'codex.md', skillsDir: '.agents/skills', agentsDir: '.agents/agents' },
-  gemini: { filename: 'GEMINI.md', name: 'Gemini CLI',   overlay: 'gemini.md', skillsDir: '.agents/skills', agentsDir: '.agents/agents' },
-};
+// Provider definitions come from the registry template (feature 085 sweep):
+//   filename  = instructionFile, name = displayName, overlay = <id>.md
+//   skillsDir/agentsDir: CLAUDE.md-based providers deploy under .claude/,
+//   everything else shares the universal .agents/ directory.
+function loadProviderDefinitions() {
+  const registryPath = path.join(TEMPLATES_DIR, 'providers.json');
+  let providers = {};
+  try {
+    providers = JSON.parse(fs.readFileSync(registryPath, 'utf-8')).providers || {};
+  } catch (err) {
+    console.error(`Cannot read provider registry at ${registryPath}: ${err.message}`);
+    process.exit(1);
+  }
+  const defs = {};
+  for (const [id, p] of Object.entries(providers)) {
+    const filename = p.instructionFile || 'AGENTS.md';
+    const usesClaudeDir = filename === 'CLAUDE.md';
+    defs[id] = {
+      filename,
+      name: p.displayName || id,
+      overlay: `${id}.md`,
+      skillsDir: usesClaudeDir ? '.claude/skills' : '.agents/skills',
+      agentsDir: usesClaudeDir ? '.claude/agents' : '.agents/agents',
+    };
+  }
+  return defs;
+}
+const PROVIDERS = loadProviderDefinitions();
 
 const VALID_PROVIDERS = Object.keys(PROVIDERS);
 const DEFAULT_PROVIDERS = ['claude'];
@@ -641,16 +663,29 @@ function runCreate(args) {
     }
   }
 
-  // Provider instruction files (multi-provider loop)
+  // Provider instruction files (multi-provider loop). Two providers can share
+  // a filename (Codex and OpenCode both read AGENTS.md, feature 085): the
+  // first one creates the file, later ones append their own notes section
+  // instead of being silently skipped.
+  const createdThisRun = new Map(); // filename -> provider that created it
   for (const provider of providers) {
     const filename = PROVIDERS[provider].filename;
     if (shouldProcess(filename)) {
       const destPath = path.join(targetPath, filename);
       if (fs.existsSync(destPath)) {
-        results.push({ action: 'skipped', path: `${filename} (already exists)`, group: 'ai-config', provider });
+        if (createdThisRun.has(filename)) {
+          const notes = loadOverlay(provider).PROVIDER_NOTES;
+          if (notes && notes.trim()) {
+            fs.appendFileSync(destPath, `\n${notes.trim()}\n`, 'utf-8');
+            results.push({ action: 'created', path: `${filename} (+ ${PROVIDERS[provider].name} notes)`, group: 'ai-config', provider });
+          }
+        } else {
+          results.push({ action: 'skipped', path: `${filename} (already exists)`, group: 'ai-config', provider });
+        }
       } else {
         const content = assembleInstructionFile(provider, templateVars);
         fs.writeFileSync(destPath, content, 'utf-8');
+        createdThisRun.set(filename, provider);
         results.push({ action: 'created', path: filename, group: 'ai-config', provider });
       }
     }

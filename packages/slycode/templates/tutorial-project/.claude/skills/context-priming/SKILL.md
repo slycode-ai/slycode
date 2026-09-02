@@ -1,8 +1,8 @@
 ---
 provider: claude
 name: context-priming
-version: 1.2.0
-updated: 2026-07-19
+version: 1.2.1
+updated: 2026-08-30
 updatable:
   - references/maintenance.md
 description: Dynamic context provider for codebase knowledge. This skill should be used when working on code, answering questions about architecture, or making changes that require understanding of project structure. Maintains area-specific reference files that are loaded on demand. Self-updating based on observed drift between references and actual code. Load this skill early in work sessions - it contains essential workflow and update protocols.
@@ -136,7 +136,7 @@ If suggestion timing/frequency becomes disruptive, user will indicate - adjust a
 1. **Primary:** `<project-root>/.claude/skills/context-priming/` — the canonical, most up-to-date copy. Always check here first.
 2. **Fallback:** The directory containing this SKILL.md (i.e. your own skill folder). If there is no `.claude/` directory in the project, the references were likely copied alongside this file.
 
-This matters when the skill is deployed to another provider (Codex at `.agents/skills/`, Gemini at `.gemini/skills/`). Those folders may contain just this SKILL.md for discovery, with the area files living in `.claude/`. But if the project has no `.claude/` directory at all (e.g. a pure Codex or Gemini project), fall back to reading from your own skill directory.
+This matters when the skill is deployed to another provider (Codex at `.agents/skills/`, Gemini at `.gemini/skills/`; OpenCode reads `.agents/skills/` and `.claude/skills/` directly). Those folders may contain just this SKILL.md for discovery, with the area files living in `.claude/`. But if the project has no `.claude/` directory at all (e.g. a pure Codex, Gemini or OpenCode project), fall back to reading from your own skill directory.
 
 **Resolved paths (primary):**
 - **Area index:** `<project-root>/.claude/skills/context-priming/references/area-index.md`

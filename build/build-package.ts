@@ -15,6 +15,7 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { syncStoreToUpdates, checkContextPrimingTemplate } from './sync-updates';
+import { assertProvidersParity } from './providers-parity';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -308,7 +309,16 @@ function copyTemplates(): void {
   // Data templates — sourced from scaffold-templates/, NOT data/.
   // The scaffold-templates/ versions are the blessed defaults for new workspaces.
   // Your working data/ copies may have local changes you don't want to propagate.
-  // To update templates: manually copy data/*.json → data/scaffold-templates/*.json
+  //
+  // EXCEPTION — providers.json: the `providers` block is registry config, not
+  // user preference, and `slycode update` (sync.ts refreshProviders) replaces
+  // every deployed workspace's block from the shipped template. It MUST match
+  // data/providers.json or prod silently loses fields (this is how feature 081's
+  // sessionIdFlag was stripped from installs). Only `defaults` may differ.
+  // Fails the build on drift; fix with: node build/sync-providers-template.js
+  assertProvidersParity(ROOT);
+  console.log('  ✓ providers.json template in sync with data/providers.json');
+
   const dataTemplates = [
     { src: 'data/commands.json', dest: 'commands.json' },
     { src: 'data/scaffold-templates/providers.json', dest: 'providers.json' },
@@ -332,6 +342,22 @@ function copyTemplates(): void {
     path.join(TEMPLATES_DIR, 'kanban-seed.json'),
     JSON.stringify(kanbanSeed, null, 2) + '\n'
   );
+
+  // LICENSE — BUSL-1.1 requires the licence text to accompany every copy, and
+  // npm includes a package-root LICENSE file in the tarball regardless of the
+  // `files` allowlist. Neither package keeps its own copy in git; the root
+  // LICENSE is the single source and is copied here on every build (clean()
+  // only wipes dist/ and templates/, so the copy is never removed by the wipe —
+  // it is simply overwritten with the current root text).
+  const rootLicense = path.join(ROOT, 'LICENSE');
+  if (fs.existsSync(rootLicense)) {
+    for (const pkg of ['slycode', 'create-slycode']) {
+      fs.copyFileSync(rootLicense, path.join(ROOT, 'packages', pkg, 'LICENSE'));
+    }
+    console.log('  ✓ LICENSE → packages/slycode, packages/create-slycode');
+  } else {
+    console.warn('  ! LICENSE not found at repo root — npm tarballs will ship without licence text');
+  }
 
   // Release CLAUDE.md
   const releaseMd = path.join(ROOT, 'CLAUDE.release.md');

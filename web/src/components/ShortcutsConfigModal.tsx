@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Shortcut, ShortcutsFile, KanbanCard, KanbanStages, ProviderId } from '@/lib/types';
+import { useProviders, shortProviderLabel } from '@/lib/use-providers';
 
 /**
  * Suggest a project tag from the project's display name.
@@ -39,12 +40,14 @@ interface ShortcutDraft extends Shortcut {
   _key: string;
 }
 
-const PROVIDERS: Array<{ id: string; label: string }> = [
-  { id: '', label: 'Default' },
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'gemini', label: 'Gemini' },
-];
+// Provider options come from the registry (feature 085 sweep); '' = default.
+function useProviderOptions(): Array<{ id: string; label: string }> {
+  const { providers } = useProviders();
+  return useMemo(
+    () => [{ id: '', label: 'Default' }, ...providers.map((p) => ({ id: p.id, label: shortProviderLabel(p) }))],
+    [providers],
+  );
+}
 
 function generateLabel(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz';
@@ -66,6 +69,7 @@ function stripKeys(drafts: ShortcutDraft[]): Shortcut[] {
 
 export function ShortcutsConfigModal({ onClose, projectId, projectName }: ShortcutsConfigModalProps) {
   const router = useRouter();
+  const PROVIDERS = useProviderOptions();
   const inferredTag = useMemo(() => inferProjectTag(projectName), [projectName]);
   const [tag, setTag] = useState('');
   // Snapshot of the last successfully-loaded/saved values, used to compute the

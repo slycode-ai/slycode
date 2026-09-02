@@ -45,6 +45,12 @@ export const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /\/\.gnupg\//,
   /\/\.codex\//,
   /\/\.local\/share\/com\.vercel\.cli\//,
+  // OpenCode: auth.json holds OAuth refresh tokens / API keys; opencode.db
+  // carries account + credential tables; config may embed provider keys.
+  /\/\.local\/share\/opencode\//,
+  /\/\.config\/opencode\//,
+  // Claude Code OAuth credential store.
+  /\/\.claude\/\.credentials\.json$/,
   /^\/proc\//,
   /^\/dev\//,
   /^\/sys\//,

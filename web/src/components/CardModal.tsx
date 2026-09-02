@@ -269,9 +269,16 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     if (card.description !== lastKnownDescriptionRef.current) {
       // Card description changed externally
       // Only sync if not being actively edited AND local state matches what we last knew
+      // Capture the previous known value BEFORE queuing the state update: React
+      // may run the functional updater later (not eagerly) when other updates
+      // are pending in the same tick — e.g. a CLI write that changed title AND
+      // description arrives via SSE as one refresh. By then the ref already
+      // holds the NEW value, the compare fails, and the field silently keeps
+      // its stale copy. See card "Card modal reverts title on close".
+      const prevKnownDescription = lastKnownDescriptionRef.current;
       if (!isFieldBeingEdited('description')) {
         setEditedDescription((current) => {
-          if (current === lastKnownDescriptionRef.current) {
+          if (current === prevKnownDescription) {
             return card.description;
           }
           return current; // Preserve local edits
@@ -286,9 +293,14 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     if (card.title !== lastKnownTitleRef.current) {
       // Card title changed externally
       // Only sync if not being actively edited AND local state matches what we last knew
+      // Same pre-capture as the description effect above. This one matters
+      // more: handleCloseWithSave writes editedTitle back whenever it differs
+      // from card.title, so a stale editedTitle REVERTS an external rename on
+      // close (observed 2026-08-25: director card title reverted while open).
+      const prevKnownTitle = lastKnownTitleRef.current;
       if (!isFieldBeingEdited('title')) {
         setEditedTitle((current) => {
-          if (current === lastKnownTitleRef.current) {
+          if (current === prevKnownTitle) {
             return card.title;
           }
           return current; // Preserve local edits
@@ -472,23 +484,59 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const voiceSettingsClosedAtRef = useRef(0);
   const voiceAnchorRef = useRef<HTMLDivElement>(null);
   const voiceFocusRef = useRef<VoiceFocusTarget | null>(null);
+  // Live handle of the mounted Terminal — set by onTerminalReady, nulled by
+  // the panel's onDispose when that instance is torn down.
   const terminalHandleRef = useRef<{ sendInput: (data: string) => void; sessionName?: string } | null>(null);
+  // Last voice-target field that held focus. The mic BUTTON takes focus on
+  // Android Chrome before its click handler runs, so document.activeElement
+  // is the button by then — this remembers the field the user meant.
+  const lastVoiceInputRef = useRef<HTMLElement | null>(null);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
-  const insertTranscribedText = useCallback((text: string) => {
-    const target = voiceFocusRef.current;
-    if (!target) return;
+  const isVoiceInput = (el: Element | null | undefined): el is HTMLInputElement | HTMLTextAreaElement =>
+    !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && !!el.closest('[data-voice-target]');
 
-    if (target.type === 'input' && target.element) {
-      if (!document.contains(target.element)) return;
-      const el = target.element as HTMLInputElement | HTMLTextAreaElement;
-      const start = el.selectionStart ?? el.value.length;
-      const end = el.selectionEnd ?? el.value.length;
-      el.focus();
-      el.setSelectionRange(start, end);
-      document.execCommand('insertText', false, text);
-    } else if (target.type === 'terminal' && target.sendInput) {
+  // Deliver a transcript. Returns an error message when it could NOT be
+  // delivered — the recorder then shows the error popup and keeps the audio +
+  // transcript so Retry re-delivers. Targets are re-resolved at delivery
+  // time: a field or terminal captured at record start may have been
+  // detached (tab switch) or disposed (provider switch) since.
+  const insertTranscribedText = useCallback((text: string): string | void => {
+    const captured = voiceFocusRef.current;
+    const NO_TARGET = 'Nowhere to insert the transcript. Focus a text field or open the Terminal tab, then Retry.';
+
+    if (captured?.type === 'input') {
+      let el = captured.element;
+      if (!el || !document.contains(el)) {
+        // Detached — accept the currently focused voice field, if any
+        const active = document.activeElement;
+        if (isVoiceInput(active)) el = active;
+        else if (activeTabRef.current === 'terminal' && terminalHandleRef.current) el = undefined;
+        else return 'The text field you were dictating into is gone. Focus a field (or open the Terminal tab), then Retry.';
+      }
+      if (el) {
+        const input = el as HTMLInputElement | HTMLTextAreaElement;
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        input.focus();
+        input.setSelectionRange(start, end);
+        document.execCommand('insertText', false, text);
+        voice.submitModeRef.current = 'auto';
+        return;
+      }
+    }
+
+    // Terminal: always use the LIVE handle, never the one captured at record
+    // start (a provider/session switch remounts the Terminal and disposes the
+    // old handle's InputQueue — sendInput on it silently no-ops).
+    const wantsTerminal = captured?.type === 'terminal' || (!captured && activeTabRef.current === 'terminal') || captured?.type === 'input';
+    const handle = terminalHandleRef.current;
+    if (!wantsTerminal) return NO_TARGET;
+    if (!handle) return 'The terminal you were dictating into is no longer open. Open the Terminal tab (with a running session), then Retry.';
+
+    {
+      const target = { type: 'terminal' as const, sendInput: handle.sendInput, sessionName: handle.sessionName };
       const shouldAutoSubmit = voice.submitModeRef.current === 'auto' && voice.settings.voice.autoSubmitTerminal;
       if (shouldAutoSubmit && target.sessionName) {
         // Verified submit (feature 070): the bridge owns paste + Enter,
@@ -512,7 +560,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       }
     }
     voice.submitModeRef.current = 'auto';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.settings.voice.autoSubmitTerminal]);
+  // The claimant is registered once (stable deps below) so it calls through a
+  // ref — otherwise it would hold the first render's closure forever.
+  const insertTranscribedTextRef = useRef(insertTranscribedText);
+  insertTranscribedTextRef.current = insertTranscribedText;
 
   // Claim/release voice control
   useEffect(() => {
@@ -521,16 +574,20 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       id: 'card-modal',
       onRecordStart: () => {
         const active = document.activeElement as HTMLElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.closest('[data-voice-target]')) {
+        const lastInput = lastVoiceInputRef.current;
+        if (isVoiceInput(active)) {
           voiceFocusRef.current = { type: 'input', element: active };
         } else if (activeTabRef.current === 'terminal' && terminalHandleRef.current) {
           const handle = terminalHandleRef.current;
           voiceFocusRef.current = { type: 'terminal', sendInput: handle.sendInput, sessionName: handle.sessionName };
+        } else if (lastInput && document.contains(lastInput)) {
+          // Focus moved to a control (the mic button) — keep the last field
+          voiceFocusRef.current = { type: 'input', element: lastInput };
         } else {
           voiceFocusRef.current = null;
         }
       },
-      onTranscriptionComplete: insertTranscribedText,
+      onTranscriptionComplete: (text: string) => insertTranscribedTextRef.current(text),
       onRelease: () => {
         voiceFocusRef.current = null;
       },
@@ -548,7 +605,8 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         voice.setHasFieldFocus(true);
         return;
       }
-      if (target.closest('[data-voice-target]') && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+      if (isVoiceInput(target)) {
+        lastVoiceInputRef.current = target;
         voice.setHasFieldFocus(true);
       }
     };

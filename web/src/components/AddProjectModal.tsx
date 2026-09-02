@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useProviders, shortProviderLabel } from '@/lib/use-providers';
 
 // ============================================================================
 // Types
@@ -56,35 +57,34 @@ type Phase = 'details' | 'providers' | 'review' | 'creating' | 'summary';
 // Constants
 // ============================================================================
 
-const PROVIDER_INFO = [
-  {
-    id: 'claude',
-    name: 'Claude',
-    filename: 'CLAUDE.md',
-    description: 'Anthropic Claude Code',
-    color: 'neon-blue',
-  },
-  {
-    id: 'codex',
-    name: 'Codex',
-    filename: 'AGENTS.md',
-    description: 'OpenAI Codex CLI',
-    color: 'emerald',
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini',
-    filename: 'GEMINI.md',
-    description: 'Google Gemini CLI',
-    color: 'amber',
-  },
-];
+// Provider choices come from the registry (feature 085 sweep) — see
+// useProviderInfo() inside the component.
+interface ProviderInfo {
+  id: string;
+  name: string;
+  filename: string;
+  description: string;
+}
+
+function useProviderInfo(): ProviderInfo[] {
+  const { providers } = useProviders();
+  return useMemo(
+    () => providers.map((p) => ({
+      id: p.id,
+      name: shortProviderLabel(p),
+      filename: p.instructionFile ?? 'AGENTS.md',
+      description: p.displayName,
+    })),
+    [providers],
+  );
+}
 
 // ============================================================================
 // Component
 // ============================================================================
 
 export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalProps) {
+  const PROVIDER_INFO = useProviderInfo();
   const [phase, setPhase] = useState<Phase>('details');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');

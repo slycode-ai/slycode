@@ -1,5 +1,5 @@
 var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/cli-assets/updates/route.js")
-R.c("server/chunks/src_lib_asset-scanner_ts_1lp_8aa._.js")
+R.c("server/chunks/src_lib_09eh-ab._.js")
 R.c("server/chunks/[root-of-the-server]__0uxigh1._.js")
 R.c("server/chunks/[root-of-the-server]__1y_g68p._.js")
 R.c("server/chunks/node_modules_next_08s853w._.js")

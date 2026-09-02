@@ -43,6 +43,8 @@
   "/api/projects/analyze/route": "app/api/projects/analyze/route.js",
   "/api/projects/reorder/route": "app/api/projects/reorder/route.js",
   "/api/projects/route": "app/api/projects/route.js",
+  "/api/providers/[id]/models/refresh/route": "app/api/providers/[id]/models/refresh/route.js",
+  "/api/providers/prefs/route": "app/api/providers/prefs/route.js",
   "/api/providers/route": "app/api/providers/route.js",
   "/api/questionnaire/[projectId]/[name]/answer/route": "app/api/questionnaire/[projectId]/[name]/answer/route.js",
   "/api/questionnaire/[projectId]/[name]/route": "app/api/questionnaire/[projectId]/[name]/route.js",

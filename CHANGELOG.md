@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-02
+
+### Added
+- OpenCode is now a first-class provider alongside Claude, Codex, and Gemini. Start OpenCode card sessions, prompt from the card UI, resume across bridge restarts, run cross-card `--provider opencode --wait`, use it in automations, and switch to it from Telegram via `/provider`. The model picker has a **Refresh** button that lists your installed OpenCode models (recently-used first). A pre-flight toast tells you if OpenCode isn't connected instead of stalling silently. An informative one-time prompt asks you to add the AGENTS.md nag (with a per-project "don't ask again"). `slycode doctor` reports install and credential state.
+- Per-machine Provider Config modal — a new sliders button next to Sign-out on the Dashboard header lets you enable, disable, and reorder providers on this machine. Every provider selector, tab, scaffold picker, and Telegram keyboard follows the order. Disabled providers can't be spawned.
+- Touch scroll now works on Claude Code 2.1.2xx+'s alt-buffer — swipe through Claude Code output on mobile without the terminal ignoring you.
+
+### Fixed
+- Voice input reliability pass — the mic button no longer steals focus from your text field on mobile, so what you dictate lands where you were typing. The recorder remembers the last target field across the Android Chrome focus race. Failed transcript delivery surfaces a clear error and keeps the audio + transcript for **Retry** without re-transcribing. Stale in-flight transcriptions are cancelled on clear/reclaim; single-flight locks prevent overlapping starts and submits. Empty audio or empty transcript now produce a specific error instead of hanging.
+
+### Changed
+- Provider identity (colours, ID patterns, allowed commands, model refresh, credential paths) is now driven from a single data file. New provider integrations become configuration, not scattered edits — and unknown providers get a friendly fallback badge instead of a broken render.
+- Kanban skill v1.17.0 — updates for the OpenCode provider workflow.
+- context-priming skill v1.2.1 — minor guidance polish.
+
 ## [0.4.5] - 2026-08-25
 
 ### Added

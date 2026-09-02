@@ -18,10 +18,24 @@ export interface ProviderResume {
   lastFlag?: string;
   detectSession: boolean;
   sessionDir?: string;
+  // When true the resume flag is never emitted without an id (no "resume
+  // latest" semantics — e.g. OpenCode's --session, where the bare form is a
+  // usage error and --continue is project-scoped, not cwd-scoped).
+  requiresId?: boolean;
+}
+
+/** How the bridge drives this provider (feature 085). Default: pty-scrape. */
+export type ProviderTransport = 'pty-scrape' | 'opencode-api';
+
+export interface ProviderColor {
+  hex: string;
+  tailwind: { bg: string; text: string };
 }
 
 export interface ProviderPrompt {
-  type: 'positional' | 'flag';
+  // 'transport' = the initial prompt is never put on argv; the session's
+  // transport delivers it after spawn (opencode-api, feature 085).
+  type: 'positional' | 'flag' | 'transport';
   interactive?: string;
   nonInteractive?: string;
 }
@@ -41,10 +55,31 @@ export interface ProviderConfig {
   prompt: ProviderPrompt;
   instructionFile?: string;
   altInstructionFile?: string;
+  // Sibling instruction files this provider reads natively when its own is
+  // absent (OpenCode: AGENTS.md → CLAUDE.md). Makes the missing-file prompt
+  // informative rather than alarming (feature 085).
+  instructionFallbacks?: string[];
   model?: {
     flag: string;
     available: Array<{ id: string; label: string; description?: string }>;
+    // Command that enumerates models on demand (feature 085 model Refresh).
+    refreshCommand?: string[];
   };
+  // ---- Registry-driven enumeration fields (feature 085 sweep) ----
+  transport?: ProviderTransport;
+  // Badge/pill colour. Web falls back to a neutral colour when absent.
+  color?: ProviderColor;
+  // Identity string agents use in `sly-kanban notes add --agent "<identity>"`.
+  agentIdentity?: string;
+  // Regex source validating this provider's conversation ids (manual link).
+  // Absent = the historical UUID-ish pattern.
+  idPattern?: string;
+  // Pre-flight credential check command (argv). Absent = no check.
+  auth?: { check: string[] };
+  // Extra argv appended to every fresh spawn (transport may add more).
+  extraArgs?: string[];
+  // Project markers that mean "this project uses this provider" (badges).
+  detect?: { files?: string[]; dirs?: string[] };
 }
 
 export interface ProviderDefault {
@@ -149,10 +184,11 @@ export function buildProviderCommand(opts: BuildArgsOptions): { command: string;
   if (resume && provider.resume.supported && provider.resume.type === 'flag') {
     if (sessionId) {
       args.push(provider.resume.flag!, sessionId);
-    } else {
+    } else if (!provider.resume.requiresId) {
       // No GUID — just pass the flag (Gemini resumes latest)
       args.push(provider.resume.flag!);
     }
+    // requiresId + no id: fall through to a fresh spawn (never "resume latest")
   }
 
   // Assigned session id — FRESH spawns only (feature 081). Claude hard-errors
@@ -189,6 +225,80 @@ export interface InstructionFileCheck {
   needed: boolean;
   targetFile?: string;
   copySource?: string;
+  /** The provider reads `copySource` natively — creating `targetFile` is optional (feature 085). */
+  nativelyReads?: boolean;
+  /** One plain sentence for the prompt UI, when nativelyReads. */
+  note?: string;
+  /** The user asked not to be prompted for this project + provider. */
+  suppressed?: boolean;
+}
+
+// ---- "Don't ask again" preferences (feature 085) -------------------------
+// Workspace file keyed by project cwd → provider → true. Small, human-readable,
+// never touched by the build or `slycode update`.
+
+export type InstructionFilePrefs = Record<string, Record<string, boolean>>;
+
+export function instructionFilePrefsPath(): string {
+  if (process.env.SLYCODE_INSTRUCTION_PREFS_PATH) return process.env.SLYCODE_INSTRUCTION_PREFS_PATH;
+  const workspaceRoot = process.env.SLYCODE_HOME
+    ? path.resolve(process.env.SLYCODE_HOME)
+    : path.join(__dirname, '..', '..');
+  return path.join(workspaceRoot, 'data', 'instruction-file-prefs.json');
+}
+
+export async function readInstructionFilePrefs(): Promise<InstructionFilePrefs> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(instructionFilePrefsPath(), 'utf-8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeCwdKey(cwd: string): string {
+  const resolved = path.resolve(cwd);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+export async function isInstructionFileSuppressed(providerId: string, cwd: string): Promise<boolean> {
+  const prefs = await readInstructionFilePrefs();
+  return prefs[normalizeCwdKey(cwd)]?.[providerId] === true;
+}
+
+/**
+ * Per-machine provider disable list (feature 085 stretch): the web UI's
+ * Provider Config modal writes data/provider-prefs.json; the bridge refuses
+ * to spawn a disabled provider. Read fresh (no cache) — the file changes at
+ * runtime and a spawn is not a hot path.
+ */
+export async function isProviderDisabled(providerId: string): Promise<boolean> {
+  try {
+    const workspaceRoot = process.env.SLYCODE_HOME
+      ? path.resolve(process.env.SLYCODE_HOME)
+      : path.join(__dirname, '..', '..');
+    const raw = await fs.readFile(path.join(workspaceRoot, 'data', 'provider-prefs.json'), 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.disabled) && parsed.disabled.includes(providerId);
+  } catch {
+    return false;
+  }
+}
+
+export async function setInstructionFileSuppressed(providerId: string, cwd: string, suppressed: boolean): Promise<void> {
+  const prefs = await readInstructionFilePrefs();
+  const key = normalizeCwdKey(cwd);
+  if (suppressed) {
+    prefs[key] = { ...(prefs[key] ?? {}), [providerId]: true };
+  } else if (prefs[key]) {
+    delete prefs[key][providerId];
+    if (Object.keys(prefs[key]).length === 0) delete prefs[key];
+  }
+  const target = instructionFilePrefsPath();
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(prefs, null, 2) + '\n', 'utf-8');
+  await fs.rename(tmp, target);
 }
 
 /**
@@ -213,11 +323,31 @@ export async function checkInstructionFile(providerId: string, cwd: string): Pro
     return { needed: false };
   } catch { /* not found, continue */ }
 
+  // 1b. The user asked not to be prompted for this project + provider
+  if (await isInstructionFileSuppressed(providerId, cwd)) {
+    return { needed: false, suppressed: true, targetFile };
+  }
+
+  // Decorate a copy offer with what the provider does on its own (feature 085):
+  // if it reads the sibling natively, say so and mark the copy optional.
+  const offer = (copySource: string): InstructionFileCheck => {
+    const nativelyReads = (provider.instructionFallbacks ?? []).includes(copySource);
+    if (!nativelyReads) return { needed: true, targetFile, copySource };
+    const shortName = provider.displayName.replace(/ (Code|CLI)$/, '');
+    return {
+      needed: true,
+      targetFile,
+      copySource,
+      nativelyReads: true,
+      note: `${shortName} reads ${copySource} on its own when ${targetFile} is absent, so this is optional.`,
+    };
+  };
+
   // 2. Alt file exists — offer to copy it to the primary filename
   if (provider.altInstructionFile) {
     try {
       await fs.access(path.join(cwd, provider.altInstructionFile));
-      return { needed: true, targetFile, copySource: provider.altInstructionFile };
+      return offer(provider.altInstructionFile);
     } catch { /* not found, continue */ }
   }
 
@@ -226,7 +356,7 @@ export async function checkInstructionFile(providerId: string, cwd: string): Pro
     if (candidate === targetFile) continue; // skip the one we're trying to create
     try {
       await fs.access(path.join(cwd, candidate));
-      return { needed: true, targetFile, copySource: candidate };
+      return offer(candidate);
     } catch { /* not found, try next */ }
   }
 

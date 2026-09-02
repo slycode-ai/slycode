@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.16.0
-updated: 2026-08-13
+version: 1.17.0
+updated: 2026-08-30
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -260,6 +260,7 @@ Agent notes are a shared scratchpad on each card for passing context between age
 - Claude: `--agent "Claude"`
 - Codex: `--agent "Codex"`
 - Gemini: `--agent "Gemini"`
+- OpenCode: `--agent "OpenCode"`
 - Notes added from the web UI are automatically tagged as `User`
 
 **Limits:** Max 30 notes per card, max 3000 characters per note.
@@ -704,6 +705,13 @@ targeted automatically); with multiple sessions the CLI asks you to specify.
   `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, Gemini:
   `~/.gemini/tmp/<slug>/chats/session-*.json`), identify the conversation you
   want by reading its content, then bind its id to the card.
+- **OpenCode keeps sessions in a database, not files.** Ids look like
+  `ses_faf07c43bffelW0gFiGTTG1PSr` (accepted by `--guid`). List them with
+  `opencode session list --format json` run *inside the project directory*
+  (it is scoped to that project; allow a few seconds — the CLI is slow to
+  boot), read one with `opencode export <id>`, then `link` as usual.
+  `relink` does this for you: it asks the card's running OpenCode server
+  first and falls back to the CLI listing.
 - **`dismiss` removes the bridge's record only.** Transcript/conversation
   files on disk are never deleted, so a dismissed conversation can always be
   re-bound later via `link`.

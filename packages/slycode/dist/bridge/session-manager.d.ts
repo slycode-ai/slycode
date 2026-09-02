@@ -61,6 +61,10 @@ export declare class SessionManager {
      */
     resolveSessionName(name: string): string;
     createSession(request: CreateSessionRequest): Promise<SessionInfo>;
+    /** Transport for a provider id (pty-scrape when unknown / bash). */
+    private transportForProvider;
+    /** Callbacks a transport may use; the delivery ladder and detection claim stay in the manager. */
+    private transportHooks;
     /**
      * Background task to detect provider session ID after spawn
      */

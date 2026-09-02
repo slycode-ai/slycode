@@ -24,6 +24,7 @@ Send the current design work for card `{{card.id}}` to a different AI provider f
 - **Claude** → send to `codex`
 - **Codex** → send to `claude`
 - **Gemini** → try `claude` first; if that fails, try `codex`
+- **OpenCode** → try `claude` first; if that fails, try `codex`
 
 **Optionally** add a context note before sending:
 ```bash

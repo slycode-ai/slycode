@@ -30,6 +30,8 @@ export declare class BridgeClient {
         branch: string | null;
         uncommitted: number;
     } | null>;
+    /** "Don't ask again" for the missing-instruction-file prompt (feature 085). */
+    setInstructionFileSuppressed(provider: string, cwd: string, suppressed: boolean): Promise<boolean>;
     checkInstructionFile(provider: string, cwd: string): Promise<InstructionFileCheck>;
     /**
      * Try canonical name first, then each alias. Returns whichever exists on

@@ -44,6 +44,7 @@ export function VoiceControlBar({
       {(voiceState === 'idle' || voiceState === 'disabled') && (
         <button
           onClick={onRecord}
+          onMouseDown={(e) => e.preventDefault()} // don't steal focus from the field being dictated into
           disabled={disabled}
           className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-500 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 disabled:opacity-50 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
           title="Start recording [Ctrl+.]"
@@ -99,6 +100,7 @@ export function VoiceControlBar({
           {/* Submit */}
           <button
             onClick={onSubmit}
+            onMouseDown={(e) => e.preventDefault()} // keep the target field focused for insertion
             className="rounded-md border border-green-400/40 bg-green-400/15 px-2 py-1.5 text-xs font-medium text-green-600 transition-all hover:bg-green-400/25 hover:shadow-[0_0_8px_rgba(34,197,94,0.2)] dark:text-green-400"
             title="Submit for transcription (Enter)"
           >

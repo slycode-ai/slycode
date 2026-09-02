@@ -39,6 +39,8 @@ export interface Session {
   // For GUID detection - files that existed before this session started
   claudeBeforeFiles?: string[];
   claudeDir?: string;
+  // Opaque per-transport state (feature 085), e.g. opencode-api port/password.
+  transportState?: Record<string, unknown>;
   // Event-anchored detection re-arm state (feature 080)
   guidDetectionInFlight?: boolean;
   guidDetectionLastArmedAt?: number;
@@ -128,6 +130,7 @@ export interface PersistedSession {
   exitOutput?: string;       // Last ~20 lines of terminal output (ANSI-stripped, for snapshot diagnostics)
   pid?: number | null;       // PTY pid while (presumed) running; nulled on observed exit. A non-null
                              // pid from a previous bridge incarnation marks a potential orphan (feature 078)
+  transportState?: Record<string, unknown>; // Opaque transport state (feature 085), survives restart
 }
 
 export interface PersistedState {
@@ -244,7 +247,7 @@ export interface DeliveryResult {
   outcome: DeliveryOutcome;
   /** true when the input-region verify loop actually ran (false for CLI-arg spawn delivery or unclassifiable providers). */
   verified: boolean;
-  mode: 'verified_paste' | 'unverified_paste' | 'cli_arg' | 'deferred_paste';
+  mode: 'verified_paste' | 'unverified_paste' | 'cli_arg' | 'deferred_paste' | 'api';
   /** Enter attempts, including a test-dropped first Enter. */
   attempts: number;
   /** Enter resends beyond the first attempt. */

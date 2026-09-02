@@ -3,11 +3,9 @@ import { randomUUID } from 'crypto';
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
-import {
-  getProviderSessionDir,
-  listProviderSessionFiles,
-  listProviderSessionCandidates,
-} from './claude-utils.js';
+import { isCommandAllowed } from './provider-registry.js';
+import { getTransport } from './transport/index.js';
+import type { SessionTransport, TransportHooks } from './transport/index.js';
 import {
   shouldArmDetection,
   chooseRelinkCandidate,
@@ -20,8 +18,8 @@ import {
   loadProviders,
   getProvider,
   buildProviderCommand,
-  supportsSessionDetection,
   ensureInstructionFile,
+  isProviderDisabled,
 } from './provider-utils.js';
 import type { ProviderConfig } from './provider-utils.js';
 import type {
@@ -46,6 +44,7 @@ import {
   extractInputRegion,
   decideNextAction,
   countMatchingPlaceholders,
+  isSubmitProvider,
   type SubmitProvider,
   type InputRegionClassification,
 } from './submit-verify.js';
@@ -393,6 +392,10 @@ export class SessionManager {
       } else {
         throw new Error(`Unknown provider: ${request.provider}`);
       }
+      // Per-machine disable (feature 085 stretch, Provider Config modal)
+      if (await isProviderDisabled(providerId)) {
+        throw new Error(`provider_disabled: ${providerConfig.displayName} is disabled on this machine — enable it in Provider Config on the dashboard`);
+      }
     } else if (request.command && request.command !== 'bash') {
       // Legacy path: command field without provider (e.g. command: 'claude')
       // Try to find a matching provider
@@ -413,8 +416,11 @@ export class SessionManager {
       await ensureInstructionFile(providerId, cwd);
     }
 
-    // Validate command against whitelist
-    if (!this.runtimeConfig.allowedCommands.includes(command)) {
+    // Validate command: bridge-config.json allow-list, or the resolved
+    // provider's own command (providers.json is workspace config too — this
+    // keeps a deployed bridge-config.json that predates a provider from
+    // rejecting it). Feature 085 sweep.
+    if (!isCommandAllowed(command, this.runtimeConfig.allowedCommands, providerConfig)) {
       throw new Error(`Command '${command}' is not allowed. Allowed commands: ${this.runtimeConfig.allowedCommands.join(', ')}`);
     }
 
@@ -514,22 +520,27 @@ export class SessionManager {
       const storedSessionId = doResume ? persisted.claudeSessionId : null;
       const isProviderSession = !!providerConfig;
 
-      // Deterministic session-id assignment (feature 081): for providers with
-      // a sessionIdFlag (Claude, Gemini), generate the id ourselves and pass
-      // it at spawn — attribution is definitional, the detection pipeline
-      // below never arms, and the id is persisted before the PTY exists.
-      // MUST be a fresh UUID per spawn attempt (never reused from persisted
-      // state): Claude hard-errors on a --session-id that already exists.
-      const assignedSessionId = (!doResume && providerConfig?.sessionIdFlag)
-        ? randomUUID()
-        : null;
+      // Transport seam (feature 085): the transport decides how the
+      // conversation id is established — bridge-assigned --session-id
+      // (feature 081, pty-scrape providers with a sessionIdFlag), post-launch
+      // transcript detection (080), or an API-created session (opencode-api).
+      // The plan is computed before the PTY exists so the id can be
+      // persisted first, exactly as before.
+      const transport: SessionTransport = getTransport(providerConfig);
+      const plan = providerConfig
+        ? await transport.planSpawn({ providerConfig, providerId, cwd, resume: doResume, storedSessionId, initialPrompt: prompt, skipPermissions })
+        : { extraArgs: [], env: {}, assignedSessionId: null, assignedIdUnverified: false, sessionDir: null, beforeFiles: [], armDetection: false };
+      const assignedSessionId = plan.assignedSessionId;
 
       // On Windows, .cmd batch wrappers run through cmd.exe which mangles multi-line
       // CLI arguments (newlines become command separators). Strip the prompt from args
       // and deliver it via bracketed paste after the provider finishes starting up.
       const isWindows = os.platform() === 'win32';
       const promptForArgs = (isWindows && prompt) ? undefined : prompt;
-      const deferredPrompt = (isWindows && prompt) ? prompt : undefined;
+      // Providers with prompt.type 'transport' get the initial prompt from
+      // their transport after spawn — never from argv, never deferred here.
+      const promptViaTransport = providerConfig?.prompt.type === 'transport';
+      const deferredPrompt = (isWindows && prompt && !promptViaTransport) ? prompt : undefined;
 
       // Build args using provider config or legacy path
       let args: string[];
@@ -544,22 +555,14 @@ export class SessionManager {
           model: doResume ? undefined : model,
         });
         command = built.command;
-        args = built.args;
+        args = [...built.args, ...plan.extraArgs];
       } else {
         // Plain bash or unknown command — no special args
         args = [];
       }
 
-      // For providers that support session detection, capture existing session
-      // files before spawn — skipped entirely when the id was assigned (081)
-      let claudeDir: string | null = null;
-      let beforeSessionFiles: string[] = [];
-      if (providerConfig && supportsSessionDetection(providerConfig) && !doResume && !assignedSessionId) {
-        claudeDir = getProviderSessionDir(providerId, cwd);
-        if (claudeDir) {
-          beforeSessionFiles = await listProviderSessionFiles(providerId, claudeDir);
-        }
-      }
+      const claudeDir = plan.sessionDir;
+      const beforeSessionFiles = plan.beforeFiles;
 
       // Create headless terminal for state management
       const headlessTerminal = new HeadlessTerminal({
@@ -597,8 +600,9 @@ export class SessionManager {
         serializeAddon,
         terminalDimensions: { cols: DEFAULT_PTY_COLS, rows: DEFAULT_PTY_ROWS },
         claudeDir: claudeDir || undefined,
-        claudeBeforeFiles: (providerConfig && supportsSessionDetection(providerConfig)) ? beforeSessionFiles : undefined,
-        assignedIdUnverified: assignedSessionId ? true : undefined,
+        claudeBeforeFiles: (providerConfig && transport.supportsDetection(providerConfig, cwd)) ? beforeSessionFiles : undefined,
+        assignedIdUnverified: plan.assignedIdUnverified ? true : undefined,
+        transportState: plan.transportState,
         activityTransitions: [],
         pendingPrompt: deferredPrompt,
       };
@@ -616,6 +620,7 @@ export class SessionManager {
         provider: providerId,
         skipPermissions,
         model: model || undefined,
+        transportState: plan.transportState,
       };
       await this.savePersistedState();
 
@@ -626,7 +631,7 @@ export class SessionManager {
         cwd,
         cols: DEFAULT_PTY_COLS,
         rows: DEFAULT_PTY_ROWS,
-        extraEnv: { SLYCODE_SESSION: name },
+        extraEnv: { SLYCODE_SESSION: name, ...plan.env },
         onData: (data) => this.handlePtyOutput(name, data),
         onExit: (code) => this.handlePtyExit(name, code, session.createdAt),
       });
@@ -652,10 +657,11 @@ export class SessionManager {
         }, DEFERRED_PROMPT_MAX_TIMEOUT_MS);
       }
 
-      // For providers with session detection, detect the session ID in background
-      // (never runs for assigned-id spawns — claudeSessionId is already set)
-      if (providerConfig && supportsSessionDetection(providerConfig) && !session.claudeSessionId && claudeDir) {
-        this.detectProviderSessionId(name, providerId, beforeSessionFiles);
+      // Transport post-spawn step: pty-scrape arms background detection when
+      // the plan called for it (never for assigned-id spawns); opencode-api
+      // waits for the API and binds the pre-created session.
+      if (providerConfig) {
+        await transport.afterSpawn(session, plan, this.transportHooks());
       }
 
       console.log(`Session created: ${name} [${providerConfig?.displayName || command}] (pid: ${session.pid})${doResume ? ' [resumed]' : ''}${assignedSessionId ? ` [assigned-id ${assignedSessionId}]` : ''}`);
@@ -677,6 +683,21 @@ export class SessionManager {
       this.sessions.delete(name);
       throw err;
     }
+  }
+
+  /** Transport for a provider id (pty-scrape when unknown / bash). */
+  private async transportForProvider(providerId: string | undefined): Promise<SessionTransport> {
+    const providerConfig = providerId ? await getProvider(providerId) : null;
+    return getTransport(providerConfig);
+  }
+
+  /** Callbacks a transport may use; the delivery ladder and detection claim stay in the manager. */
+  private transportHooks(): TransportHooks {
+    return {
+      performVerifiedDelivery: (sessionName, prompt) => this.performVerifiedDelivery(sessionName, prompt),
+      startDetection: (sessionName, providerId, beforeFiles) => { void this.detectProviderSessionId(sessionName, providerId, beforeFiles); },
+      claimSessionId: async (sessionName, sessionId) => { await this.claimDetectedSessionId(sessionName, sessionId, true); },
+    };
   }
 
   /**
@@ -726,14 +747,14 @@ export class SessionManager {
 
     const providerId = session.provider || 'claude';
     const providerConfig = await getProvider(providerId);
-    if (!providerConfig || !supportsSessionDetection(providerConfig)) return;
-    if (!getProviderSessionDir(providerId, session.cwd)) return;
+    const transport = getTransport(providerConfig);
+    if (!providerConfig || !transport.supportsDetection(providerConfig, session.cwd)) return;
 
     // Assigned-id verification at exit (081 fallback): the transcript exists
     // by now or never will. Present → verified; absent → the CLI dropped or
     // ignored --session-id: null the id and fall through to normal detection.
     if (session.claudeSessionId && session.assignedIdUnverified) {
-      const candidates = await listProviderSessionCandidates(providerId, session.cwd);
+      const candidates = await transport.listCandidates(providerId, session.cwd);
       if (candidates.some(c => c.sessionId === session.claudeSessionId)) {
         session.assignedIdUnverified = undefined;
         return;
@@ -749,7 +770,7 @@ export class SessionManager {
 
     if (session.claudeSessionId) return;
 
-    const candidates = await listProviderSessionCandidates(providerId, session.cwd, session.claudeBeforeFiles || []);
+    const candidates = await transport.listCandidates(providerId, session.cwd, session.claudeBeforeFiles || []);
     const createdAtMs = session.createdAt ? new Date(session.createdAt).getTime() : null;
     const choice = chooseDetectionCandidate(candidates, {
       createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
@@ -943,6 +964,8 @@ export class SessionManager {
     console.log(`Session exited: ${name} (code: ${code}, alive: ${aliveMs !== null ? `${(aliveMs / 1000).toFixed(1)}s` : 'unknown'})`);
 
     session.status = 'stopped';
+    // Transport teardown on unexpected exit too (event streams etc.) — never throws.
+    void this.transportForProvider(session.provider).then(t => t.onStop(session)).catch(() => undefined);
     session.exitCode = code;
     session.exitedAt = exitedAt;
     session.pid = null;
@@ -1289,6 +1312,14 @@ export class SessionManager {
     // Mark as user-initiated stop so handlePtyExit skips exit output capture
     session.stoppedByUser = true;
 
+    // Transport teardown (feature 085): pty-scrape has nothing; opencode-api
+    // closes its event stream. Never blocks the kill below.
+    try {
+      await (await this.transportForProvider(session.provider)).onStop(session);
+    } catch (err) {
+      console.warn(`[transport] onStop failed for ${resolvedName}: ${(err as Error).message}`);
+    }
+
     // Create a promise that resolves when PTY exits (event-driven, not polling)
     const exitPromise = new Promise<void>((resolve) => {
       if (session.status === 'stopped') {
@@ -1370,7 +1401,7 @@ export class SessionManager {
     let fileFound = false;
     if (cwd) {
       try {
-        const candidates = await listProviderSessionCandidates(provider, cwd);
+        const candidates = await (await this.transportForProvider(provider)).listCandidates(provider, cwd, undefined, session ?? persisted ?? undefined);
         fileFound = candidates.some(c => c.sessionId === sessionId);
       } catch { /* advisory only */ }
     }
@@ -1425,7 +1456,7 @@ export class SessionManager {
     // the explicit user action only.)
     const createdAtIso = session?.createdAt || persisted?.createdAt || null;
     const createdAtMs = createdAtIso ? Date.parse(createdAtIso) : null;
-    const candidates = await listProviderSessionCandidates(provider, cwd);
+    const candidates = await (await this.transportForProvider(provider)).listCandidates(provider, cwd, undefined, session ?? persisted ?? undefined);
     const chosen = chooseRelinkCandidate(candidates, {
       createdAtMs: Number.isNaN(createdAtMs as number) ? null : createdAtMs,
     });
@@ -1666,7 +1697,7 @@ export class SessionManager {
           return;
         }
 
-        const candidates = await listProviderSessionCandidates(providerId, session.cwd, beforeFiles);
+        const candidates = await (await this.transportForProvider(providerId)).listCandidates(providerId, session.cwd, beforeFiles);
         const createdAtMs = session.createdAt ? new Date(session.createdAt).getTime() : null;
         const choice = chooseDetectionCandidate(candidates, {
           createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
@@ -1747,8 +1778,8 @@ export class SessionManager {
 
     const providerId = session.provider || 'claude';
     const providerConfig = await getProvider(providerId);
-    if (!providerConfig || !supportsSessionDetection(providerConfig)) return;
-    if (!getProviderSessionDir(providerId, session.cwd)) return;
+    const transport = getTransport(providerConfig);
+    if (!providerConfig || !transport.supportsDetection(providerConfig, session.cwd)) return;
 
     // Spawn-time before-files snapshot; empty for assigned-id fallbacks (the
     // snapshot was skipped) — the lifetime bound in chooseDetectionCandidate
@@ -1780,7 +1811,7 @@ export class SessionManager {
     session.assignedIdVerifyLastAt = now;
 
     const providerId = session.provider || 'claude';
-    const candidates = await listProviderSessionCandidates(providerId, session.cwd);
+    const candidates = await (await this.transportForProvider(providerId)).listCandidates(providerId, session.cwd);
     const present = candidates.some(c => c.sessionId === session.claudeSessionId);
     const failures = present ? 0 : (session.assignedIdVerifyFailures ?? 0) + 1;
     session.assignedIdVerifyFailures = failures;
@@ -2006,8 +2037,9 @@ export class SessionManager {
       // same self-verifying primitive as automations and questionnaire
       // submits — paste, confirm queued, Enter, verify the input cleared
       // (Enter-only resend). The call-lock/busy/depth guards above are
-      // cross-card-specific and stay here, layered on top.
-      const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
+      // cross-card-specific and stay here, layered on top. Routed through the
+      // session's transport (feature 085): pty-scrape → the ladder below.
+      const delivery = await (await this.transportForProvider(session.provider)).deliver(session, prompt, this.transportHooks());
       const isActive = this.isSessionActive(resolvedName) || false;
       if (delivery.outcome !== 'delivered') {
         console.warn(`[submit] cross-card prompt to ${resolvedName} not delivered: ${delivery.outcome}${delivery.reason ? ` (${delivery.reason})` : ''} id=${delivery.correlationId} polls=${(delivery.polls || []).join(',')}`);
@@ -2181,7 +2213,7 @@ export class SessionManager {
         void this.ensureSessionIdDetection(resolvedName);
       }
 
-      const delivery = await this.performVerifiedDelivery(resolvedName, prompt);
+      const delivery = await (await this.transportForProvider(session.provider)).deliver(session, prompt, this.transportHooks());
       return { success: delivery.outcome === 'delivered', sessionStatus: session.status, delivery };
     } finally {
       releaseMutex!();
@@ -2238,7 +2270,7 @@ export class SessionManager {
     };
 
     {
-      const classifiable = session.provider === 'claude' || session.provider === 'codex' || session.provider === 'gemini';
+      const classifiable = isSubmitProvider(session.provider);
       const chunkCount = Math.ceil(prompt.length / CHUNKED_WRITE_SIZE);
       // Chunk-scaled settle (generalized from the Windows deferred path):
       // Codex's TUI drops a fixed-600ms Enter on multi-chunk pastes.

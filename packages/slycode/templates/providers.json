@@ -18,10 +18,30 @@
         "detectSession": true,
         "sessionDir": "~/.claude/projects/"
       },
+      "sessionIdFlag": "--session-id",
       "prompt": {
         "type": "positional"
       },
       "instructionFile": "CLAUDE.md",
+      "transport": "pty-scrape",
+      "agentIdentity": "Claude",
+      "idPattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "color": {
+        "hex": "#d4764e",
+        "tailwind": {
+          "bg": "bg-blue-100 dark:bg-blue-900/40",
+          "text": "text-blue-700 dark:text-blue-300"
+        },
+        "token": "neon-blue"
+      },
+      "detect": {
+        "files": [
+          "CLAUDE.md"
+        ],
+        "dirs": [
+          ".claude"
+        ]
+      },
       "model": {
         "flag": "--model",
         "available": [
@@ -70,6 +90,26 @@
       },
       "instructionFile": "AGENTS.md",
       "altInstructionFile": "CODEX.md",
+      "transport": "pty-scrape",
+      "agentIdentity": "Codex",
+      "idPattern": "^[0-9a-f][0-9a-f-]{7,40}[0-9a-f]$",
+      "color": {
+        "hex": "#6b8fae",
+        "tailwind": {
+          "bg": "bg-emerald-100 dark:bg-emerald-900/40",
+          "text": "text-emerald-700 dark:text-emerald-300"
+        },
+        "token": "emerald"
+      },
+      "detect": {
+        "files": [
+          "AGENTS.md"
+        ],
+        "dirs": [
+          ".codex",
+          ".agents"
+        ]
+      },
       "model": {
         "flag": "-m",
         "available": [
@@ -112,12 +152,32 @@
         "flag": "--resume",
         "detectSession": true
       },
+      "sessionIdFlag": "--session-id",
       "prompt": {
         "type": "flag",
         "interactive": "-i",
         "nonInteractive": "-p"
       },
       "instructionFile": "GEMINI.md",
+      "transport": "pty-scrape",
+      "agentIdentity": "Gemini",
+      "idPattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "color": {
+        "hex": "#8b7ec8",
+        "tailwind": {
+          "bg": "bg-purple-100 dark:bg-purple-900/40",
+          "text": "text-purple-700 dark:text-purple-300"
+        },
+        "token": "amber"
+      },
+      "detect": {
+        "files": [
+          "GEMINI.md"
+        ],
+        "dirs": [
+          ".gemini"
+        ]
+      },
       "model": {
         "flag": "-m",
         "available": [
@@ -143,6 +203,71 @@
           }
         ]
       }
+    },
+    "opencode": {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "command": "opencode",
+      "install": "npm i -g opencode-ai",
+      "transport": "opencode-api",
+      "permissions": {
+        "flag": "--auto",
+        "label": "Auto-approve",
+        "default": true
+      },
+      "resume": {
+        "supported": true,
+        "type": "flag",
+        "flag": "--session",
+        "requiresId": true,
+        "detectSession": true
+      },
+      "prompt": {
+        "type": "transport"
+      },
+      "instructionFile": "AGENTS.md",
+      "idPattern": "^ses_[A-Za-z0-9]{20,40}$",
+      "color": {
+        "hex": "#e0a458",
+        "tailwind": {
+          "bg": "bg-amber-100 dark:bg-amber-900/40",
+          "text": "text-amber-700 dark:text-amber-300"
+        },
+        "token": "amber"
+      },
+      "agentIdentity": "OpenCode",
+      "auth": {
+        "check": [
+          "opencode",
+          "auth",
+          "list"
+        ]
+      },
+      "detect": {
+        "files": [
+          "opencode.json",
+          "opencode.jsonc"
+        ],
+        "dirs": [
+          ".opencode"
+        ]
+      },
+      "model": {
+        "flag": "-m",
+        "available": [],
+        "refreshCommand": [
+          "opencode",
+          "models"
+        ],
+        "recentCommand": [
+          "opencode",
+          "db",
+          "select model from session where model is not null and parent_id is null order by time_updated desc limit 50"
+        ]
+      },
+      "instructionFallbacks": [
+        "CLAUDE.md"
+      ]
     }
   },
   "defaults": {

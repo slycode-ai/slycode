@@ -20,7 +20,12 @@ interface VoiceContextValue {
   hasRecording: boolean;
 
   // Controls (from useVoiceRecorder)
-  startRecording: () => Promise<void>;
+  // startRecording captures the insertion target (claimant's onRecordStart, or
+  // the focused field/terminal in global mode) BEFORE recording — the mic
+  // button and the keyboard shortcut must both go through it. The raw
+  // recorder call skips target capture and the transcript is dropped on
+  // completion (the mobile "voice captures nothing" bug).
+  startRecording: () => void;
   pauseRecording: () => void;
   resumeRecording: () => void;
   clearRecording: () => void;
@@ -105,18 +110,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // ---- Global focus target (unclaimed mode) ----
   const globalFocusTargetRef = useRef<GlobalFocusTarget | null>(null);
   const globalSubmitModeRef = useRef<'auto' | 'paste'>('auto');
+  // Last voice-target field that held focus. The mic BUTTON steals focus on
+  // Android Chrome before its click handler runs, so document.activeElement
+  // is the button by then — this ref remembers the field the user meant.
+  const lastVoiceInputRef = useRef<HTMLElement | null>(null);
 
   // ---- UI state ----
   const [showSettings, setShowSettings] = useState(false);
   const [hasFieldFocus, setHasFieldFocus] = useState(false);
 
   // ---- Global text insertion (unclaimed mode) ----
-  const insertTextGlobal = useCallback((text: string) => {
+  // Returns an error message when the transcript could not be delivered (the
+  // recorder keeps it for Retry); returns nothing on success.
+  const insertTextGlobal = useCallback((text: string): string | void => {
     const target = globalFocusTargetRef.current;
-    if (!target) return;
+    if (!target) return 'Nowhere to insert the transcript. Focus a text field or a terminal, then Retry.';
 
     if (target.type === 'input' && target.element) {
-      if (!document.contains(target.element)) return;
+      if (!document.contains(target.element)) return 'The text field you were dictating into is gone. Focus a field, then Retry.';
       const el = target.element as HTMLInputElement | HTMLTextAreaElement;
       const start = el.selectionStart ?? el.value.length;
       const end = el.selectionEnd ?? el.value.length;
@@ -125,7 +136,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       document.execCommand('insertText', false, text);
     } else if (target.type === 'terminal' && target.terminalId) {
       const handle = terminalHandlesRef.current.get(target.terminalId);
-      if (!handle) return;
+      if (!handle) return 'The terminal you were dictating into is gone. Focus a terminal, then Retry.';
       const shouldAutoSubmit = globalSubmitModeRef.current === 'auto' && settings.voice.autoSubmitTerminal;
       if (shouldAutoSubmit && handle.sessionName) {
         // Verified submit (feature 070): the bridge owns paste + Enter,
@@ -151,12 +162,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }, [settings.voice.autoSubmitTerminal]);
 
   // ---- Transcription complete handler (routes to claimant or global) ----
-  const handleTranscriptionComplete = useCallback((text: string) => {
+  const handleTranscriptionComplete = useCallback((text: string): string | void => {
     if (claimantRef.current) {
-      claimantRef.current.onTranscriptionComplete(text);
-    } else {
-      insertTextGlobal(text);
+      return claimantRef.current.onTranscriptionComplete(text);
     }
+    return insertTextGlobal(text);
   }, [insertTextGlobal]);
 
   // ---- Voice recorder (single state machine) ----
@@ -193,6 +203,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       const target = e.target as HTMLElement;
       // Check voice-target inputs
       if (target.closest('[data-voice-target]') && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        lastVoiceInputRef.current = target;
         setHasFieldFocus(true);
         return;
       }
@@ -237,8 +248,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     } else {
       // Unclaimed (global) mode — capture focus target ourselves
       const active = document.activeElement as HTMLElement;
+      const lastInput = lastVoiceInputRef.current;
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.closest('[data-voice-target]')) {
         globalFocusTargetRef.current = { type: 'input', element: active };
+      } else if (lastInput && document.contains(lastInput) && !active?.closest('[data-terminal-id]')) {
+        // Focus moved to a control (the mic button) — keep the last field
+        globalFocusTargetRef.current = { type: 'input', element: lastInput };
       } else if (active?.closest('[data-terminal-id]')) {
         const terminalEl = active.closest('[data-terminal-id]') as HTMLElement;
         const terminalId = terminalEl.dataset.terminalId || lastActiveTerminalRef.current;
@@ -293,7 +308,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     elapsedSeconds: voiceRecorder.elapsedSeconds,
     error: voiceRecorder.error,
     hasRecording: voiceRecorder.hasRecording,
-    startRecording: voiceRecorder.startRecording,
+    startRecording: handleStartRecording,
     pauseRecording: voiceRecorder.pauseRecording,
     resumeRecording: voiceRecorder.resumeRecording,
     clearRecording: voiceRecorder.clearRecording,

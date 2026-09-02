@@ -1,16 +1,16 @@
 # @slycode/slycode
 
-The SlyCode CLI — workspace manager and command-center server for AI coding agents (Claude Code, Codex, Gemini CLI).
+The SlyCode CLI — workspace manager and command-center server for AI coding agents (Claude Code, Codex, OpenCode, Gemini CLI).
 
 Most users start a new workspace via the scaffold tool:
 
 ```bash
-npx @slycode/create-slycode my-workspace
-cd my-workspace
-slycode start
+npx @slycode/create-slycode slycode   # any directory name works
+cd slycode
+npx slycode start
 ```
 
-See https://slycode.ai for the full overview.
+Full README — features, Code Mode, configuration, known limitations: https://github.com/slycode-ai/slycode#readme
 
 ## Prerequisites
 
@@ -44,10 +44,14 @@ These platforms have no `node-pty` prebuild and will compile from source during 
 
 If your toolchain is missing, the SlyCode install will print an actionable preflight warning naming the missing tools and the install command for your detected package manager. The install will then continue and `node-pty`'s source build will fail with its own error — running the suggested command and retrying will get you through.
 
+## Providers
+
+Claude Code, Codex, OpenCode (`npm i -g opencode-ai`, then `opencode auth login`), and Gemini CLI are installed separately — SlyCode orchestrates them, it doesn't bundle them. Gemini CLI with a personal Google account needs an API key: add `GEMINI_API_KEY=<key>` to your workspace `.env` and restart SlyCode.
+
 ## Diagnostics
 
-Once installed, run `slycode doctor` for a health check covering Node version, build tools, ports, AI agents, and workspace layout.
+Once installed, run `npx slycode doctor` for a health check covering Node version, build tools, ports, AI agents, and workspace layout.
 
 ## License
 
-[BUSL-1.1](./LICENSE) — open core. See https://slycode.ai for licensing details.
+[BUSL-1.1](https://github.com/slycode-ai/slycode/blob/main/LICENSE) — open core. Free for individuals, including freelancers. Organisations with paid employees need a commercial licence. Details: https://slycode.ai

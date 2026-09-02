@@ -16,6 +16,7 @@ import { AtlasRollup } from './AtlasRollup';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
 import { LogoutButton } from './LogoutButton';
+import { ProviderConfigModal } from './ProviderConfigModal';
 import { VersionUpdateToast } from './VersionUpdateToast';
 import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
@@ -42,6 +43,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [slycodeVersion, setSlycodeVersion] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showProviderConfig, setShowProviderConfig] = useState(false);
 
   // Auto-open the global terminal when arriving via /global or /?openGlobal=1.
   // Strip the param after consuming so a refresh doesn't re-trigger.
@@ -333,9 +335,21 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
       <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+        <button
+          onClick={() => setShowProviderConfig(true)}
+          title="Provider config"
+          aria-label="Provider config"
+          className="rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
+        >
+          {/* Sliders icon — ordering + toggles */}
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m2 0h1M13 4v4M7 10v4M17 16v4" />
+          </svg>
+        </button>
         <ThemeToggle />
         <LogoutButton />
       </div>
+      {showProviderConfig && <ProviderConfigModal onClose={() => setShowProviderConfig(false)} />}
 
       {/* Hero Section */}
       <div className="relative flex flex-col items-center pb-2 pt-10">

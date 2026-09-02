@@ -208,12 +208,17 @@ async function doctor(_args) {
             checks.push({ name: tool, result: 'warn', message: 'Not in PATH (run: slycode start — it self-heals CLI links)' });
         }
     }
-    // 7. AI coding agents
-    const agents = [
-        { name: 'Claude Code', cmd: 'claude --version' },
-        { name: 'Codex', cmd: 'codex --version' },
-        { name: 'Gemini CLI', cmd: 'gemini --version' },
-    ];
+    // 7. AI coding agents — from the workspace provider registry (feature 085)
+    let agents = [];
+    try {
+        const registry = JSON.parse(fs.readFileSync(path.join(workspace, 'data', 'providers.json'), 'utf-8'));
+        agents = Object.values(registry.providers ?? {})
+            .filter(p => typeof p.command === 'string')
+            .map(p => ({ name: p.displayName || p.command, cmd: `${p.command} --version`, authCheck: p.auth?.check }));
+    }
+    catch {
+        checks.push({ name: 'Provider registry', result: 'warn', message: 'data/providers.json unreadable — cannot check coding agents' });
+    }
     const foundAgents = [];
     for (const agent of agents) {
         try {
@@ -222,18 +227,34 @@ async function doctor(_args) {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 windowsHide: true,
             }).trim();
-            checks.push({ name: agent.name, result: 'ok', message: version });
+            // Credential pre-flight for providers that declare one (feature 085):
+            // e.g. `opencode auth list` prints "N credentials".
+            let authNote = '';
+            if (agent.authCheck?.length) {
+                try {
+                    const out = (0, child_process_1.execSync)(`${agent.authCheck.map(a => JSON.stringify(a)).join(' ')} 2>&1`, {
+                        encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, timeout: 20_000,
+                    });
+                    const m = /(\d+)\s+credentials?/i.exec(out);
+                    const n = m ? parseInt(m[1], 10) : NaN;
+                    authNote = Number.isNaN(n) ? '' : n > 0 ? ` — connected (${n} credential${n === 1 ? '' : 's'})` : ` — not connected: run '${agent.authCheck[0]} auth login'`;
+                }
+                catch {
+                    authNote = ' — credential check failed';
+                }
+            }
+            checks.push({ name: agent.name, result: authNote.includes('not connected') ? 'warn' : 'ok', message: version + authNote });
             foundAgents.push(agent.name);
         }
         catch {
             checks.push({ name: agent.name, result: 'ok', message: 'Not installed' });
         }
     }
-    if (foundAgents.length === 0) {
+    if (agents.length > 0 && foundAgents.length === 0) {
         checks.push({
             name: 'AI coding agents',
             result: 'warn',
-            message: 'No coding agents found. Install at least one (claude, codex, or gemini).',
+            message: `No coding agents found. Install at least one (${agents.map(a => a.cmd.split(' ')[0]).join(', ')}).`,
         });
     }
     // 8. Workspace structure

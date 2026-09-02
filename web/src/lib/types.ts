@@ -615,7 +615,9 @@ export interface TerminalHandle {
 export interface VoiceClaimant {
   id: string;
   onRecordStart?: () => void;
-  onTranscriptionComplete: (text: string) => void;
+  /** Deliver the transcript. Return an error message if it could NOT be
+   *  delivered — the recorder keeps audio + transcript so Retry re-delivers. */
+  onTranscriptionComplete: (text: string) => string | void;
   onRelease?: () => void;
 }
 
@@ -623,11 +625,11 @@ export interface VoiceClaimant {
 // Platform Detection Types
 // ============================================================================
 
-export interface PlatformDetection {
-  claude: boolean;
-  gemini: boolean;
-  codex: boolean;
-}
+/**
+ * Which providers a project uses, keyed by registry provider id (feature 085:
+ * derived from data/providers.json `detect` rules, no fixed key set).
+ */
+export type PlatformDetection = Record<string, boolean>;
 
 // ============================================================================
 // Search Types

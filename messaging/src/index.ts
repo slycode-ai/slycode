@@ -22,13 +22,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // --- Shared Provider Labels ---
 
-const PROVIDER_LABELS: Record<string, string> = {
-  claude: 'Claude Code',
-  codex: 'Codex CLI',
-  gemini: 'Gemini CLI',
-};
+// Provider labels come from data/providers.json (displayName) at startup —
+// feature 085 sweep: no hardcoded provider list here. Restart to pick up a
+// registry change (the service restarts on deploy anyway).
+function loadProviderLabels(): Record<string, string> {
+  try {
+    const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
+    const data = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
+    const out: Record<string, string> = {};
+    for (const [id, p] of Object.entries<{ displayName?: string }>(data.providers ?? {})) {
+      out[id] = p.displayName || id;
+    }
+    return out;
+  } catch (err) {
+    console.warn('providers.json unreadable — provider labels unavailable:', (err as Error).message);
+    return {};
+  }
+}
 
-const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS);
+const PROVIDER_LABELS: Record<string, string> = loadProviderLabels();
+
+// Per-machine disabled providers (feature 085 stretch) — read fresh so the
+// web UI's Provider Config modal takes effect without a messaging restart.
+function enabledProviders(): string[] {
+  try {
+    const root = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
+    const parsed = JSON.parse(fs.readFileSync(path.join(root, 'data', 'provider-prefs.json'), 'utf-8'));
+    const disabled: string[] = Array.isArray(parsed?.disabled) ? parsed.disabled : [];
+    const order: string[] = Array.isArray(parsed?.order) ? parsed.order : [];
+    const ids = Object.keys(PROVIDER_LABELS).filter(id => !disabled.includes(id));
+    const head = order.filter(id => ids.includes(id));
+    return [...head, ...ids.filter(id => !head.includes(id))];
+  } catch {
+    return Object.keys(PROVIDER_LABELS);
+  }
+}
+
 
 // --- Provider Resolution ---
 
@@ -60,7 +89,19 @@ function getProvidersPath(): string {
 async function getProviderModels(providerId: string): Promise<Array<{ id: string; label: string; description?: string }>> {
   try {
     const data = JSON.parse(fs.readFileSync(getProvidersPath(), 'utf-8'));
-    return data.providers[providerId]?.model?.available || [];
+    const registryList: Array<{ id: string; label: string; description?: string }> = data.providers[providerId]?.model?.available || [];
+    // Per-machine refreshed lists (feature 085 model Refresh) win when present;
+    // recently used ids come first, same ordering as the web picker.
+    try {
+      const refreshed = JSON.parse(fs.readFileSync(path.join(path.dirname(getProvidersPath()), 'provider-models.json'), 'utf-8'))?.[providerId];
+      const models: string[] = Array.isArray(refreshed?.models) ? refreshed.models.map((m: { id: string }) => m.id) : [];
+      if (models.length > 0) {
+        const recent: string[] = Array.isArray(refreshed.recent) ? refreshed.recent.filter((r: string) => models.includes(r)) : [];
+        const ordered = [...recent, ...models.filter(m => !recent.includes(m))];
+        return ordered.map(id => ({ id, label: id.split('/').slice(1).join('/') || id, description: recent.includes(id) ? 'used before' : undefined }));
+      }
+    } catch { /* no refreshed list */ }
+    return registryList;
   } catch { return []; }
 }
 
@@ -698,12 +739,20 @@ async function checkInstructionFilePreFlight(
     model: state.getSelectedModel() || undefined,
   });
 
+  // Informative register when the provider reads the sibling natively
+  // (feature 085): no alarm, and a way to stop being asked for this project.
+  const text = check.nativelyReads
+    ? `${check.targetFile} not found. ${check.note ?? ''}\n\nCreate it from ${check.copySource} anyway?`
+    : `⚠️ ${check.targetFile} is missing in this project.\n\nCreate from ${check.copySource}?`;
   await channel.sendInlineKeyboard(
-    `⚠️ ${check.targetFile} is missing in this project.\n\nCreate from ${check.copySource}?`,
-    [[
-      { label: '✅ Yes, create it', callbackData: 'ifc_yes' },
-      { label: '❌ No, skip', callbackData: 'ifc_no' },
-    ]],
+    text,
+    [
+      [
+        { label: '✅ Yes, create it', callbackData: 'ifc_yes' },
+        { label: '❌ No, skip', callbackData: 'ifc_no' },
+      ],
+      [{ label: "🔕 Don't ask again for this project", callbackData: 'ifc_never' }],
+    ],
   );
 
   return false;
@@ -1142,7 +1191,7 @@ function setupChannel(
     const currentLabel = PROVIDER_LABELS[current] || current;
     const target = state.getTarget();
     const contextLabel = target.type === 'card' ? 'card' : 'terminal';
-    const buttons: InlineButton[][] = ALL_PROVIDERS.map(p => [{
+    const buttons: InlineButton[][] = enabledProviders().map(p => [{
       label: (p === current ? '● ' : '') + PROVIDER_LABELS[p],
       callbackData: `prov_cur_${p}`,
     }]);
@@ -1438,7 +1487,7 @@ function setupChannel(
 
   channel.onCallback('prov_cur_', async (data) => {
     const provider = data.replace('prov_cur_', '');
-    if (!ALL_PROVIDERS.includes(provider)) return;
+    if (!enabledProviders().includes(provider)) return;
     state.setProviderOverride(provider);
     state.setSelectedProvider(provider);
     // Pre-fill model from the project default when it targets this provider
@@ -1485,7 +1534,13 @@ function setupChannel(
     const approved = data === 'ifc_yes';
     state.clearPendingInstructionFileConfirm();
 
-    if (approved) {
+    if (data === 'ifc_never') {
+      // Remember per project + provider (feature 085); then proceed without the file.
+      const saved = await bridge.setInstructionFileSuppressed(pending.provider, pending.cwd, true);
+      await channel.sendText(saved
+        ? `Won't ask about ${pending.targetFile} in this project again.`
+        : `Couldn't save that preference — continuing without ${pending.targetFile}.`);
+    } else if (approved) {
       await channel.sendText(`Creating ${pending.targetFile}...`);
     }
 

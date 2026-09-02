@@ -71,10 +71,11 @@ export function buildProviderCommand(opts) {
         if (sessionId) {
             args.push(provider.resume.flag, sessionId);
         }
-        else {
+        else if (!provider.resume.requiresId) {
             // No GUID — just pass the flag (Gemini resumes latest)
             args.push(provider.resume.flag);
         }
+        // requiresId + no id: fall through to a fresh spawn (never "resume latest")
     }
     // Assigned session id — FRESH spawns only (feature 081). Claude hard-errors
     // when the id already exists, so callers must generate a new UUID per spawn
@@ -102,6 +103,67 @@ export function supportsSessionDetection(provider) {
 }
 // Priority order for finding a copy source when instruction file is missing
 const INSTRUCTION_FILE_PRIORITY = ['CLAUDE.md', 'AGENTS.md', 'CODEX.md', 'GEMINI.md'];
+export function instructionFilePrefsPath() {
+    if (process.env.SLYCODE_INSTRUCTION_PREFS_PATH)
+        return process.env.SLYCODE_INSTRUCTION_PREFS_PATH;
+    const workspaceRoot = process.env.SLYCODE_HOME
+        ? path.resolve(process.env.SLYCODE_HOME)
+        : path.join(__dirname, '..', '..');
+    return path.join(workspaceRoot, 'data', 'instruction-file-prefs.json');
+}
+export async function readInstructionFilePrefs() {
+    try {
+        const parsed = JSON.parse(await fs.readFile(instructionFilePrefsPath(), 'utf-8'));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    }
+    catch {
+        return {};
+    }
+}
+function normalizeCwdKey(cwd) {
+    const resolved = path.resolve(cwd);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+export async function isInstructionFileSuppressed(providerId, cwd) {
+    const prefs = await readInstructionFilePrefs();
+    return prefs[normalizeCwdKey(cwd)]?.[providerId] === true;
+}
+/**
+ * Per-machine provider disable list (feature 085 stretch): the web UI's
+ * Provider Config modal writes data/provider-prefs.json; the bridge refuses
+ * to spawn a disabled provider. Read fresh (no cache) — the file changes at
+ * runtime and a spawn is not a hot path.
+ */
+export async function isProviderDisabled(providerId) {
+    try {
+        const workspaceRoot = process.env.SLYCODE_HOME
+            ? path.resolve(process.env.SLYCODE_HOME)
+            : path.join(__dirname, '..', '..');
+        const raw = await fs.readFile(path.join(workspaceRoot, 'data', 'provider-prefs.json'), 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed?.disabled) && parsed.disabled.includes(providerId);
+    }
+    catch {
+        return false;
+    }
+}
+export async function setInstructionFileSuppressed(providerId, cwd, suppressed) {
+    const prefs = await readInstructionFilePrefs();
+    const key = normalizeCwdKey(cwd);
+    if (suppressed) {
+        prefs[key] = { ...(prefs[key] ?? {}), [providerId]: true };
+    }
+    else if (prefs[key]) {
+        delete prefs[key][providerId];
+        if (Object.keys(prefs[key]).length === 0)
+            delete prefs[key];
+    }
+    const target = instructionFilePrefsPath();
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(prefs, null, 2) + '\n', 'utf-8');
+    await fs.rename(tmp, target);
+}
 /**
  * Check if a provider's instruction file exists in the given directory.
  * Detection order:
@@ -122,11 +184,30 @@ export async function checkInstructionFile(providerId, cwd) {
         return { needed: false };
     }
     catch { /* not found, continue */ }
+    // 1b. The user asked not to be prompted for this project + provider
+    if (await isInstructionFileSuppressed(providerId, cwd)) {
+        return { needed: false, suppressed: true, targetFile };
+    }
+    // Decorate a copy offer with what the provider does on its own (feature 085):
+    // if it reads the sibling natively, say so and mark the copy optional.
+    const offer = (copySource) => {
+        const nativelyReads = (provider.instructionFallbacks ?? []).includes(copySource);
+        if (!nativelyReads)
+            return { needed: true, targetFile, copySource };
+        const shortName = provider.displayName.replace(/ (Code|CLI)$/, '');
+        return {
+            needed: true,
+            targetFile,
+            copySource,
+            nativelyReads: true,
+            note: `${shortName} reads ${copySource} on its own when ${targetFile} is absent, so this is optional.`,
+        };
+    };
     // 2. Alt file exists — offer to copy it to the primary filename
     if (provider.altInstructionFile) {
         try {
             await fs.access(path.join(cwd, provider.altInstructionFile));
-            return { needed: true, targetFile, copySource: provider.altInstructionFile };
+            return offer(provider.altInstructionFile);
         }
         catch { /* not found, continue */ }
     }
@@ -136,7 +217,7 @@ export async function checkInstructionFile(providerId, cwd) {
             continue; // skip the one we're trying to create
         try {
             await fs.access(path.join(cwd, candidate));
-            return { needed: true, targetFile, copySource: candidate };
+            return offer(candidate);
         }
         catch { /* not found, try next */ }
     }

@@ -3,7 +3,14 @@ import type { VoiceState } from '@/lib/types';
 
 interface UseVoiceRecorderOptions {
   maxRecordingSeconds: number;
-  onTranscriptionComplete?: (text: string) => void;
+  /**
+   * Deliver a transcript to its target. Return an error message (string) when
+   * it could NOT be delivered — the recorder then enters the error state and
+   * keeps both the audio and the transcript so Retry can re-deliver without
+   * re-transcribing. Return nothing (or throw) otherwise; a throw is treated
+   * as a delivery failure with the thrown message.
+   */
+  onTranscriptionComplete?: (text: string) => string | void;
 }
 
 interface UseVoiceRecorderReturn {
@@ -25,15 +32,31 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [transcribedText, setTranscribedText] = useState<string | null>(null);
+  // Mirrors "audio or transcript retained" as state so the UI (Retry button,
+  // popup title) re-renders when retention changes — refs alone don't.
+  const [hasRecording, setHasRecording] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioBlobRef = useRef<Blob | null>(null);
+  // Transcript that came back but could not be delivered — Retry re-delivers
+  // it instead of paying for a second transcription.
+  const pendingTranscriptRef = useRef<string | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const batchStartRef = useRef(0);
   const autoPausedRef = useRef(false);
   const onTranscriptionCompleteRef = useRef(onTranscriptionComplete);
+  // Recording generation: bumped by every start and clear. Any async
+  // completion (transcription response, retry) captures the generation it
+  // started under and is ignored if it no longer matches — so a modal closed
+  // or voice reclaimed mid-transcription, or a fresh recording started after
+  // a clear, can never receive a stale transcript.
+  const generationRef = useRef(0);
+  // Single-flight locks — `state` in the closures lags a tap by one render,
+  // so a rapid double-tap could otherwise start two recorders or two POSTs.
+  const startingRef = useRef(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     onTranscriptionCompleteRef.current = onTranscriptionComplete;
@@ -96,12 +119,19 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
   }, []);
 
   const transcribeAudio = useCallback(async (blob: Blob): Promise<string> => {
+    if (blob.size === 0) {
+      throw new Error('No audio was captured (empty recording). Check the microphone and try again.');
+    }
     const formData = new FormData();
     formData.append('audio', blob, 'recording.webm');
     const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Transcription failed');
-    return data.text;
+    const text = typeof data.text === 'string' ? data.text.trim() : '';
+    if (!text) {
+      throw new Error('Transcription came back empty — nothing intelligible was heard.');
+    }
+    return text;
   }, []);
 
   const releaseStream = useCallback(() => {
@@ -109,18 +139,57 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
     streamRef.current = null;
   }, []);
 
+  /**
+   * Hand a transcript to the delivery callback. On success everything retained
+   * for Retry is dropped; on failure the audio + transcript are kept and the
+   * error state shows the callback's message.
+   */
+  const deliverTranscript = useCallback((text: string) => {
+    let failure: string | undefined;
+    try {
+      failure = onTranscriptionCompleteRef.current?.(text) || undefined;
+    } catch (err) {
+      failure = (err as Error).message || 'Transcript could not be delivered';
+    }
+    setTranscribedText(text);
+    setElapsedSeconds(0);
+    if (failure) {
+      pendingTranscriptRef.current = text;
+      setHasRecording(true);
+      setError(failure);
+      setState('error');
+      return;
+    }
+    audioBlobRef.current = null;
+    pendingTranscriptRef.current = null;
+    chunksRef.current = [];
+    setHasRecording(false);
+    setState('idle');
+  }, []);
+
   const startRecording = useCallback(async () => {
     if (state !== 'idle' && state !== 'disabled') return;
+    if (startingRef.current) return;
+    startingRef.current = true;
+    const generation = ++generationRef.current;
 
     try {
       setError(null);
       setTranscribedText(null);
       chunksRef.current = [];
       audioBlobRef.current = null;
+      pendingTranscriptRef.current = null;
+      setHasRecording(false);
       setElapsedSeconds(0);
       batchStartRef.current = 0;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (generation !== generationRef.current) {
+        // Cleared (modal closed / voice reclaimed) while the permission
+        // prompt was up — don't start a recorder nobody owns.
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
@@ -150,6 +219,8 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
       }
       setState('error');
       releaseStream();
+    } finally {
+      startingRef.current = false;
     }
   }, [state, startTimer, releaseStream]);
 
@@ -178,12 +249,15 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
   }, [state, elapsedSeconds, startTimer]);
 
   const clearRecording = useCallback(() => {
+    generationRef.current++; // orphan any in-flight transcription/retry
     stopTimer();
     if (mediaRecorderRef.current?.state !== 'inactive') {
       try { mediaRecorderRef.current?.stop(); } catch { /* ignore */ }
     }
     chunksRef.current = [];
     audioBlobRef.current = null;
+    pendingTranscriptRef.current = null;
+    setHasRecording(false);
     setElapsedSeconds(0);
     setError(null);
     setTranscribedText(null);
@@ -193,53 +267,69 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
 
   const submitRecording = useCallback(async () => {
     if (state !== 'recording' && state !== 'paused') return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    const generation = generationRef.current;
 
     stopTimer();
     setState('transcribing');
 
     try {
       const blob = await stopMediaRecorder();
-      audioBlobRef.current = blob;
       releaseStream();
+      if (generation !== generationRef.current) return; // cleared while stopping
+      audioBlobRef.current = blob;
+      setHasRecording(blob.size > 0);
 
       const text = await transcribeAudio(blob);
-      setTranscribedText(text);
-      setElapsedSeconds(0);
-      chunksRef.current = [];
-      setState('idle');
-      onTranscriptionCompleteRef.current?.(text);
+      if (generation !== generationRef.current) return; // cleared while transcribing
+      deliverTranscript(text);
     } catch (err) {
+      if (generation !== generationRef.current) return;
       setError((err as Error).message || 'Transcription failed');
       setState('error');
+    } finally {
+      submittingRef.current = false;
     }
-  }, [state, stopTimer, stopMediaRecorder, transcribeAudio, releaseStream]);
+  }, [state, stopTimer, stopMediaRecorder, transcribeAudio, releaseStream, deliverTranscript]);
 
   const retryTranscription = useCallback(async () => {
-    if (state !== 'error' || !audioBlobRef.current) return;
+    if (state !== 'error') return;
+    if (submittingRef.current) return;
+    const generation = generationRef.current;
 
+    // A transcript that only failed delivery is re-delivered as-is.
+    const pending = pendingTranscriptRef.current;
+    if (pending) {
+      setError(null);
+      deliverTranscript(pending);
+      return;
+    }
+
+    if (!audioBlobRef.current) return;
+    submittingRef.current = true;
     setState('transcribing');
     setError(null);
 
     try {
       const text = await transcribeAudio(audioBlobRef.current);
-      setTranscribedText(text);
-      audioBlobRef.current = null;
-      chunksRef.current = [];
-      setElapsedSeconds(0);
-      setState('idle');
-      onTranscriptionCompleteRef.current?.(text);
+      if (generation !== generationRef.current) return;
+      deliverTranscript(text);
     } catch (err) {
+      if (generation !== generationRef.current) return;
       setError((err as Error).message || 'Transcription failed');
       setState('error');
+    } finally {
+      submittingRef.current = false;
     }
-  }, [state, transcribeAudio]);
+  }, [state, transcribeAudio, deliverTranscript]);
 
   return {
     state,
     elapsedSeconds,
     error,
     transcribedText,
-    hasRecording: audioBlobRef.current !== null || chunksRef.current.length > 0,
+    hasRecording,
     startRecording,
     pauseRecording,
     resumeRecording,

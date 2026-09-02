@@ -21,6 +21,9 @@ interface TerminalProps {
   onConnectionChange?: (connected: boolean) => void;
   onSessionExit?: (code: number, output?: string) => void;
   onReady?: (handle: TerminalHandle) => void;
+  /** Fired when this terminal instance is torn down — any handle received via
+   *  onReady is dead after this (its InputQueue is disposed). */
+  onDispose?: () => void;
   onImagePaste?: (file: File) => void;
 }
 
@@ -32,6 +35,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onConnectionChange,
     onSessionExit,
     onReady,
+    onDispose,
     onImagePaste,
   },
   ref
@@ -68,13 +72,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const onSessionExitRef = useRef(onSessionExit);
   const onReadyRef = useRef(onReady);
   const onImagePasteRef = useRef(onImagePaste);
+  const onDisposeRef = useRef(onDispose);
 
   useEffect(() => {
     onConnectionChangeRef.current = onConnectionChange;
     onSessionExitRef.current = onSessionExit;
     onReadyRef.current = onReady;
+    onDisposeRef.current = onDispose;
     onImagePasteRef.current = onImagePaste;
-  }, [onConnectionChange, onSessionExit, onReady, onImagePaste]);
+  }, [onConnectionChange, onSessionExit, onReady, onImagePaste, onDispose]);
 
   // Expose focus and sendInput methods
   useImperativeHandle(ref, () => ({
@@ -307,10 +313,57 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Mobile touch scroll — xterm's .xterm-viewport (scrollable) is a sibling
     // of .xterm-screen (canvas), not an ancestor. The browser can't find a
     // scrollable ancestor from the canvas touch target, so native touch-to-scroll
-    // doesn't work. We handle it manually via terminal.scrollLines().
+    // doesn't work, and xterm.js has no touch handling of its own.
+    //
+    // Two paths, chosen per drag from xterm's live state:
+    //   1. Normal buffer AND the app does not own wheel events (shell, Codex,
+    //      Gemini): terminal.scrollLines(n) moves xterm's own scrollback.
+    //      NOT synthetic wheel events here — xterm 6's viewport normalises
+    //      wheel events through VS Code's StandardWheelEvent
+    //      (src/vs/base/browser/mouseEvent.ts:150-161), which reads the legacy
+    //      `wheelDeltaY` before `deltaMode`; Blink/WebKit populate it for a
+    //      synthetic event as plain -deltaY, so a 2-line drag becomes 2/120 of
+    //      a line (attenuated to nothing) instead of 2 lines.
+    //   2. Otherwise — alt buffer, or the app enabled a wheel-reporting mouse
+    //      mode (Claude Code CLI 2.1.2xx+ tracks the mouse and scrolls its own
+    //      alt-screen view) — dispatch synthetic `wheel` events on xterm's
+    //      screen element, exactly what a desktop wheel does: xterm reports
+    //      them to the PTY (CoreBrowserTerminal.ts bindMouse → sendEvent) or,
+    //      with no mouse mode on the alt buffer (vim, less), sends arrow keys
+    //      (CoreBrowserTerminal.ts ~L806 `!this.buffer.hasScrollback`). Both
+    //      branches emit ONE report/key per event regardless of deltaY
+    //      magnitude, so we dispatch |lines| unit events, not one event of
+    //      deltaY=lines.
+    // The previous implementation only had path 1 — a silent no-op on Claude
+    // Code's alt buffer, which is why touch scroll "died" when the CLI took
+    // the mouse in July.
     let touchStartY: number | null = null;
     let touchAccumulator = 0;
     const LINE_HEIGHT = Math.ceil((terminal.options.fontSize ?? 14) * (terminal.options.lineHeight ?? 1));
+    // Mouse modes that report wheel events to the app (x10 reports button
+    // presses only — see CoreMouseService protocols).
+    const WHEEL_REPORTING_MODES = new Set(['vt200', 'drag', 'any']);
+
+    const dispatchTouchScroll = (lines: number, touch: Touch) => {
+      const appOwnsWheel = WHEEL_REPORTING_MODES.has(terminal.modes.mouseTrackingMode);
+      const normalBuffer = terminal.buffer.active.type === 'normal';
+      const screenEl = terminal.element?.querySelector<HTMLElement>('.xterm-screen') ?? terminal.element;
+      if ((normalBuffer && !appOwnsWheel) || !screenEl || typeof WheelEvent === 'undefined') {
+        terminal.scrollLines(lines);
+        return;
+      }
+      const direction = lines > 0 ? 1 : -1;
+      for (let i = 0; i < Math.abs(lines); i++) {
+        screenEl.dispatchEvent(new WheelEvent('wheel', {
+          deltaY: direction,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          bubbles: true,
+          cancelable: true,
+        }));
+      }
+    };
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 1) {
@@ -321,14 +374,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     const handleTouchMove = (e: TouchEvent) => {
       if (touchStartY === null || e.touches.length !== 1) return;
-      const currentY = e.touches[0].clientY;
+      const touch = e.touches[0];
+      const currentY = touch.clientY;
       const deltaY = touchStartY - currentY; // positive = scroll down
       touchStartY = currentY;
 
       touchAccumulator += deltaY;
       const lines = Math.trunc(touchAccumulator / LINE_HEIGHT);
       if (lines !== 0) {
-        terminal.scrollLines(lines);
+        dispatchTouchScroll(lines, touch);
         touchAccumulator -= lines * LINE_HEIGHT;
       }
 
@@ -452,8 +506,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             terminal.reset();
             // Resize to original dimensions first (state was captured at these dimensions)
             terminal.resize(originalDimsRef.current.cols, originalDimsRef.current.rows);
-            // Write the serialized state
-            terminal.write(state);
+            // Write the serialized state. The snapshot re-enables the modes
+            // the app had on (bracketed paste, focus, mouse tracking) but the
+            // serialize addon cannot see the mouse ENCODING, so it never
+            // re-sends SGR (?1006h). Without it xterm reports wheel/clicks in
+            // legacy X10 form, which Claude Code (any modern mouse-tracking
+            // CLI) ignores — wheel scroll is dead after every reopen until the
+            // CLI happens to re-send its setup. Restore SGR locally once the
+            // snapshot has been parsed; nothing is sent to the PTY.
+            terminal.write(state, () => {
+              if (terminal.modes.mouseTrackingMode !== 'none') {
+                terminal.write('\x1b[?1006h');
+              }
+            });
             // Now fit to current container size and notify server
             fitAddon.fit();
             sendResize();
@@ -531,6 +596,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         connectionIdRef.current = null;
       }
       terminal.dispose();
+      onDisposeRef.current?.();
     };
   }, [sessionName, bridgeUrl]);
 

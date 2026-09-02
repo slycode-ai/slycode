@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { detectProviderPlatforms } from './provider-registry.server';
 import type {
   AssetType,
   AssetFrontmatter,
@@ -330,15 +331,9 @@ export function buildAssetMatrix(
  * Detect which AI platforms a project supports by checking for config files and directories.
  */
 export function detectPlatforms(projectPath: string): PlatformDetection {
-  const exists = (p: string) => {
-    try { return fs.existsSync(path.join(projectPath, p)); } catch { return false; }
-  };
-
-  return {
-    claude: exists('CLAUDE.md') || exists('.claude'),
-    gemini: exists('GEMINI.md') || exists('.gemini'),
-    codex: exists('AGENTS.md') || exists('.codex') || exists('.agents'),
-  };
+  // Rules live in data/providers.json (`detect.files` / `detect.dirs`) so a
+  // new provider shows up as a badge without touching this file (feature 085).
+  return detectProviderPlatforms(projectPath);
 }
 
 // ============================================================================

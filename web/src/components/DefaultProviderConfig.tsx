@@ -3,11 +3,50 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getProviderColor } from '@/lib/provider-colors';
 
+interface ModelEntry { id: string; label: string; description?: string }
+
 interface ProviderInfo {
   id: string;
   displayName: string;
   permissions: { label: string; default: boolean };
-  model?: { available?: { id: string; label: string; description?: string }[] };
+  model?: {
+    available?: ModelEntry[];
+    /** Present when the provider enumerates models on demand (feature 085). */
+    refreshCommand?: string[];
+    refreshedAt?: string;
+  };
+}
+
+/**
+ * Group a provider/model list for the picker: entries flagged "used before"
+ * form the first group, the rest group by their `provider/` prefix. Lists
+ * without prefixes (Claude, Codex) come back as a single unlabelled group.
+ */
+function groupModels(models: ModelEntry[]): Array<{ label: string | null; items: ModelEntry[] }> {
+  const used = models.filter(m => /used before/.test(m.description ?? ''));
+  const rest = models.filter(m => !used.includes(m));
+  const hasPrefixes = rest.some(m => m.id.includes('/'));
+  if (!hasPrefixes) return [{ label: used.length ? 'Recently used' : null, items: used }, { label: null, items: rest }].filter(g => g.items.length);
+  const byPrefix = new Map<string, ModelEntry[]>();
+  for (const m of rest) {
+    const prefix = m.id.split('/')[0];
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), m]);
+  }
+  return [
+    ...(used.length ? [{ label: 'Recently used', items: used }] : []),
+    ...[...byPrefix.entries()].map(([label, items]) => ({ label, items })),
+  ];
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} d ago`;
 }
 
 interface GlobalDefault {
@@ -33,6 +72,9 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
   const [customMode, setCustomMode] = useState(false);
   const [customDraft, setCustomDraft] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
+  // Model Refresh (feature 085): on demand only, never polled.
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -100,6 +142,30 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
   const modelInList = !!def?.model && models.some(m => m.id === def.model);
   const isCustomModel = !!def?.model && !modelInList;
   const dotColor = def ? getProviderColor(def.provider).dot : undefined;
+  const canRefresh = !!currentProvider?.model?.refreshCommand?.length;
+  const shortName = currentProvider ? currentProvider.displayName.replace(/ (Code|CLI)$/, '') : 'Provider';
+  const groups = groupModels(models);
+
+  const refreshModels = useCallback(async () => {
+    if (!def || !canRefresh || refreshing) return;
+    setRefreshing(true);
+    setRefreshNote(null);
+    try {
+      const res = await fetch(`/api/providers/${encodeURIComponent(def.provider)}/models/refresh`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Refresh failed (${res.status})`);
+      setProviders(prev => {
+        const p = prev[def.provider];
+        if (!p) return prev;
+        return { ...prev, [def.provider]: { ...p, model: { ...(p.model ?? {}), available: body.available, refreshedAt: body.refreshedAt } } };
+      });
+      setRefreshNote({ kind: 'ok', text: `${body.count} models${body.recentCount ? `, ${body.recentCount} used before` : ''}` });
+    } catch (err) {
+      setRefreshNote({ kind: 'error', text: (err as Error).message });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [def, canRefresh, refreshing]);
 
   const commitCustom = () => {
     if (!def) return;
@@ -182,9 +248,25 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
             })}
           </div>
 
-          {/* Model — known list + free-text custom entry */}
+          {/* Model — known list + free-text custom entry (+ on-demand Refresh for providers that enumerate) */}
           <div className="mt-3">
-            <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-void-500">Model</span>
+            <div className="mb-1 flex items-baseline justify-between">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">Model</span>
+              {canRefresh && (
+                <button
+                  type="button"
+                  onClick={refreshModels}
+                  disabled={refreshing}
+                  title={currentProvider?.model?.refreshedAt ? `Last refreshed ${relativeTime(currentProvider.model.refreshedAt)}` : `Ask ${shortName} which models are available here`}
+                  className="flex items-center gap-1 text-[10px] font-medium text-void-500 transition-colors hover:text-neon-blue-400 disabled:cursor-progress disabled:text-void-500"
+                >
+                  <svg className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15.4A7 7 0 0018.4 12M18.4 8.6A7 7 0 005.6 12" />
+                  </svg>
+                  {refreshing ? 'Asking…' : 'Refresh'}
+                </button>
+              )}
+            </div>
             {customMode ? (
               <input
                 ref={customInputRef}
@@ -214,13 +296,27 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
                 }}
                 className="w-full rounded border border-void-300 bg-void-100 px-2 py-1.5 text-xs text-void-900 dark:border-void-600 dark:bg-void-900 dark:text-void-300"
               >
-                <option value="">Provider default</option>
-                {models.map(m => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
+                <option value="">{shortName} default</option>
+                {groups.map((g, i) => g.label
+                  ? (
+                    <optgroup key={`${g.label}-${i}`} label={g.label}>
+                      {g.items.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                    </optgroup>
+                  )
+                  : g.items.map(m => <option key={m.id} value={m.id}>{m.label}</option>))}
                 {isCustomModel && <option value={def.model}>{def.model} (custom)</option>}
                 <option value="__custom__">Custom…</option>
               </select>
+            )}
+            {refreshNote && (
+              <p aria-live="polite" className={`mt-1 text-[10px] leading-snug ${refreshNote.kind === 'error' ? 'text-red-400' : 'text-void-500'}`}>
+                {refreshNote.kind === 'ok' ? `Refreshed · ${refreshNote.text}` : refreshNote.text}
+              </p>
+            )}
+            {canRefresh && models.length === 0 && !refreshNote && !customMode && (
+              <p className="mt-1 text-[10px] leading-snug text-void-500">
+                No models listed yet. Refresh asks {shortName} what it can reach from this machine; until then it uses its own default.
+              </p>
             )}
             {isCustomModel && !customMode && (
               <p className="mt-1 text-[10px] leading-snug text-void-500">

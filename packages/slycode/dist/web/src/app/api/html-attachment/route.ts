@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { loadRegistry } from '@/lib/registry';
 import { getSlycodeRoot } from '@/lib/paths';
+import { directPathRegex } from '@/lib/provider-registry.server';
 
 // HTML attachments are served raw with a tightened CSP that lets common
 // CDN-hosted libraries load but blocks every exfiltration vector we know about.
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest) {
     baseDir = getSlycodeRoot();
   }
 
-  const isDirectPath = /^\.(claude|codex|agents|gemini)/.test(posixPath) || /^(store|updates)\//.test(posixPath);
+  const isDirectPath = directPathRegex().test(posixPath) || /^(store|updates)\//.test(posixPath);
   const fullPath = isDirectPath
     ? path.join(baseDir, posixPath)
     : path.join(baseDir, 'documentation', posixPath.replace(/^documentation\//, ''));

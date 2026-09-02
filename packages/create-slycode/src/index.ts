@@ -4,7 +4,7 @@ import * as readline from 'readline';
 import { execSync } from 'child_process';
 
 const USAGE = `
-Usage: npx create-slycode [directory]
+Usage: npx @slycode/create-slycode [directory]
 
 Creates a new SlyCode workspace.
 
@@ -13,9 +13,9 @@ Options:
   --help, -h    Show this help message
 
 Examples:
-  npx create-slycode              # Create in ./slycode
-  npx create-slycode my-workspace # Create in ./my-workspace
-  npx create-slycode .            # Create in current directory
+  npx @slycode/create-slycode              # Create in ./slycode
+  npx @slycode/create-slycode my-workspace # Create in ./my-workspace
+  npx @slycode/create-slycode .            # Create in current directory
 `.trim();
 
 interface SetupAnswers {
@@ -190,7 +190,7 @@ function writeEnvFile(dir: string, answers: SetupAnswers): void {
     `TZ=${answers.timezone}`,
     '',
     '# ── Ports ──────────────────────────────────────────────────────────',
-    '# Web UI: the port you open in your browser (http://localhost:7591)',
+    `# Web UI: the port you open in your browser (http://localhost:${answers.webPort})`,
     `WEB_PORT=${answers.webPort}`,
     '# Bridge: internal service for terminal sessions (not directly accessed)',
     `BRIDGE_PORT=${answers.bridgePort}`,
@@ -835,18 +835,18 @@ export async function main(args: string[]): Promise<void> {
       console.log('  ⚠  macOS: cd into your workspace before running slycode:');
       console.log('');
       console.log(`     cd ${resolvedDir}`);
-      console.log('     slycode start           Start all services');
+      console.log('     npx slycode start       Start all services');
       console.log('');
-      console.log('  slycode doctor          Check environment');
-      console.log('  slycode --help          See all commands');
+      console.log('  npx slycode doctor      Check environment');
+      console.log('  npx slycode --help      See all commands');
     } else {
       console.log('  Next steps:');
       console.log('');
       console.log(`     cd ${resolvedDir}`);
-      console.log('     slycode start           Start all services');
+      console.log('     npx slycode start       Start all services');
       console.log('');
-      console.log('  slycode doctor          Check environment');
-      console.log('  slycode --help          See all commands');
+      console.log('  npx slycode doctor      Check environment');
+      console.log('  npx slycode --help      See all commands');
     }
   } else {
     // Installed in current directory — no cd needed
@@ -861,9 +861,9 @@ export async function main(args: string[]): Promise<void> {
       console.log('  │    npx slycode --help      See all commands             │');
       console.log('  └─────────────────────────────────────────────────────────┘');
     } else {
-      console.log('  slycode start           Start all services');
-      console.log('  slycode doctor          Check environment');
-      console.log('  slycode --help          See all commands');
+      console.log('  npx slycode start       Start all services');
+      console.log('  npx slycode doctor      Check environment');
+      console.log('  npx slycode --help      See all commands');
     }
   }
   console.log('');

@@ -23,7 +23,15 @@
  * This module must stay dependency-free (no session-manager imports) so it can
  * be table-tested against fixture snapshots.
  */
-export type SubmitProvider = 'claude' | 'codex' | 'gemini';
+/**
+ * Providers whose TUI chrome this classifier understands. This list is
+ * inherently per-TUI (each entry has hand-captured fixtures and an
+ * extractInputRegion arm) — it is NOT the provider registry. A provider that
+ * is driven by a non-PTY transport (feature 085) never appears here.
+ */
+export declare const SUBMIT_PROVIDERS: readonly ["claude", "codex", "gemini"];
+export type SubmitProvider = typeof SUBMIT_PROVIDERS[number];
+export declare function isSubmitProvider(provider: string | undefined | null): provider is SubmitProvider;
 export type InputRegionClassification = 'empty' | 'queued_ours' | 'queued_other' | 'no_input_region' | 'unrecognized';
 export type VerifyAction = 'wait' | 'resend_enter' | 'delivered' | 'failed' | 'blocked' | 'ambiguous';
 export interface PastePlaceholder {
