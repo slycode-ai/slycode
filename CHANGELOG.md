@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-09-02
+
+### Fixed
+- OpenCode with local models (Ollama, LM Studio, etc.) is no longer blocked by a `provider_not_connected` pre-flight. The auth check assumed OpenCode always needs a cloud login, but models configured locally in `opencode.json` don't. `slycode doctor` still warns if a cloud credential is expected and missing.
+- Per-machine disabled providers are now respected when picking defaults. If Claude is disabled and only OpenCode is enabled, new sessions now default to OpenCode instead of trying to spawn Claude first. Your stored default is preserved and comes back if you re-enable Claude later. Also applied to Telegram messaging and cross-card CLI defaults.
+
 ## [0.4.6] - 2026-09-02
 
 ### Added

@@ -62,7 +62,15 @@ function getProviderDefault(projectId) {
         const data = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
         const defaults = data.defaults;
         const def = (projectId ? defaults.projects?.[projectId] : undefined) ?? defaults.global;
-        return { provider: def?.provider || 'claude', model: def?.model };
+        let provider = def?.provider || 'claude';
+        // A default pointing at a per-machine-disabled provider falls back to the
+        // first enabled one (feature 085 stretch fix — OpenCode-only boxes).
+        const enabled = enabledProviders();
+        if (enabled.length > 0 && !enabled.includes(provider)) {
+            provider = enabled[0];
+            return { provider };
+        }
+        return { provider, model: def?.model };
     }
     catch {
         return { provider: 'claude' };

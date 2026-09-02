@@ -55,11 +55,30 @@ export function orderProviderIds(ids: string[], prefs: ProviderPrefs): string[] 
  * disabled providers are omitted entirely (selectors, wizard and messaging
  * never see them) and the remainder is reordered. Non-destructive copy.
  */
-export function applyProviderPrefs<T extends { providers?: Record<string, unknown> }>(data: T, prefs: ProviderPrefs): T {
+export function applyProviderPrefs<T extends {
+  providers?: Record<string, unknown>;
+  defaults?: { global?: { provider?: string }; projects?: Record<string, { provider?: string }> };
+}>(data: T, prefs: ProviderPrefs): T {
   if (!data?.providers) return data;
   const disabled = new Set(prefs.disabled);
   const ids = orderProviderIds(Object.keys(data.providers), prefs).filter(id => !disabled.has(id));
   const providers: Record<string, unknown> = {};
   for (const id of ids) providers[id] = data.providers[id];
-  return { ...data, providers };
+
+  // Defaults must respect the disabled list too: a machine whose stored
+  // default points at a disabled provider would otherwise keep trying it
+  // (observed: OpenCode-only box still opening Claude). Rewritten in the
+  // RESPONSE only — the stored file keeps the user's preference, so
+  // re-enabling the provider restores it.
+  const firstEnabled = ids[0];
+  const fix = <D extends { provider?: string }>(d: D | undefined): D | undefined =>
+    d?.provider && disabled.has(d.provider) && firstEnabled ? { ...d, provider: firstEnabled } : d;
+  let defaults = data.defaults;
+  if (defaults && firstEnabled) {
+    const projects = defaults.projects
+      ? Object.fromEntries(Object.entries(defaults.projects).map(([k, v]) => [k, fix(v)!]))
+      : undefined;
+    defaults = { ...defaults, global: fix(defaults.global), ...(projects ? { projects } : {}) };
+  }
+  return { ...data, providers, ...(defaults ? { defaults } : {}) };
 }

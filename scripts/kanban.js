@@ -4184,7 +4184,22 @@ async function resolveSessionProvider(opts, card, bridgeUrl) {
       if (match) registryProjectId = match.id;
     } catch { /* registry optional */ }
     const def = (registryProjectId && providers?.defaults?.projects?.[registryProjectId]) || providers?.defaults?.global;
-    if (def?.provider) return def.provider;
+    if (def?.provider) {
+      // Per-machine disabled providers (feature 085 stretch): a stored default
+      // pointing at one falls back to the first enabled provider.
+      try {
+        const prefs = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'data', 'provider-prefs.json'), 'utf-8'));
+        const disabled = Array.isArray(prefs?.disabled) ? prefs.disabled : [];
+        if (disabled.includes(def.provider)) {
+          const order = Array.isArray(prefs?.order) ? prefs.order : [];
+          const all = Object.keys(providers?.providers || {}).filter((id) => !disabled.includes(id));
+          const head = order.filter((id) => all.includes(id));
+          const enabled = [...head, ...all.filter((id) => !head.includes(id))];
+          if (enabled.length > 0) return enabled[0];
+        }
+      } catch { /* prefs optional */ }
+      return def.provider;
+    }
   } catch { /* providers.json optional */ }
 
   return 'claude';

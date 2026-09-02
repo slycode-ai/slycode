@@ -131,8 +131,12 @@ export class OpenCodeApiTransport implements SessionTransport {
   // ---- spawn -------------------------------------------------------------
 
   async planSpawn(input: SpawnPlanInput): Promise<SpawnPlan> {
+    // No hard credential gate: local/config-defined models (Ollama, LM Studio,
+    // anything in opencode.json) need no auth.json at all. Cloud logins are
+    // OpenCode's own business — a missing one surfaces in its TUI, and doctor
+    // reports it. (A hard block here stranded a local-model-only machine.)
     if (!hasOpenCodeCredentials()) {
-      throw new Error("provider_not_connected: OpenCode has no credentials on this machine — run 'opencode auth login' in a terminal first");
+      console.log('[opencode-api] no cloud credentials on this machine — assuming local/config-defined providers');
     }
     const port = await allocateLoopbackPort();
     const password = randomBytes(24).toString('base64url');

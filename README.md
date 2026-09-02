@@ -187,7 +187,7 @@ SlyCode works with multiple AI coding agents:
 |----------|-----|--------|
 | Claude Code | `claude` | Supported |
 | Codex | `codex` | Supported |
-| OpenCode | `opencode` | Supported — driven over its built-in API; run `opencode auth login` once per machine (ChatGPT Plus/Pro OAuth, API keys). Claude Pro/Max subscriptions can't be used inside OpenCode (Anthropic's terms); use an Anthropic API key for Claude models there |
+| OpenCode | `opencode` | Supported — driven over its built-in API. Local models configured in `opencode.json` (Ollama, LM Studio, …) need no login; cloud models need `opencode auth login` once per machine (ChatGPT Plus/Pro OAuth, API keys). Claude Pro/Max subscriptions can't be used inside OpenCode (Anthropic's terms); use an Anthropic API key for Claude models there |
 | Gemini CLI | `gemini` | Supported — API key required for personal Google accounts |
 
 - Switch providers per card or per project from the web UI or Telegram
