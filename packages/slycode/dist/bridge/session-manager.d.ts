@@ -240,7 +240,7 @@ export declare class SessionManager {
     private static readonly VERIFY_MAX_RESENDS;
     /**
      * Per-provider Enter-resend cap. Post-submit double-Enter was validated
-     * harmless only on Claude (spike 2026-06-06); Codex/Gemini get a single
+     * harmless only on Claude (spike 2026-06-06); Codex gets a single
      * resend until validated there (card #0336 review decision).
      */
     private static readonly VERIFY_MAX_RESENDS_BY_PROVIDER;

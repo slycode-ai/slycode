@@ -160,3 +160,27 @@ export async function DELETE(
     return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
   }
 }
+
+// PUT — idempotent state writes (feature 086: PUT /speaker { enabled }).
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const { path } = await params;
+  const targetPath = path.join('/');
+  const url = `${BRIDGE_URL}/${targetPath}`;
+  try {
+    const body = await request.text();
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const text = await res.text();
+    let data: unknown;
+    try { data = JSON.parse(text); } catch { data = { error: text || `Bridge responded ${res.status}` }; }
+    return NextResponse.json(data, { status: res.status });
+  } catch (_err) {
+    return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+  }
+}

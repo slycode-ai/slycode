@@ -5,7 +5,7 @@
  *
  * Creates SlyCode-compliant project workspaces.
  * Can analyze existing directories and scaffold new or partial setups.
- * Supports multiple AI providers (Claude, Codex, Gemini).
+ * Supports multiple AI providers (Claude, Codex, OpenCode).
  *
  * Usage: node scripts/scaffold.js <command> [options]
  * Run with --help for more information.
@@ -129,7 +129,7 @@ Options:
 
 Examples:
   scaffold analyze --path /home/user/projects/my-project
-  scaffold analyze --path ./project --providers claude,codex,gemini
+  scaffold analyze --path ./project --providers claude,codex,opencode
 `;
 
 const CREATE_HELP = `
@@ -143,13 +143,13 @@ Options:
   --id <id>                 Project ID (default: kebab-case of name)
   --description <desc>      Project description
   --providers <list>        Comma-separated providers (default: claude)
-                            Available: claude, codex, gemini
+                            Available: claude, codex, opencode
   --config <json>           JSON config for selective scaffolding
 
 Examples:
   scaffold create --path /home/user/projects/my-app --name "My App"
   scaffold create --path ./app --name "App" --providers claude,codex
-  scaffold create --path ./app --name "App" --providers claude,codex,gemini
+  scaffold create --path ./app --name "App" --providers claude,codex,opencode
 `;
 
 // ============================================================================

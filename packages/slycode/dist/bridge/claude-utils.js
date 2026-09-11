@@ -191,96 +191,6 @@ export async function detectNewCodexSessionId(dir, beforeFiles) {
     return extractCodexSessionId(newFiles[0]);
 }
 // ============================================================
-// Gemini session detection
-// Sessions: ~/.gemini/tmp/<slug>/chats/session-*.json
-// Slug resolved from ~/.gemini/projects.json registry or computed via slugify
-// Full UUID stored inside JSON as sessionId field
-// ============================================================
-/**
- * Slugify a name the same way Gemini CLI does (projectRegistry.ts).
- * Lowercase, replace non-alphanumeric with hyphens, collapse, trim.
- */
-function geminiSlugify(text) {
-    return (text
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '') || 'project');
-}
-/**
- * Get the Gemini chats directory for a given cwd.
- * Reads ~/.gemini/projects.json for the canonical slug (Gemini's own registry).
- * Falls back to computing the slug for first-run cases.
- */
-export function getGeminiSessionDir(cwd) {
-    const geminiDir = path.join(os.homedir(), '.gemini');
-    const geminiBase = path.join(geminiDir, 'tmp');
-    // Read Gemini's project registry for the canonical slug
-    const registryPath = path.join(geminiDir, 'projects.json');
-    try {
-        const data = JSON.parse(require('fs').readFileSync(registryPath, 'utf-8'));
-        const slug = data?.projects?.[cwd];
-        if (slug) {
-            return path.join(geminiBase, slug, 'chats');
-        }
-    }
-    catch { /* registry doesn't exist yet */ }
-    // Fallback: compute slug the same way Gemini does
-    const baseName = path.basename(cwd) || 'project';
-    return path.join(geminiBase, geminiSlugify(baseName), 'chats');
-}
-/**
- * List all session files in a Gemini chats directory.
- * Returns filenames for before/after comparison.
- */
-export async function listGeminiSessionFiles(dir) {
-    try {
-        const files = await fs.readdir(dir);
-        // Gemini CLI ≤0.4x wrote session-*.json (single JSON object); 0.49+ writes
-        // session-*.jsonl (JSONL, metadata on the first line). Accept both —
-        // matching only .json made current Gemini sessions invisible to detection.
-        return files.filter(f => f.startsWith('session-') && (f.endsWith('.json') || f.endsWith('.jsonl')));
-    }
-    catch {
-        return [];
-    }
-}
-/**
- * Extract the full session UUID from a Gemini session file (JSON or JSONL).
- */
-export async function extractGeminiSessionId(filePath) {
-    try {
-        const content = await fs.readFile(filePath, 'utf-8');
-        let data;
-        try {
-            data = JSON.parse(content);
-        }
-        catch {
-            // JSONL format — the session metadata record is the first line
-            const nl = content.indexOf('\n');
-            data = JSON.parse(nl === -1 ? content : content.slice(0, nl));
-        }
-        const id = data?.sessionId;
-        return typeof id === 'string' && isValidGuid(id) ? id : null;
-    }
-    catch {
-        return null;
-    }
-}
-/**
- * Detect a new Gemini session by comparing before/after file lists.
- */
-export async function detectNewGeminiSessionId(dir, beforeFiles) {
-    const afterFiles = await listGeminiSessionFiles(dir);
-    const newFiles = afterFiles.filter(f => !beforeFiles.includes(f));
-    if (newFiles.length === 0)
-        return null;
-    // Sort by name (contains timestamp) to get the most recent
-    newFiles.sort((a, b) => b.localeCompare(a));
-    const filePath = path.join(dir, newFiles[0]);
-    return extractGeminiSessionId(filePath);
-}
-// ============================================================
 // Unified provider-agnostic session detection
 // ============================================================
 /**
@@ -313,26 +223,6 @@ export async function getMostRecentProviderSessionId(providerId, cwd) {
             valid.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
             return valid.length > 0 ? extractCodexSessionId(valid[0].file) : null;
         }
-        case 'gemini': {
-            const files = await listGeminiSessionFiles(dir);
-            if (files.length === 0)
-                return null;
-            // Get stats to find most recent by mtime
-            const fileStats = await Promise.all(files.map(async (f) => {
-                try {
-                    const stat = await fs.stat(path.join(dir, f));
-                    return { file: f, mtime: stat.mtime };
-                }
-                catch {
-                    return null;
-                }
-            }));
-            const valid = fileStats.filter(Boolean);
-            valid.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-            if (valid.length === 0)
-                return null;
-            return extractGeminiSessionId(path.join(dir, valid[0].file));
-        }
         default: return null;
     }
 }
@@ -357,7 +247,7 @@ export function parseCodexRolloutTimestamp(filename) {
  *
  * `excludeFiles` (feature 081): the spawn-time before-files snapshot, in the
  * same identifier format as listProviderSessionFiles (Claude: bare GUIDs;
- * Codex/Gemini: filenames). Entries present at spawn are skipped so the
+ * Codex: filenames). Entries present at spawn are skipped so the
  * detection watch can consume candidates instead of the old unsorted diff.
  */
 export async function listProviderSessionCandidates(providerId, cwd, excludeFiles) {
@@ -399,17 +289,6 @@ export async function listProviderSessionCandidates(providerId, cwd, excludeFile
             }
             break;
         }
-        case 'gemini': {
-            for (const file of await listGeminiSessionFiles(dir)) {
-                if (exclude.has(file))
-                    continue;
-                const sessionId = await extractGeminiSessionId(path.join(dir, file));
-                if (!sessionId)
-                    continue;
-                candidates.push({ sessionId, timestampMs: await statMs(file) });
-            }
-            break;
-        }
         default:
             return [];
     }
@@ -424,7 +303,6 @@ export function getProviderSessionDir(providerId, cwd) {
     switch (providerId) {
         case 'claude': return getClaudeProjectDir(cwd);
         case 'codex': return getCodexSessionDir();
-        case 'gemini': return getGeminiSessionDir(cwd);
         default: return null;
     }
 }
@@ -435,7 +313,6 @@ export async function listProviderSessionFiles(providerId, dir) {
     switch (providerId) {
         case 'claude': return listSessionFiles(dir);
         case 'codex': return listCodexSessionFiles(dir);
-        case 'gemini': return listGeminiSessionFiles(dir);
         default: return [];
     }
 }
@@ -446,7 +323,6 @@ export async function detectNewProviderSessionId(providerId, dir, beforeFiles) {
     switch (providerId) {
         case 'claude': return detectNewSessionId(dir, beforeFiles);
         case 'codex': return detectNewCodexSessionId(dir, beforeFiles);
-        case 'gemini': return detectNewGeminiSessionId(dir, beforeFiles);
         default: return null;
     }
 }

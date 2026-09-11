@@ -75,6 +75,11 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
   // Model Refresh (feature 085): on demand only, never polled.
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // Cross-project prompts (feature #0350): a project-owned policy stored in
+  // the board root. null until loaded — the control stays inert (never shows
+  // a guessed "off") until the real value is known.
+  const [crossProject, setCrossProject] = useState<boolean | null>(null);
+  const [crossSaveState, setCrossSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +101,41 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
       })
       .catch(() => { /* providers.json unavailable — control stays inert */ });
   }, [projectId]);
+
+  // Board settings — separate endpoint so this popover never pulls the whole board.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/kanban/settings?projectId=${encodeURIComponent(projectId)}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { settings?: { allowCrossProjectPrompts?: boolean } } | null) => {
+        if (cancelled || !data?.settings) return;
+        setCrossProject(data.settings.allowCrossProjectPrompts === true);
+      })
+      .catch(() => { /* no board yet — control stays inert */ });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const persistCrossProject = useCallback((next: boolean) => {
+    const previous = crossProject;
+    setCrossProject(next);
+    setCrossSaveState('saving');
+    fetch(`/api/kanban/settings?projectId=${encodeURIComponent(projectId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowCrossProjectPrompts: next }),
+    })
+      .then(async res => {
+        if (!res.ok) throw new Error(`save failed (${res.status})`);
+        const body = await res.json();
+        setCrossProject(body?.settings?.allowCrossProjectPrompts === true);
+        setCrossSaveState('idle');
+      })
+      .catch(() => {
+        // Revert to what the server last confirmed — never leave a lie on screen.
+        setCrossProject(previous);
+        setCrossSaveState('error');
+      });
+  }, [projectId, crossProject]);
 
   // Close on outside click / Escape
   useEffect(() => {
@@ -341,6 +381,33 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
               ? 'Showing the last-set default — saving any change pins it to this project.'
               : 'Used by every new session in this project. Pick a different provider at start time without changing this.'}
           </p>
+
+          {/* Cross-project prompts (feature #0350) — a policy this project owns, not a session default.
+              Kept visually apart from the provider defaults above: its own rule, its own save state. */}
+          {crossProject !== null && (
+            <div className="mt-3 border-t border-void-200/60 pt-2 dark:border-void-700/60">
+              <label className="flex cursor-pointer items-start gap-1.5 text-xs text-void-500">
+                <input
+                  type="checkbox"
+                  checked={crossProject}
+                  disabled={crossSaveState === 'saving'}
+                  onChange={e => persistCrossProject(e.target.checked)}
+                  className="mt-0.5 rounded border-void-600"
+                />
+                <span className="flex-1">
+                  <span className={crossProject ? 'text-void-700 dark:text-void-200' : ''}>Accept cross-project prompts</span>
+                  <span className="mt-0.5 block text-[10px] leading-snug text-void-500">
+                    Agents in other projects can send prompts to this project&apos;s cards. Off by default.
+                  </span>
+                </span>
+              </label>
+              {crossSaveState === 'error' && (
+                <p role="alert" className="mt-1 text-[10px] leading-snug text-red-400">
+                  Couldn&apos;t save. The setting is back to what&apos;s on disk.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

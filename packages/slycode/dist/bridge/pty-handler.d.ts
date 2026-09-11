@@ -12,7 +12,7 @@ export interface PtyOptions {
 /**
  * Whether a session command is safe to spawn / resolve.
  *
- * The bridge only ever opens providers (claude/codex/gemini → bare command
+ * The bridge only ever opens providers (claude/codex/opencode → bare command
  * names), 'bash'/'powershell.exe', or an absolute path. Anything else — in
  * particular a string carrying shell metacharacters — must never reach the
  * shell used by resolveCommand. This is the boundary check; resolveCommand

@@ -1,6 +1,6 @@
 ---
 name: configure-commands
-version: 2.0.0
+version: 2.0.1
 label: "Configure"
 description: "Help configure command visibility and settings"
 group: "Action Assistant"
@@ -225,7 +225,7 @@ Curated from real usage — apply these when creating or editing actions:
 - **Design vs implementation split**: "design" actions cover requirements (WHAT/WHY); feature specs / implementation cover HOW. A feature spec is optional for simple work — post-design actions should assess complexity and allow skipping straight to implementation.
 - **Context priming**: code-focused actions (implement, debug, test, review, quick-fix) should remind the AI to run `/context-priming` with the card's **Areas** if not already primed.
 - **Questionnaires for batched questions**: actions that may ask the user 3+ related questions in one round should instruct authoring a questionnaire (`documentation/questionnaires/NNN_<slug>.json`, attach via `--questionnaire-ref`) instead of asking inline — **except when responding via messaging** (Telegram/Slack), where questionnaires aren't visible; ask inline there. Keep the carve-out wording consistent with existing actions (search `store/actions/*.md` for "responding via messaging").
-- **Cross-agent prompts**: actions can send work to another provider on the same card via `sly-kanban prompt <card-id> "…" --provider <target> --wait --timeout 120+`; the receiver replies with `sly-kanban respond <response-id> "…"`. Route to a *different* provider (Claude→Codex, Codex→Claude, Gemini→either), don't use `--fresh` unless required, and use generous timeouts.
+- **Cross-agent prompts**: actions can send work to another provider on the same card via `sly-kanban prompt <card-id> "…" --provider <target> --wait --timeout 120+`; the receiver replies with `sly-kanban respond <response-id> "…"`. Route to a *different* provider (e.g. Claude→Codex, Codex→Claude), don't use `--fresh` unless required, and use generous timeouts.
 - **Don't create redundant actions** (e.g., "status" vs "summarize" — pick one).
 
 ## Common Mistakes to Avoid

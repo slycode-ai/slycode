@@ -12,11 +12,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // Configuration
 // Resolve project root from cwd (walk up to find documentation/kanban.json)
-function findProjectRoot() {
-  let dir = process.cwd();
+function findProjectRoot(startDir = process.cwd()) {
+  let dir = startDir;
   while (dir !== path.dirname(dir)) {
     if (fs.existsSync(path.join(dir, 'documentation', 'kanban.json'))) {
       return dir;
@@ -27,14 +28,207 @@ function findProjectRoot() {
   return null;
 }
 
-const PROJECT_ROOT = findProjectRoot();
+// Session-key normalisation — LOCKSTEP with web/src/lib/session-keys.ts
+// normalizeSessionKey(): CLI and web must agree on one identity per project.
+function normalizeSessionKey(base) {
+  return String(base).replace(/[^a-zA-Z0-9-]/g, '-');
+}
+function computeSessionKey(projectPath) {
+  const parts = String(projectPath).split(/[/\\]/).filter(Boolean);
+  return normalizeSessionKey(parts[parts.length - 1] || '');
+}
+
+// ============================================================================
+// Workspace + registry (feature #0350: --project cross-project targeting)
+// ============================================================================
+// The registry (projects/registry.json) is WORKSPACE-level: registered
+// projects such as a website repo have no projects/ or data/ dir of their own.
+// Resolution order mirrors packages/slycode/src/cli/workspace.ts
+// resolveWorkspace(): SLYCODE_HOME → ~/.slycode/config.json → walk up from
+// cwd → walk up from this script's own realpath (the global `sly-kanban` is a
+// symlink to <workspace>/scripts/kanban.js in dev, and the deployed script
+// lives under <workspace>/node_modules/@slycode/slycode/dist/scripts/).
+function findWorkspaceRoot() {
+  const isWorkspace = (d) => fs.existsSync(path.join(d, 'projects', 'registry.json'));
+  const walkUp = (start) => {
+    let dir = start;
+    while (dir !== path.dirname(dir)) {
+      if (isWorkspace(dir)) return dir;
+      dir = path.dirname(dir);
+    }
+    return isWorkspace(dir) ? dir : null;
+  };
+  const envHome = process.env.SLYCODE_HOME;
+  if (envHome && isWorkspace(path.resolve(envHome))) return path.resolve(envHome);
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.slycode', 'config.json'), 'utf-8'));
+    if (cfg && cfg.home && isWorkspace(path.resolve(cfg.home))) return path.resolve(cfg.home);
+  } catch { /* no config */ }
+  const fromCwd = walkUp(process.cwd());
+  if (fromCwd) return fromCwd;
+  try {
+    return walkUp(path.dirname(fs.realpathSync(__filename)));
+  } catch {
+    return null;
+  }
+}
+
+let _workspaceRoot;
+function getWorkspaceRoot() {
+  if (_workspaceRoot === undefined) _workspaceRoot = findWorkspaceRoot();
+  return _workspaceRoot;
+}
+
+// Registry projects with sessionKey/aliases filled in (self-healed the same
+// way web/src/lib/session-keys.ts ensureProjectSessionKey does, in memory only).
+function loadRegistryProjects(workspaceRoot = getWorkspaceRoot()) {
+  if (!workspaceRoot) return [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'projects', 'registry.json'), 'utf-8'));
+    const entries = Array.isArray(raw) ? raw : (raw.projects || []);
+    return entries
+      .filter((p) => p && typeof p === 'object' && p.id && p.path)
+      .map((p) => {
+        const sessionKey = p.sessionKey || computeSessionKey(p.path);
+        const sessionKeyAliases = Array.isArray(p.sessionKeyAliases)
+          ? p.sessionKeyAliases
+          : (p.id !== sessionKey ? [p.id] : []);
+        return { ...p, path: path.resolve(p.path), sessionKey, sessionKeyAliases };
+      });
+  } catch {
+    return [];
+  }
+}
+
+// Every key that names a registry project in session names / boards.
+function projectKeySet(project) {
+  return new Set([project.id, project.sessionKey, ...(project.sessionKeyAliases || [])].filter(Boolean));
+}
+
+// Resolve a --project ref — LOCKSTEP with messaging/src/session-keys.ts
+// resolveCanonicalProjectId(): id → sessionKey → alias → name (case-insensitive).
+// Tags are deliberately NOT accepted (many projects share a tag).
+function resolveProjectRef(ref, projects) {
+  if (!ref || typeof ref !== 'string') return null;
+  const byId = projects.find((p) => p.id === ref);
+  if (byId) return byId;
+  const byKey = projects.find((p) => p.sessionKey === ref);
+  if (byKey) return byKey;
+  const byAlias = projects.find((p) => (p.sessionKeyAliases || []).includes(ref));
+  if (byAlias) return byAlias;
+  const lowered = ref.toLowerCase();
+  return projects.find((p) => typeof p.name === 'string' && p.name.toLowerCase() === lowered) || null;
+}
+
+function findRegistryProjectByPath(root, projects = loadRegistryProjects()) {
+  if (!root) return null;
+  const resolved = path.resolve(root);
+  return projects.find((p) => p.path === resolved) || null;
+}
+
+// Exit code for a refused cross-project prompt — distinct from generic
+// failures (1) so callers and scripts can tell "the target said no" apart.
+const EXIT_CROSS_PROJECT_REFUSED = 3;
+
+// Per-project opt-in (#0350). Lives in the target board's root so the project
+// owns it, it travels with the repo, and BOTH prompt routes can read it from
+// the board they already loaded. Absent = off. Written by the web UI only.
+function allowsCrossProjectPrompts(board) {
+  return !!(board && board.settings && board.settings.allowCrossProjectPrompts === true);
+}
+
+// Session-name shape — LOCKSTEP with bridge/src/session-name.ts
+// parseSessionName(): `{project}:{provider}:card:{id}` or `{project}:card:{id}`
+// for card sessions; first segment is always the project key.
+function parseCallerSession(name) {
+  if (!name || typeof name !== 'string') return null;
+  const parts = name.split(':');
+  const projectKey = parts[0] || '';
+  if (!projectKey) return null;
+  let cardId = null;
+  if (parts.length === 4 && parts[2] === 'card' && parts[3]) cardId = parts[3];
+  else if (parts.length === 3 && parts[1] === 'card' && parts[2]) cardId = parts[2];
+  return { session: name, projectKey, cardId };
+}
+
+// "claude-master #0350" when the caller's board is at hand, else the key plus
+// the raw card id (or just the key for non-card sessions).
+function describeCaller(caller) {
+  if (!caller.cardId) return caller.projectKey;
+  try {
+    if (CALLER_ROOT) {
+      const board = JSON.parse(fs.readFileSync(path.join(CALLER_ROOT, 'documentation', 'kanban.json'), 'utf-8'));
+      for (const cards of Object.values(board.stages || {})) {
+        const hit = Array.isArray(cards) ? cards.find((c) => c && c.id === caller.cardId) : null;
+        if (hit && hit.number != null) return `${caller.projectKey} ${formatCardNumber(hit.number)}`;
+      }
+    }
+  } catch { /* best effort */ }
+  return `${caller.projectKey} ${caller.cardId}`;
+}
+
+// `--project <ref>` is read straight off argv BEFORE any path constant below
+// so every helper (readKanban, findCard, emitEvent, auto-status, board lock)
+// transparently targets the other project's board. parseArgs() later sees the
+// same flag as opts.project, which no command interprets.
+function readProjectFlag(argv) {
+  const i = argv.indexOf('--project');
+  if (i === -1) return null;
+  const ref = argv[i + 1];
+  if (ref === undefined || ref.startsWith('--')) {
+    console.error('Error: --project requires a project ref (id, session key, or name). See: kanban projects');
+    process.exit(1);
+  }
+  return ref;
+}
+
+// Remove the global `--project <ref>` pair so subcommands that dispatch on a
+// raw positional (`questionnaire list`, `session list`, `automation …`) see
+// their own arguments regardless of where the flag was placed.
+function stripProjectFlag(args) {
+  const i = args.indexOf('--project');
+  if (i === -1) return args;
+  return [...args.slice(0, i), ...args.slice(i + 2)];
+}
+
+const PROJECT_FLAG = readProjectFlag(process.argv.slice(2));
+// The board found by walking up from cwd. With --project this is the CALLER's
+// project (may be null — a --project call needs no local board).
+const CALLER_ROOT = findProjectRoot();
+let TARGET_PROJECT = null;
+let PROJECT_ROOT = CALLER_ROOT;
+if (PROJECT_FLAG) {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    console.error('Error: --project needs the SlyCode workspace (projects/registry.json) and none could be found.');
+    console.error('Set SLYCODE_HOME, or run from inside the SlyCode workspace.');
+    process.exit(1);
+  }
+  const projects = loadRegistryProjects(workspaceRoot);
+  TARGET_PROJECT = resolveProjectRef(PROJECT_FLAG, projects);
+  if (!TARGET_PROJECT) {
+    console.error(`Error: No registered project matches "${PROJECT_FLAG}".`);
+    console.error('Registered projects (id · name · session key):');
+    for (const p of projects) console.error(`  ${p.id} · ${p.name || '(unnamed)'} · ${p.sessionKey}`);
+    console.error("Run 'kanban projects' for the full list.");
+    process.exit(1);
+  }
+  PROJECT_ROOT = TARGET_PROJECT.path;
+  if (!fs.existsSync(path.join(PROJECT_ROOT, 'documentation', 'kanban.json'))) {
+    console.error(`Error: Project "${TARGET_PROJECT.name || TARGET_PROJECT.id}" has no kanban board at ${PROJECT_ROOT}/documentation/kanban.json`);
+    process.exit(1);
+  }
+}
 if (!PROJECT_ROOT) {
   console.error('Error: No kanban board found.');
   console.error(`Searched for documentation/kanban.json in the directory tree above ${process.cwd()}`);
-  console.error('Run this command from within a project that has a kanban board.');
+  console.error('Run this command from within a project that has a kanban board, or target one with --project <ref>.');
   process.exit(1);
 }
-const PROJECT_NAME = path.basename(PROJECT_ROOT).replace(/[^a-zA-Z0-9-]/g, '-');
+// With --project the session-name prefix is the target's registry sessionKey
+// (what the web UI matches sessions on); otherwise the cwd basename, which is
+// the same value for a registered project (computeSessionKey mirrors this).
+const PROJECT_NAME = TARGET_PROJECT ? TARGET_PROJECT.sessionKey : normalizeSessionKey(path.basename(PROJECT_ROOT));
 const KANBAN_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban.json');
 // Cold storage for archived cards (feature 077). Same shape as the live board;
 // holds only `archived: true` cards. Missing file = no cold cards, never an error.
@@ -43,7 +237,14 @@ const COLD_PATH = path.join(PROJECT_ROOT, 'documentation', 'kanban-archive.json'
 const LOCK_PATH = KANBAN_PATH + '.lock';
 const LOCK_STALE_MS = 5000;
 const EVENTS_PATH = path.join(PROJECT_ROOT, 'documentation', 'events.json');
-const AREA_INDEX_PATH = path.join(PROJECT_ROOT, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
+// The context-priming references live under whichever skills dir the
+// workspace uses: .claude/ (Claude), or .agents/ (Codex/OpenCode) in
+// workspaces without a .claude/ directory. First existing candidate wins;
+// the .claude path stays the default for error messages.
+const AREA_INDEX_CANDIDATES = ['.claude', '.agents', '.opencode'].map((dir) =>
+  path.join(PROJECT_ROOT, dir, 'skills', 'context-priming', 'references', 'area-index.md')
+);
+const AREA_INDEX_PATH = AREA_INDEX_CANDIDATES.find((p) => fs.existsSync(p)) || AREA_INDEX_CANDIDATES[0];
 const MAX_EVENTS = 100;
 const MAX_ENTRY_BYTES = 4 * 1024;
 
@@ -223,10 +424,12 @@ function autoStatusProblemResolved(card, remainingCount) {
   return tryAutoStatus(card, { text, tier: 'medium' });
 }
 
-function autoStatusPromptReceived(card) {
+function autoStatusPromptReceived(card, fromProjectKey) {
   // Fixed text (no excerpt) — prevents leaking instruction-shaped or sensitive
-  // prompt fragments to the board.
-  return tryAutoStatus(card, { text: 'Prompt received', tier: 'low' });
+  // prompt fragments to the board. Cross-project prompts (#0350) name the
+  // calling project's key — registry data, not prompt text.
+  const text = fromProjectKey ? `Prompt received from ${fromProjectKey}` : 'Prompt received';
+  return tryAutoStatus(card, { text, tier: 'low' });
 }
 
 function autoStatusQuestionnaireSubmitted(card) {
@@ -272,6 +475,26 @@ function formatStatusForPromptCli(status, now = new Date()) {
   ];
 }
 
+// Speaker permission snapshot for prompt-bound surfaces (feature 086).
+// Mirror of web/src/lib/speaker-line.ts — keep the wording in lockstep.
+// It is STATE, not an instruction: an ON snapshot conveys neither an ask nor
+// a guarantee that a browser is listening; the speak command checks live state.
+function formatSpeakerLineCli(state) {
+  const s = state === 'on' || state === 'off' ? state : 'unknown';
+  return `Speaker permission: ${s} (snapshot; use sly-messaging speak only if the user explicitly asked this session for spoken summaries; the command checks current state)`;
+}
+
+async function fetchSpeakerStateCli(bridgeUrl) {
+  try {
+    const res = await fetch(`${bridgeUrl}/speaker`, { signal: AbortSignal.timeout(500) });
+    if (!res.ok) return 'unknown';
+    const data = await res.json();
+    return data && typeof data.enabled === 'boolean' ? (data.enabled ? 'on' : 'off') : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 // ============================================================================
 // Help Text
 // ============================================================================
@@ -298,8 +521,27 @@ Commands:
   respond       Reply to a cross-card prompt (callback for --wait mode)
   session       Manage a card's terminal sessions (list/relink/link/dismiss/stop)
   areas         List available areas from context-priming
+  projects      List registered projects (refs for --project, cross-project setting)
+
+Global option:
+  --project <ref>   Target a card in ANOTHER registered project (ref = project id,
+                    session key, or name — see 'kanban projects'). Allowed on
+                    'prompt' (the target must accept cross-project prompts) and on
+                    read-only commands (show, search, board, notes list, ...).
 
 Run 'kanban <command> --help' for command-specific options.
+`;
+
+const PROJECTS_HELP = `
+Usage: kanban projects
+
+List every project registered in the SlyCode workspace: id, name, session key,
+whether it accepts cross-project prompts, and its path. Any of id / session key /
+name works as a --project ref.
+
+Cross-project prompts are OFF by default. A project's owner switches them on in
+the SlyCode web UI (that project's header → defaults popover → "Accept
+cross-project prompts"). There is no CLI setter.
 `;
 
 const SEARCH_HELP = `
@@ -515,7 +757,7 @@ Actions:
   clear                          Remove all notes
 
 Options:
-  --agent <name>        Agent name for new/summary notes (e.g. "Claude", "Codex", "Gemini")
+  --agent <name>        Agent name for new/summary notes (e.g. "Claude", "Codex", "OpenCode")
   --count <N>           Number of oldest notes to summarize (default: 20)
 
 Examples:
@@ -545,7 +787,7 @@ Subcommands:
 Configure options:
   --schedule <cron|iso>       Cron expression or ISO datetime
   --schedule-type <type>      "recurring" or "one-shot" (default: recurring)
-  --provider <id>             Provider ID (claude, codex, gemini)
+  --provider <id>             Provider ID (claude, codex, opencode)
   --fresh-session <bool>      Kill and recreate session each run (default: false)
   --working-dir <path>        Override working directory
   --report-messaging <bool>   Auto-append messaging instructions (default: false)
@@ -580,7 +822,12 @@ Send a prompt to another card's session (cross-card execution).
 If no running session exists, one is created automatically.
 
 Options:
-  --provider <id>     Target provider (claude|codex|gemini). Default: global default
+  --project <ref>     Target a card in ANOTHER registered project (id, session key,
+                      or name — see 'kanban projects'). The target project must have
+                      "Accept cross-project prompts" switched on in its web UI header;
+                      otherwise the prompt is refused (exit code 3). If refused, stop
+                      and tell the user — there is no other route.
+  --provider <id>     Target provider (claude|codex|opencode). Default: project default
   --model <id>        Model for new sessions (e.g. opus, o3)
   --wait              Wait for a response (sync mode with callback)
   --timeout <secs>    Timeout for --wait mode (default: 120 seconds)
@@ -591,6 +838,7 @@ Modes:
   Fire-and-forget:  kanban prompt <card-id> "do something"
   Wait for response: kanban prompt <card-id> "analyze this" --wait --timeout 60
   Fresh session:     kanban prompt <card-id> "review" --fresh --provider codex --wait
+  Other project:     kanban prompt --project slycode-web 0053 "update the docs page" --wait
 
 When using --wait, the called card must run 'kanban respond <id> "response"' to return data.
 `;
@@ -610,7 +858,7 @@ Subcommands:
   stop <card-id> [--provider <id>]    Stop the session's terminal process
 
 Options:
-  --provider <id>   Target provider (claude|codex|gemini). Default: the card's
+  --provider <id>   Target provider (claude|codex|opencode). Default: the card's
                     only session if unambiguous, else the project default.
   --guid <uuid>     Conversation id to bind (link subcommand only). Find
                     candidates in the provider's session dir, e.g. Claude:
@@ -1117,10 +1365,16 @@ function isValidEventEntry(entry) {
  * Sanitizes the on-disk array on read so any pre-existing pollution self-heals.
  */
 function emitEvent(type, project, detail, cardId) {
+  emitEventTo(EVENTS_PATH, type, project, detail, cardId);
+}
+
+// Same contract as emitEvent, against an explicit events file — used to log a
+// cross-project prompt on the CALLER's board as well as the target's (#0350).
+function emitEventTo(eventsPath, type, project, detail, cardId) {
   try {
     let events = [];
-    if (fs.existsSync(EVENTS_PATH)) {
-      const parsed = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf-8'));
+    if (fs.existsSync(eventsPath)) {
+      const parsed = JSON.parse(fs.readFileSync(eventsPath, 'utf-8'));
       events = Array.isArray(parsed) ? parsed.filter(isValidEventEntry) : [];
     }
     const event = {
@@ -1138,7 +1392,7 @@ function emitEvent(type, project, detail, cardId) {
     if (events.length > MAX_EVENTS) {
       events.splice(0, events.length - MAX_EVENTS);
     }
-    atomicWriteFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+    atomicWriteFileSync(eventsPath, JSON.stringify(events, null, 2));
   } catch {
     // Never fail card operations due to event logging
   }
@@ -2553,6 +2807,82 @@ function cmdNotes(args) {
   }
 }
 
+// List registered projects — the discovery surface for --project refs and the
+// cross-project setting (#0350). Reads each project's board root for the flag.
+function cmdProjects(args) {
+  const opts = parseArgs(args);
+  if (opts.help) {
+    console.log(PROJECTS_HELP);
+    return;
+  }
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    console.error('Error: No SlyCode workspace found (projects/registry.json). Set SLYCODE_HOME or run from inside the workspace.');
+    process.exit(1);
+  }
+  const projects = loadRegistryProjects(workspaceRoot)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.id).localeCompare(String(b.id)));
+  if (projects.length === 0) {
+    console.log('No projects registered.');
+    return;
+  }
+  const rows = projects.map((p) => {
+    let cross = 'no board';
+    try {
+      const board = JSON.parse(fs.readFileSync(path.join(p.path, 'documentation', 'kanban.json'), 'utf-8'));
+      cross = allowsCrossProjectPrompts(board) ? 'on' : 'off';
+    } catch { /* no board */ }
+    return { id: p.id, name: p.name || '', key: p.sessionKey, cross, path: p.path };
+  });
+  if (opts.json) {
+    console.log(JSON.stringify(rows.map((r) => ({ ...r, allowCrossProjectPrompts: r.cross === 'on' })), null, 2));
+    return;
+  }
+  const w = (k) => Math.max(k.length, ...rows.map((r) => String(r[k]).length));
+  const cols = [['id', 'ID'], ['name', 'NAME'], ['key', 'SESSION KEY'], ['cross', 'CROSS-PROJECT'], ['path', 'PATH']];
+  const widths = cols.map(([k, h]) => Math.max(h.length, w(k)));
+  console.log(cols.map(([, h], i) => h.padEnd(widths[i])).join('  ').trimEnd());
+  for (const r of rows) {
+    console.log(cols.map(([k], i) => String(r[k]).padEnd(widths[i])).join('  ').trimEnd());
+  }
+  console.log('');
+  console.log('CROSS-PROJECT = accepts prompts from other projects (set in the web UI; off by default).');
+  console.log('Use ID, SESSION KEY, or NAME as a --project ref.');
+}
+
+// Which invocations may carry --project (#0350). `prompt` is gated by the
+// target's setting inside cmdPrompt; reads are never gated (reading a card is
+// not driving its project). Every other write is refused so the target's own
+// session stays the owner of its card state.
+function projectFlagAllowed(command, args) {
+  const opts = parseArgs(args);
+  const pos = opts._;
+  switch (command) {
+    case 'prompt':
+    case 'show':
+    case 'search':
+    case 'board':
+    case 'areas':
+    case 'projects':
+      return true;
+    case 'notes':
+      return pos[1] === undefined || pos[1] === 'list' || pos[1] === 'search';
+    case 'checklist':
+      return pos[1] === undefined || pos[1] === 'list';
+    case 'problem':
+      return pos[1] === undefined || pos[1] === 'list';
+    case 'status':
+      return pos[1] === undefined && opts.clear !== true;
+    case 'questionnaire':
+      return pos[0] === 'list' || pos[0] === 'answers';
+    case 'session':
+      return pos[0] === 'list';
+    default:
+      return false;
+  }
+}
+
 function cmdAreas(args) {
   const opts = parseArgs(args);
 
@@ -3531,22 +3861,119 @@ function cmdPrompt(args) {
   const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
   const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
 
-  // Load providers.json for the default provider (feature 073)
-  let providers = null;
-  try {
-    const providersPath = path.join(PROJECT_ROOT, 'data', 'providers.json');
-    providers = JSON.parse(fs.readFileSync(providersPath, 'utf-8'));
-  } catch { /* providers.json optional */ }
+  // Provider config + this board's registry id, resolved via the WORKSPACE
+  // (per-project defaults are keyed by registry project id, and a registered
+  // project outside the workspace has no providers.json of its own).
+  const { providers, registryProjectId } = workspaceProviderConfig();
 
-  // Resolve this project's registry id so per-project defaults apply
-  // (defaults.projects is keyed by registry project id, not directory name).
-  let registryProjectId = null;
-  try {
-    const registry = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'projects', 'registry.json'), 'utf-8'));
-    const entries = Array.isArray(registry) ? registry : (registry.projects || []);
-    const match = entries.find((p) => p && p.path && path.resolve(p.path) === PROJECT_ROOT);
-    if (match) registryProjectId = match.id;
-  } catch { /* registry optional — fall back to global default */ }
+  // ---- Cross-project gate (feature #0350) ----------------------------------
+  // Runs BEFORE the bridge is contacted. Two routes, two strengths:
+  //
+  //  1. Explicit `--project` to a board that is not the cwd's own project is
+  //     ALWAYS gated by the target's flag — humans included. The flag is the
+  //     target project's policy, flipped in its own UI; the CLI never
+  //     second-guesses it from who is asking. This is the enforceable route.
+  //  2. Running from inside the target's directory (the cwd route) can only be
+  //     judged from SLYCODE_SESSION, which the bridge stamps on the sessions
+  //     it spawns. That is a CONVENIENCE GUARD, not a security boundary: a
+  //     missing or spoofed identity passes. It catches an agent wandering by
+  //     mistake, nothing more.
+  //
+  // Caller identity is resolved CANONICALLY against the registry: the key in
+  // SLYCODE_SESSION is matched to every project whose id/sessionKey/aliases
+  // contain it. Exactly one owner → compare project ids. More than one (an
+  // alias that collides with another project's canonical key) → the identity
+  // is ambiguous and the prompt is rejected outright: a foreign caller must
+  // never slip through because it happens to match a legacy alias.
+  const caller = parseCallerSession(process.env.SLYCODE_SESSION);
+  const registryProjects = loadRegistryProjects();
+  const targetEntry = TARGET_PROJECT || findRegistryProjectByPath(PROJECT_ROOT, registryProjects);
+  const callerEntry = findRegistryProjectByPath(CALLER_ROOT, registryProjects);
+  const sameRoot = !!CALLER_ROOT && path.resolve(CALLER_ROOT) === path.resolve(PROJECT_ROOT);
+
+  const explicitCross = !!PROJECT_FLAG && !sameRoot;
+
+  let sessionCross = false;
+  let ambiguousOwners = null;
+  if (caller && caller.projectKey) {
+    const owners = registryProjects.filter((p) => projectKeySet(p).has(caller.projectKey));
+    const targetLiteralKeys = new Set([PROJECT_NAME, kanban.project_id].filter(Boolean));
+    if (owners.length > 1) {
+      ambiguousOwners = owners;
+    } else if (owners.length === 1) {
+      sessionCross = targetEntry
+        ? owners[0].id !== targetEntry.id
+        : ![...projectKeySet(owners[0])].some((k) => targetLiteralKeys.has(k));
+    } else {
+      // Key unknown to the registry (no workspace, or an unregistered board):
+      // literal compare against the target's own non-alias keys only.
+      sessionCross = !targetLiteralKeys.has(caller.projectKey);
+    }
+  }
+
+  const crossProject = explicitCross || sessionCross || !!ambiguousOwners;
+  // Who is asking, for events/status/context. A session gives a key; a plain
+  // shell is attributed to the board it was run from (registry key, else the
+  // directory's key), never to a guessed session.
+  const callerKey = caller
+    ? caller.projectKey
+    : (callerEntry ? callerEntry.sessionKey : (CALLER_ROOT ? normalizeSessionKey(path.basename(CALLER_ROOT)) : 'shell'));
+  const callerLabel = caller ? describeCaller(caller) : `${callerKey} (shell, no session)`;
+  const targetLabel = `"${(targetEntry && targetEntry.name) || PROJECT_NAME}" (${PROJECT_NAME})`;
+
+  if (ambiguousOwners) {
+    const names = ambiguousOwners.map((p) => `${p.id} (${p.sessionKey})`).join(', ');
+    emitEvent('card_prompt', PROJECT_NAME, `Cross-project prompt from ${callerLabel} rejected (ambiguous caller identity: ${names})`, card.id);
+    console.error(`Refused: the calling session's project key "${caller.projectKey}" matches more than one registered project: ${names}.`);
+    console.error('Caller identity is ambiguous, so the prompt is rejected. Fix the colliding sessionKey/aliases');
+    console.error('in projects/registry.json (SlyCode web UI → Projects), then retry. Tell the user.');
+    process.exit(EXIT_CROSS_PROJECT_REFUSED);
+  }
+  if (crossProject && !allowsCrossProjectPrompts(kanban)) {
+    emitEvent('card_prompt', PROJECT_NAME, `Cross-project prompt from ${callerLabel} refused (setting off)`, card.id);
+    console.error(`Refused: project ${targetLabel} does not accept cross-project prompts.`);
+    console.error('Its owner has not enabled "Accept cross-project prompts" for that project');
+    console.error("(SlyCode web UI → that project's header → defaults popover).");
+    console.error('Do not work around this — there is no other official route. Tell the user the');
+    console.error('target project refused the prompt and leave the setting decision to them.');
+    process.exit(EXIT_CROSS_PROJECT_REFUSED);
+  }
+  const crossFrom = crossProject ? callerKey : null;
+  const promptKind = crossProject ? `Cross-project prompt from ${callerLabel}` : 'Cross-card prompt';
+  const targetRef = card.number != null ? `${PROJECT_NAME} ${formatCardNumber(card.number)}` : `${PROJECT_NAME} ${card.id}`;
+
+  // Delivery bookkeeping: target auto-status + (cross-project only) an event on
+  // the CALLER's own board so both sides show the hand-off.
+  //
+  // The board loaded at the top of cmdPrompt is STALE by now — bridge I/O can
+  // take 20s+, and main()'s advisory lock has long been breakable. Writing it
+  // back would clobber every concurrent change, including the owner switching
+  // the flag off mid-startup. So: re-take the lock, re-read the board from
+  // disk, and merge ONLY this card's status into the fresh copy.
+  const markDelivered = () => {
+    releaseBoardLock();
+    acquireBoardLock();
+    try {
+      const fresh = readKanban();
+      const hit = findCard(fresh, card.id);
+      if (hit && autoStatusPromptReceived(hit.card, crossFrom)) {
+        writeKanban(fresh);
+      }
+    } catch (err) {
+      console.error(`Warning: could not record the prompt on the target card (${err.message})`);
+    } finally {
+      releaseBoardLock();
+    }
+    if (crossProject && !sameRoot && CALLER_ROOT) {
+      emitEventTo(
+        path.join(CALLER_ROOT, 'documentation', 'events.json'),
+        'card_prompt',
+        callerKey,
+        `Cross-project prompt sent to ${targetRef}`,
+        (caller && caller.cardId) || undefined,
+      );
+    }
+  };
 
   const doPrompt = async () => {
     try {
@@ -3557,6 +3984,12 @@ function cmdPrompt(args) {
         const def = (registryProjectId && providers?.defaults?.projects?.[registryProjectId])
           || providers?.defaults?.global;
         if (def?.provider) provider = def.provider;
+        // Inferred defaults must name an enabled registry provider (#0343
+        // review finding: a stored default outlived the provider's removal).
+        if (provider) {
+          const enabled = enabledRegistryProviders(providers);
+          if (enabled.length > 0 && !enabled.includes(provider)) provider = enabled[0];
+        }
       }
       if (!provider) provider = 'claude';
 
@@ -3604,9 +4037,20 @@ function cmdPrompt(args) {
       const cardContextStatusLines = cardContextStatusObj
         ? '\n' + formatStatusForPromptCli(cardContextStatusObj).join('\n')
         : '';
+      // Speaker snapshot (feature 086): separate runtime-state line after the
+      // status metadata, fetched at dispatch time; 'unknown' if the bridge
+      // does not answer within 500ms.
+      const speakerLine = formatSpeakerLineCli(await fetchSpeakerStateCli(bridgeUrl));
+      // Audit line (#0350): the receiving AI always knows who is asking — and,
+      // for --wait, whom it answers. Values come from the session name and the
+      // caller's board, never from prompt text.
+      const calledFromLine = caller
+        ? `\nCalled from: ${callerLabel} (session ${caller.session})${crossProject ? ' — cross-project' : ''}`
+        : '';
       const cardContext = `[Card: ${card.title} (${card.number != null ? `${formatCardNumber(card.number)}, ` : ''}${card.id})]
 Stage: ${stage} | Type: ${card.type || 'unknown'} | Priority: ${card.priority || 'unknown'}
-Description: ${card.description || '(no description)'}${cardContextStatusLines}
+Description: ${card.description || '(no description)'}${cardContextStatusLines}${calledFromLine}
+${speakerLine}
 ---
 
 `;
@@ -3768,13 +4212,12 @@ Either way, the CLI will print a success line with the byte count and a preview 
 
         // V2: target card gets a low-tier auto-status that the prompt landed.
         // Fixed text (no excerpt) so prompt fragments don't leak to the board.
-        autoStatusPromptReceived(card);
-        writeKanban(kanban);
+        markDelivered();
 
         // For fire-and-forget, prompt was passed as CLI arg — we're done
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} via session creation.`);
-          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget, new session)`, card.id);
+          emitEvent('card_prompt', PROJECT_NAME, `${promptKind} sent to ${cardId} (${provider}, fire-and-forget, new session)`, card.id);
           return;
         }
 
@@ -3809,13 +4252,12 @@ Either way, the CLI will print a success line with the byte count and a preview 
 
         // V2: target card gets a low-tier auto-status that the prompt landed.
         // Fixed text (no excerpt) so prompt fragments don't leak to the board.
-        autoStatusPromptReceived(card);
-        writeKanban(kanban);
+        markDelivered();
 
         // Fire-and-forget mode
         if (!wait) {
           console.log(`Prompt delivered to ${cardId} (session: ${sessionName}).`);
-          emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt sent to ${cardId} (${provider}, fire-and-forget)`, card.id);
+          emitEvent('card_prompt', PROJECT_NAME, `${promptKind} sent to ${cardId} (${provider}, fire-and-forget)`, card.id);
           return;
         }
       }
@@ -3844,7 +4286,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
             if (pollData.status === 'received' && pollData.data) {
               // Happy path: response received
               console.log(pollData.data);
-              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): response received`, card.id);
+              emitEvent('card_prompt', PROJECT_NAME, `${promptKind} to ${cardId} (${provider}, wait): response received`, card.id);
               return;
             }
           } else if (pollRes.status === 404) {
@@ -3854,7 +4296,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
               console.error('A response can no longer arrive through this wait — the worker\'s respond will be');
               console.error('refused as an unknown id. Re-issue the prompt, or coordinate via card notes.');
               console.error(`Session: ${sessionName}`);
-              emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): aborted, registration lost`, card.id);
+              emitEvent('card_prompt', PROJECT_NAME, `${promptKind} to ${cardId} (${provider}, wait): aborted, registration lost`, card.id);
               process.exit(1);
             }
           } else {
@@ -3910,7 +4352,7 @@ Either way, the CLI will print a success line with the byte count and a preview 
         console.error(`Session: ${sessionName}`);
       }
 
-      emitEvent('card_prompt', PROJECT_NAME, `Cross-card prompt to ${cardId} (${provider}, wait): timeout (active=${isActive})`, card.id);
+      emitEvent('card_prompt', PROJECT_NAME, `${promptKind} to ${cardId} (${provider}, wait): timeout (active=${isActive})`, card.id);
       process.exit(1);
 
     } catch (err) {
@@ -4147,6 +4589,44 @@ function cmdRespond(args) {
 // ============================================================================
 
 /**
+ * Enabled registry providers in effective order: providers.json keys minus the
+ * per-machine disabled list, prefs order first. Used to validate INFERRED
+ * provider defaults — a stored default can outlive a provider's per-machine
+ * disable or its removal from the registry (#0343), and must then fall back
+ * to the first enabled provider. Explicit --provider values are never
+ * rewritten; the bridge rejects them loudly.
+ */
+/**
+ * Workspace-level provider config for the board being operated on (#0350):
+ * data/providers.json lives in the WORKSPACE, and defaults.projects is keyed
+ * by registry project id. Registered projects outside the workspace have
+ * neither file, so both are resolved via the workspace root (falling back to
+ * PROJECT_ROOT for a standalone board).
+ */
+function workspaceProviderConfig() {
+  const root = getWorkspaceRoot() || PROJECT_ROOT;
+  let providers = null;
+  try {
+    providers = JSON.parse(fs.readFileSync(path.join(root, 'data', 'providers.json'), 'utf-8'));
+  } catch { /* providers.json optional */ }
+  const entry = TARGET_PROJECT || findRegistryProjectByPath(PROJECT_ROOT);
+  return { providers, registryProjectId: entry ? entry.id : null, root };
+}
+
+function enabledRegistryProviders(providers) {
+  let disabled = [];
+  let order = [];
+  try {
+    const prefs = JSON.parse(fs.readFileSync(path.join(getWorkspaceRoot() || PROJECT_ROOT, 'data', 'provider-prefs.json'), 'utf-8'));
+    if (Array.isArray(prefs?.disabled)) disabled = prefs.disabled;
+    if (Array.isArray(prefs?.order)) order = prefs.order;
+  } catch { /* prefs optional */ }
+  const all = Object.keys(providers?.providers || {}).filter((id) => !disabled.includes(id));
+  const head = order.filter((id) => all.includes(id));
+  return [...head, ...all.filter((id) => !head.includes(id))];
+}
+
+/**
  * Resolve the provider for a card session op: --provider flag > the card's only
  * live session record > project default > global default > 'claude'.
  */
@@ -4175,29 +4655,16 @@ async function resolveSessionProvider(opts, card, bridgeUrl) {
 
   // Project default > global default (feature 073 resolution rule)
   try {
-    const providers = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'data', 'providers.json'), 'utf-8'));
-    let registryProjectId = null;
-    try {
-      const registry = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'projects', 'registry.json'), 'utf-8'));
-      const entries = Array.isArray(registry) ? registry : (registry.projects || []);
-      const match = entries.find((p) => p && p.path && path.resolve(p.path) === PROJECT_ROOT);
-      if (match) registryProjectId = match.id;
-    } catch { /* registry optional */ }
+    const { providers, registryProjectId } = workspaceProviderConfig();
+    if (!providers) throw new Error('no providers.json');
     const def = (registryProjectId && providers?.defaults?.projects?.[registryProjectId]) || providers?.defaults?.global;
     if (def?.provider) {
-      // Per-machine disabled providers (feature 085 stretch): a stored default
-      // pointing at one falls back to the first enabled provider.
-      try {
-        const prefs = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'data', 'provider-prefs.json'), 'utf-8'));
-        const disabled = Array.isArray(prefs?.disabled) ? prefs.disabled : [];
-        if (disabled.includes(def.provider)) {
-          const order = Array.isArray(prefs?.order) ? prefs.order : [];
-          const all = Object.keys(providers?.providers || {}).filter((id) => !disabled.includes(id));
-          const head = order.filter((id) => all.includes(id));
-          const enabled = [...head, ...all.filter((id) => !head.includes(id))];
-          if (enabled.length > 0) return enabled[0];
-        }
-      } catch { /* prefs optional */ }
+      // An inferred default must name an ENABLED registry provider — it can
+      // be stale two ways: disabled per-machine (feature 085 stretch) or
+      // removed from the registry entirely (#0343). Both fall back to the
+      // first enabled provider.
+      const enabled = enabledRegistryProviders(providers);
+      if (enabled.length > 0 && !enabled.includes(def.provider)) return enabled[0];
       return def.provider;
     }
   } catch { /* providers.json optional */ }
@@ -4325,7 +4792,7 @@ function cmdSession(args) {
 // ============================================================================
 
 function main() {
-  const args = process.argv.slice(2);
+  const args = stripProjectFlag(process.argv.slice(2));
   const command = args[0];
   const commandArgs = args.slice(1);
 
@@ -4343,6 +4810,15 @@ function main() {
     'create', 'update', 'move', 'reorder', 'archive', 'checklist',
     'problem', 'notes', 'status', 'automation', 'questionnaire', 'prompt',
   ]);
+
+  // --project is read-only except for `prompt` (#0350). Checked before the
+  // lock so a refused write never touches the other project's board.
+  if (PROJECT_FLAG && !projectFlagAllowed(command, commandArgs)) {
+    console.error(`Error: --project is read-only except for 'prompt'; '${command}' cannot modify another project's card.`);
+    console.error(`Ask that card to do it: kanban prompt --project ${PROJECT_FLAG} <card> "..."`);
+    process.exit(1);
+  }
+
   if (MUTATING_COMMANDS.has(command)) {
     acquireBoardLock();
   }
@@ -4401,6 +4877,9 @@ function main() {
       break;
     case 'areas':
       cmdAreas(commandArgs);
+      break;
+    case 'projects':
+      cmdProjects(commandArgs);
       break;
     default:
       console.error(`Error: Unknown command '${command}'`);

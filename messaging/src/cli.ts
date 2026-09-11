@@ -202,6 +202,139 @@ async function searchVoicesCmd(query: string | undefined, port: number): Promise
   }
 }
 
+// --- Project voice (feature 086) ------------------------------------------
+// `voice set|show|clear` talk to /projects/:id/voice. Project resolution:
+// --project <id|name|key>, else `_session` + the caller's SLYCODE_SESSION.
+
+const ELEVENLABS_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
+
+function projectRouteTarget(projectArg: string | undefined): { idSegment: string; query: string } {
+  if (projectArg) return { idSegment: encodeURIComponent(projectArg), query: '' };
+  const session = process.env.SLYCODE_SESSION;
+  if (session) return { idSegment: '_session', query: `?session=${encodeURIComponent(session)}` };
+  console.error('Error: no project given. Pass --project <id|name>, or run from a SlyCode terminal (SLYCODE_SESSION).');
+  process.exit(1);
+}
+
+interface ProjectVoicePayload {
+  ok?: boolean;
+  projectId?: string;
+  stored?: { id: string; name: string } | null;
+  effective?: { id: string; name: string } | null;
+  source?: 'project' | 'inherited' | 'env' | null;
+  error?: string;
+  message?: string;
+  candidates?: Array<{ voice_id: string; name: string; category: string }>;
+}
+
+function printProjectVoice(data: ProjectVoicePayload): void {
+  const fmt = (v: { id: string; name: string } | null | undefined) => (v ? `${v.name} (${v.id})` : 'none');
+  console.log(`Project:   ${data.projectId}`);
+  console.log(`Stored:    ${fmt(data.stored)}`);
+  console.log(`Effective: ${fmt(data.effective)}${data.source ? ` [${data.source}]` : ''}`);
+}
+
+async function projectVoiceCmd(
+  action: 'set' | 'show' | 'clear',
+  value: string | undefined,
+  opts: { projectId?: string; forceId?: boolean },
+  port: number,
+): Promise<void> {
+  const target = projectRouteTarget(opts.projectId);
+  const url = `http://localhost:${port}/projects/${target.idSegment}/voice${target.query}`;
+  const init: RequestInit = { headers: { 'Content-Type': 'application/json' } };
+  if (action === 'show') {
+    init.method = 'GET';
+  } else if (action === 'clear') {
+    init.method = 'DELETE';
+  } else {
+    if (!value) {
+      console.error('Error: voice set requires a voice id or exact voice name');
+      process.exit(1);
+    }
+    init.method = 'PUT';
+    const asId = opts.forceId || ELEVENLABS_ID_PATTERN.test(value);
+    init.body = JSON.stringify(asId ? { voiceId: value } : { voiceName: value });
+  }
+  try {
+    const res = await fetch(url, init);
+    const data = await res.json() as ProjectVoicePayload;
+    if (!res.ok || !data.ok) {
+      console.error(`Error: ${data.error || 'unknown'}: ${data.message || 'no message'}`);
+      for (const c of data.candidates || []) console.error(`  ${c.voice_id}  ${c.name} (${c.category})`);
+      process.exit(1);
+    }
+    writeCachedPort(port);
+    if (action === 'clear') console.log('Project voice cleared (back to the inherited default).');
+    printProjectVoice(data);
+  } catch (err) {
+    if ((err as Error).message.includes('ECONNREFUSED') || (err as Error).message === 'fetch failed') {
+      console.error('Error: Messaging service is not running. Start it with sly-start.sh or sly-dev.sh.');
+    } else {
+      console.error(`Error: ${(err as Error).message}`);
+    }
+    process.exit(1);
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// speak — spoken reply in the web terminal (feature 086, spec Task 8)
+// ---------------------------------------------------------------------------
+// Talks ONLY to the bridge that spawned this terminal (SLYCODE_BRIDGE_URL),
+// never to the messaging service and never to a probed/cached port: the
+// bridge is the single admission authority (speaker flag, listeners, length,
+// budget) and it orchestrates the paid render itself. A refusal is the
+// user's setting or state, not an error — print it verbatim and exit 1.
+async function speak(text: string): Promise<void> {
+  const session = process.env.SLYCODE_SESSION;
+  const bridgeUrl = process.env.SLYCODE_BRIDGE_URL;
+  if (!session) {
+    console.error('Error: no_session: no registered session (SLYCODE_SESSION missing or unknown); speak only works from a SlyCode terminal');
+    process.exit(1);
+  }
+  if (!bridgeUrl) {
+    console.error('Error: no_bridge: bridge URL not provided (SLYCODE_BRIDGE_URL missing); speak only works from a SlyCode terminal');
+    process.exit(1);
+  }
+  // One idempotency id per invocation, reused across transport retries so a
+  // lost HTTP response can never turn into a second paid render.
+  const requestId = (await import('crypto')).randomUUID();
+  const url = `${bridgeUrl.replace(/\/$/, '')}/sessions/${encodeURIComponent(session)}/speak`;
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, requestId }),
+        signal: AbortSignal.timeout(40_000),
+      });
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      const transient = msg.includes('ECONNREFUSED') || msg === 'fetch failed' || msg.includes('ECONNRESET') || (err as Error).name === 'TimeoutError';
+      if (transient && attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 500 * attempt));
+        continue;
+      }
+      console.error(transient
+        ? 'Error: bridge_unreachable: the terminal bridge did not answer; speak only works from a running SlyCode terminal'
+        : `Error: ${msg}`);
+      process.exit(1);
+    }
+    let data: { ok?: boolean; code?: string; message?: string; delivered?: number; replayed?: boolean } = {};
+    try { data = await res.json() as typeof data; } catch { /* non-JSON body */ }
+    if (!res.ok || !data.ok) {
+      console.error(`Error: ${data.code || `http_${res.status}`}: ${data.message || 'no message'}`);
+      process.exit(1);
+    }
+    const n = typeof data.delivered === 'number' ? data.delivered : 0;
+    console.log(`Spoken (delivered to ${n} browser${n === 1 ? '' : 's'}): "${text}"`);
+    return;
+  }
+}
+
 function printUsage(): void {
   console.log(`Usage: messaging-cli <command> [args]
 
@@ -222,8 +355,25 @@ Commands:
                                        back to the caller's session, then the
                                        global default voice. Unknown projects
                                        are rejected with an error.
+  speak <text>                         Short spoken summary played in the web
+                                       UI (every connected browser). ONLY when
+                                       the user explicitly asked this session
+                                       for spoken summaries; the speaker toggle
+                                       is permission, not an instruction.
+                                       Refusals (sound off, nobody listening,
+                                       too long, budget) are final — never
+                                       work around them with generate/--tts.
   voices [query]                       Search TTS voices by name (personal +
                                        shared library). Prints voice IDs.
+  voice set <id|name> [--project <p>]  Set a project's TTS voice (used by
+                  [--voice-id]         Telegram AND terminal spoken replies).
+                                       A 20-char id is treated as an id; any
+                                       other value must match exactly one
+                                       voice name. --project defaults to the
+                                       caller's session project.
+  voice show [--project <p>]           Print the stored and effective voice.
+  voice clear [--project <p>]          Remove the project's override (falls
+                                       back to the inherited default).
 
 Examples:
   messaging-cli send "The build is complete"
@@ -233,7 +383,10 @@ Examples:
   messaging-cli generate "intro for the new feature"
   messaging-cli generate "[whispers] secret stuff" --format mp3 --out-dir /tmp
   messaging-cli generate "ship note" --project SlyCode
-  messaging-cli voices "Rachel"`);
+  messaging-cli voices "Rachel"
+  messaging-cli voice set "Rachel" --project SlyCode
+  messaging-cli voice show
+  messaging-cli speak "tests pass, one thing left to check on the modal"`);
 }
 
 // Parse arguments
@@ -385,6 +538,41 @@ if (command === 'send') {
   const query = args.slice(1).join(' ') || undefined;
   const port = await detectPort();
   await searchVoicesCmd(query, port);
+} else if (command === 'voice') {
+  const action = args[1];
+  if (action !== 'set' && action !== 'show' && action !== 'clear') {
+    console.error("Error: voice requires an action: set <id|name> | show | clear");
+    printUsage();
+    process.exit(1);
+  }
+  const rest = args.slice(2);
+  let projectId: string | undefined;
+  let forceId = false;
+  let value: string | undefined;
+  let i = 0;
+  while (i < rest.length) {
+    const arg = rest[i];
+    if (arg === '--project') {
+      projectId = rest[i + 1];
+      if (projectId === undefined) { console.error('Error: --project requires a value'); process.exit(1); }
+      i += 2;
+      continue;
+    }
+    if (arg === '--voice-id') { forceId = true; i++; continue; }
+    if (arg.startsWith('--')) { console.error(`Error: unknown flag: ${arg}`); process.exit(1); }
+    if (value === undefined && action === 'set') { value = arg; i++; continue; }
+    console.error(`Error: unexpected argument: ${arg}`);
+    process.exit(1);
+  }
+  const port = await detectPort();
+  await projectVoiceCmd(action, value, { projectId, forceId }, port);
+} else if (command === 'speak') {
+  const text = args.slice(1).join(' ').trim();
+  if (!text) {
+    console.error('Error: speak requires text, e.g. speak "tests pass, one thing left"');
+    process.exit(1);
+  }
+  await speak(text);
 } else {
   console.error(`Unknown command: ${command}`);
   printUsage();

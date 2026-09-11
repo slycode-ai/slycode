@@ -351,10 +351,22 @@
       "namedRegex": "^/api/kanban/cards(?:/)?$"
     },
     {
+      "page": "/api/kanban/settings",
+      "regex": "^/api/kanban/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/kanban/settings(?:/)?$"
+    },
+    {
       "page": "/api/kanban/stream",
       "regex": "^/api/kanban/stream(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/kanban/stream(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/health",
+      "regex": "^/api/messaging/health(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/health(?:/)?$"
     },
     {
       "page": "/api/projects",

@@ -65,25 +65,6 @@ export declare function extractCodexSessionId(filename: string): string | null;
  */
 export declare function detectNewCodexSessionId(dir: string, beforeFiles: string[]): Promise<string | null>;
 /**
- * Get the Gemini chats directory for a given cwd.
- * Reads ~/.gemini/projects.json for the canonical slug (Gemini's own registry).
- * Falls back to computing the slug for first-run cases.
- */
-export declare function getGeminiSessionDir(cwd: string): string;
-/**
- * List all session files in a Gemini chats directory.
- * Returns filenames for before/after comparison.
- */
-export declare function listGeminiSessionFiles(dir: string): Promise<string[]>;
-/**
- * Extract the full session UUID from a Gemini session file (JSON or JSONL).
- */
-export declare function extractGeminiSessionId(filePath: string): Promise<string | null>;
-/**
- * Detect a new Gemini session by comparing before/after file lists.
- */
-export declare function detectNewGeminiSessionId(dir: string, beforeFiles: string[]): Promise<string | null>;
-/**
  * Get the most recently modified session ID for any provider.
  * Used by the "relink" feature to re-detect the active session.
  */
@@ -107,7 +88,7 @@ export interface SessionFileCandidate {
  *
  * `excludeFiles` (feature 081): the spawn-time before-files snapshot, in the
  * same identifier format as listProviderSessionFiles (Claude: bare GUIDs;
- * Codex/Gemini: filenames). Entries present at spawn are skipped so the
+ * Codex: filenames). Entries present at spawn are skipped so the
  * detection watch can consume candidates instead of the old unsorted diff.
  */
 export declare function listProviderSessionCandidates(providerId: string, cwd: string, excludeFiles?: string[]): Promise<SessionFileCandidate[]>;

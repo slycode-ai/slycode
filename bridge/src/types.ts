@@ -17,7 +17,7 @@ export interface Session {
   command: string;
   args: string[];
   cwd: string;
-  provider: string;          // Provider id (e.g. "claude", "gemini", "codex")
+  provider: string;          // Provider id (e.g. "claude", "codex", "opencode")
   skipPermissions: boolean;  // Whether permission-skip flag was used
   model?: string;            // Model id passed to CLI (e.g. "opus", "o3")
   status: SessionStatus;
@@ -87,7 +87,7 @@ export interface ActivityTransition {
 export interface CreateSessionRequest {
   name: string;
   command?: string;
-  provider?: string;       // Provider id from providers.json (e.g. "claude", "gemini", "codex")
+  provider?: string;       // Provider id from providers.json (e.g. "claude", "codex", "opencode")
   skipPermissions?: boolean; // Whether to add permission-skip flag
   model?: string;           // Model id to pass to CLI via provider's model flag
   cwd?: string;

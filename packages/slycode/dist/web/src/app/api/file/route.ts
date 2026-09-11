@@ -18,7 +18,6 @@ const ALLOWED_PATH_PREFIXES = [
   '.claude/',
   '.codex/',
   '.agents/',
-  '.gemini/',
   'store/',
   'updates/',
 ];

@@ -5,5 +5,8 @@
   "lowPriorityFiles": [],
   "rootMainFiles": [],
   "pages": {},
-  "ampFirstPages": []
+  "ampFirstPages": [],
+  "rootMainFilesTree": {},
+  "pagesChunkGroupBootstrapParams": {},
+  "chunkLoadingGlobal": "TURBOPACK"
 }

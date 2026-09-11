@@ -11,6 +11,7 @@ import { submitVerified, notifyDeliveryFailure, type VerifiedDelivery } from '@/
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import { BranchTab } from './BranchTab';
 import { useVoice } from '@/contexts/VoiceContext';
+import { SpeakerToggle } from './SpeakerToggle';
 import { computeSessionKey } from '@/lib/session-keys';
 
 interface SessionInfo {
@@ -273,6 +274,7 @@ export function GlobalClaudePanel({
               {sessionInfo?.status}
             </span>
           )}
+          {isExpanded && <SpeakerToggle speaker={voice.speaker} variant="onBlue" />}
           <button
             onClick={(e) => {
               e.stopPropagation();

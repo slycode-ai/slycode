@@ -2,6 +2,7 @@ import os from 'os';
 import { randomUUID } from 'crypto';
 import type { WebSocket } from 'ws';
 import type { Response } from 'express';
+import { broadcastSse } from './sse.js';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import { isCommandAllowed } from './provider-registry.js';
 import { getTransport } from './transport/index.js';
@@ -83,7 +84,7 @@ const DEFAULT_CONFIG: BridgeConfig = {
 
 const webPort = process.env.PORT || process.env.WEB_PORT || '7591';
 const DEFAULT_RUNTIME_CONFIG: BridgeRuntimeConfig = {
-  allowedCommands: ['claude', 'codex', 'gemini', 'bash'],
+  allowedCommands: ['claude', 'codex', 'opencode', 'bash'],
   cors: { origins: [`http://localhost:${webPort}`, `http://127.0.0.1:${webPort}`] },
 };
 
@@ -218,19 +219,9 @@ export class SessionManager {
       for (const session of this.sessions.values()) {
         if (session.sseClients.size === 0) continue;
 
-        const deadClients: Response[] = [];
-        for (const client of session.sseClients) {
-          try {
-            client.write('event: heartbeat\ndata: {}\n\n');
-          } catch {
-            deadClients.push(client);
-          }
-        }
-        for (const client of deadClients) {
-          session.sseClients.delete(client);
-        }
-        if (deadClients.length > 0) {
-          console.log(`[SSE] heartbeat found ${deadClients.length} dead client(s) for ${session.name} (remaining: ${session.sseClients.size})`);
+        const { dead } = broadcastSse(session.sseClients, 'heartbeat', {});
+        if (dead > 0) {
+          console.log(`[SSE] heartbeat found ${dead} dead client(s) for ${session.name} (remaining: ${session.sseClients.size})`);
           this.updateClientCount(session);
         }
       }
@@ -631,7 +622,7 @@ export class SessionManager {
         cwd,
         cols: DEFAULT_PTY_COLS,
         rows: DEFAULT_PTY_ROWS,
-        extraEnv: { SLYCODE_SESSION: name, ...plan.env },
+        extraEnv: { SLYCODE_SESSION: name, SLYCODE_BRIDGE_URL: `http://127.0.0.1:${this.config.port}`, ...plan.env },
         onData: (data) => this.handlePtyOutput(name, data),
         onExit: (code) => this.handlePtyExit(name, code, session.createdAt),
       });
@@ -709,7 +700,7 @@ export class SessionManager {
     beforeFiles: string[]
   ): Promise<void> {
     // Custom watch that uses live claimed-GUID checks (not a stale snapshot)
-    // Gemini CLI takes ~30s to create session files; Claude is ~5s. Use 60s to be safe.
+    // Some CLIs create session files lazily (tens of seconds); Claude is ~5s. Use 60s to be safe.
     const sessionId = await this.watchForUnclaimedSession(name, providerId, beforeFiles, 60000);
     if (sessionId) {
       await this.claimDetectedSessionId(name, sessionId);
@@ -846,20 +837,8 @@ export class SessionManager {
       }
     }
 
-    // Broadcast to SSE clients (collect dead clients to remove after iteration)
-    const deadSseClients: Response[] = [];
-    for (const client of session.sseClients) {
-      try {
-        client.write(`event: output\ndata: ${JSON.stringify({ data })}\n\n`);
-      } catch {
-        deadSseClients.push(client);
-      }
-    }
-    // Remove dead SSE clients
-    for (const client of deadSseClients) {
-      session.sseClients.delete(client);
-    }
-    if (deadSseClients.length > 0) {
+    // Broadcast to SSE clients (dead clients are removed by the helper)
+    if (broadcastSse(session.sseClients, 'output', { data }).dead > 0) {
       this.updateClientCount(session);
     }
 
@@ -1036,14 +1015,10 @@ export class SessionManager {
       }
     }
 
-    // Notify SSE clients
+    // Notify SSE clients, then close every stream (client may already be gone)
+    broadcastSse(session.sseClients, 'exit', exitPayload);
     for (const client of session.sseClients) {
-      try {
-        client.write(`event: exit\ndata: ${JSON.stringify(exitPayload)}\n\n`);
-        client.end();
-      } catch (err) {
-        // Client might already be disconnected
-      }
+      try { client.end(); } catch { /* already disconnected */ }
     }
     session.sseClients.clear();
 
@@ -1853,19 +1828,7 @@ export class SessionManager {
     session.terminalDimensions = { cols, rows };
 
     // Broadcast new dimensions to all connected SSE clients so other tabs can adapt
-    const dimsPayload = `event: resize\ndata: ${JSON.stringify({ cols, rows })}\n\n`;
-    const deadClients: Response[] = [];
-    for (const client of session.sseClients) {
-      try {
-        client.write(dimsPayload);
-      } catch {
-        deadClients.push(client);
-      }
-    }
-    for (const client of deadClients) {
-      session.sseClients.delete(client);
-    }
-    if (deadClients.length > 0) {
+    if (broadcastSse(session.sseClients, 'resize', { cols, rows }).dead > 0) {
       this.updateClientCount(session);
     }
 
@@ -2064,10 +2027,10 @@ export class SessionManager {
   private static readonly VERIFY_MAX_RESENDS = 2;
   /**
    * Per-provider Enter-resend cap. Post-submit double-Enter was validated
-   * harmless only on Claude (spike 2026-06-06); Codex/Gemini get a single
+   * harmless only on Claude (spike 2026-06-06); Codex gets a single
    * resend until validated there (card #0336 review decision).
    */
-  private static readonly VERIFY_MAX_RESENDS_BY_PROVIDER: Record<SubmitProvider, number> = { claude: 2, codex: 1, gemini: 1 };
+  private static readonly VERIFY_MAX_RESENDS_BY_PROVIDER: Record<SubmitProvider, number> = { claude: 2, codex: 1 };
   /** Bounded diagnostic snippet: last N lines / max chars written to bridge.log (never returned to callers). */
   private static readonly DIAG_SNIPPET_LINES = 12;
   private static readonly DIAG_SNIPPET_CHARS = 400;
@@ -2086,7 +2049,7 @@ export class SessionManager {
   private verifySnapshotClassify(name: string, expected: string | null): InputRegionClassification | null {
     const session = this.sessions.get(name);
     const provider = session?.provider;
-    if (provider !== 'claude' && provider !== 'codex' && provider !== 'gemini') return null;
+    if (provider !== 'claude' && provider !== 'codex') return null;
     const snap = this.getSnapshot(name, SessionManager.VERIFY_SNAPSHOT_LINES);
     if (!snap) return null;
     return classifyInputRegion(provider as SubmitProvider, snap.content, expected);

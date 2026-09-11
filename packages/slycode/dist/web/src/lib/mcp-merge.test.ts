@@ -116,3 +116,13 @@ test('source without mcpServers is a no-op merge that still writes a valid desti
   assert.deepEqual(result, { imported: [], skipped: [] });
   assert.deepEqual(Object.keys(readJson(dstPath).mcpServers as object), ['a']);
 });
+
+test('merge writes atomically and leaves no temp file behind', () => {
+  writeJson(srcPath, { mcpServers: { c: { command: 'run-c' } } });
+  writeJson(dstPath, { mcpServers: { a: { command: 'run-a' } } });
+
+  mergeMcpFile(srcPath, dstPath);
+
+  assert.deepEqual(fs.readdirSync(path.dirname(dstPath)), ['.mcp.json'], 'no .tmp.* sibling may remain');
+  assert.deepEqual(Object.keys(readJson(dstPath).mcpServers as object).sort(), ['a', 'c']);
+});

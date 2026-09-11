@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import type { VoiceState } from '@/lib/types';
 
 interface VoiceControlBarProps {
@@ -14,6 +15,8 @@ interface VoiceControlBarProps {
   onSubmit: () => void;
   onRetry: () => void;
   onOpenSettings: () => void;
+  /** Rendered between the mic cluster and the gear, OUTSIDE the focus-dimmed wrapper (the speaker toggle, feature 086). */
+  beforeSettings?: ReactNode;
 }
 
 function formatTime(seconds: number): string {
@@ -34,6 +37,7 @@ export function VoiceControlBar({
   onSubmit,
   onRetry,
   onOpenSettings,
+  beforeSettings,
 }: VoiceControlBarProps) {
   const isRecordingPhase = voiceState === 'recording' || voiceState === 'paused';
 
@@ -147,6 +151,8 @@ export function VoiceControlBar({
       )}
 
       </div>
+
+      {beforeSettings}
 
       {/* Settings gear - always interactive, never inherits `disabled` styling */}
       <button

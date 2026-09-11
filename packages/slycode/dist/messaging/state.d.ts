@@ -16,6 +16,14 @@ export declare class StateManager {
     private loadProjects;
     private loadState;
     private saveState;
+    /**
+     * Persist and THROW on failure. Used by callers whose HTTP/CLI contract
+     * must not report success for an in-memory change that would vanish on
+     * restart (project voice setter, feature 086). Existing callers keep the
+     * log-only saveState().
+     */
+    private saveStateStrict;
+    private writeStateFile;
     getProjects(): Project[];
     getSelectedProject(): Project | null;
     reloadProjects(): void;
@@ -92,6 +100,38 @@ export declare class StateManager {
         id: string;
         name: string;
     } | null;
+    /**
+     * Resolve a project id from an explicit id/name/key or from a session name
+     * (first segment). Reloads the registry first so projects added after
+     * service start resolve. Returns null when nothing matches.
+     */
+    resolveProjectIdFrom(opts: {
+        projectId?: string;
+        session?: string;
+    }): string | null;
+    /** Stored = the project's own override; effective = stored → top-level (env default is the caller's fallback). */
+    getProjectVoice(projectId: string): {
+        stored: {
+            id: string;
+            name: string;
+        } | null;
+        effective: {
+            id: string;
+            name: string;
+        } | null;
+        source: 'project' | 'inherited' | null;
+    };
+    setProjectVoice(projectId: string, voice: {
+        id: string;
+        name: string;
+    }): void;
+    /**
+     * Clear the project's override. This resets the project to the CURRENT
+     * inherited default: anchorProjectsFromRegistry() re-anchors the top-level
+     * voice into the entry on the next reload, so "clear" never means
+     * "permanently follow the workspace default" nor "force the env voice".
+     */
+    clearProjectVoice(projectId: string): void;
     setVoice(id: string, name: string): void;
     clearVoice(): void;
     getResponseMode(): ResponseMode;

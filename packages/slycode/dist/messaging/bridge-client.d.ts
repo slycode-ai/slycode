@@ -1,6 +1,8 @@
 import type { BridgeSessionInfo, BridgeCreateSessionRequest, Channel, InstructionFileCheck } from './types.js';
 export declare class BridgeClient {
     private baseUrl;
+    /** Base URL the client was constructed with (used for one-off probes such as GET /speaker). */
+    getBaseUrl(): string;
     constructor(bridgeUrl: string);
     getSession(name: string): Promise<BridgeSessionInfo | null>;
     listSessions(): Promise<BridgeSessionInfo[]>;

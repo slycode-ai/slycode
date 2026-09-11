@@ -6,9 +6,12 @@ import { fileURLToPath } from 'url';
 import { SessionManager } from './session-manager.js';
 import { setupWebSocket } from './websocket.js';
 import { createApiRouter } from './api.js';
+import { createSpeakRouter } from './speak-route.js';
 import { ResponseStore } from './response-store.js';
 import { Reaper, resolveReaperPaths } from './reaper.js';
 import { loadProviders } from './provider-utils.js';
+import { getSpeakerAuthority } from './speaker.js';
+import { configureMessagingClient } from './messaging-client.js';
 import type { BridgeRuntimeConfig } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +22,7 @@ function loadRuntimeConfig(): BridgeRuntimeConfig {
     ? path.resolve(process.env.SLYCODE_HOME, 'bridge-config.json')
     : path.join(__dirname, '..', 'bridge-config.json');
   const defaultConfig: BridgeRuntimeConfig = {
-    allowedCommands: ['claude', 'codex', 'gemini', 'bash'],
+    allowedCommands: ['claude', 'codex', 'opencode', 'bash'],
     cors: { origins: ['http://localhost:3003'] },
   };
 
@@ -36,6 +39,13 @@ function loadRuntimeConfig(): BridgeRuntimeConfig {
 
 const PORT = parseInt(process.env.PORT || process.env.BRIDGE_PORT || '3004', 10);
 const HOST = process.env.BRIDGE_HOST || 'localhost';
+// Messaging service URL for spoken-reply rendering (feature 086). Explicit
+// MESSAGING_URL wins; otherwise the workspace's MESSAGING_SERVICE_PORT. Never
+// derived from the bridge's own port and never probed across environments.
+export const MESSAGING_URL: string | null = process.env.MESSAGING_URL
+  || (process.env.MESSAGING_SERVICE_PORT ? `http://127.0.0.1:${process.env.MESSAGING_SERVICE_PORT}` : null)
+  // Dev mode (no SLYCODE_HOME): messaging's own dev default port, matching its index.ts fallback
+  || (process.env.SLYCODE_HOME ? null : 'http://127.0.0.1:3005');
 
 function validateDataPaths(): void {
   const root = process.env.SLYCODE_HOME
@@ -43,6 +53,7 @@ function validateDataPaths(): void {
     : path.join(__dirname, '..', '..');
   const mode = process.env.SLYCODE_HOME ? 'deployed' : 'dev';
   console.log(`[bridge] Workspace root: ${root} (${mode} mode)`);
+  console.log(MESSAGING_URL ? `[bridge] Messaging: ${MESSAGING_URL}` : '[bridge] Messaging: not configured — spoken replies (speak) disabled');
 
   const providersPath = path.join(root, 'data', 'providers.json');
   if (!fs.existsSync(providersPath)) {
@@ -70,7 +81,7 @@ async function main() {
     if (origin && corsOrigins.includes(origin)) {
       res.header('Access-Control-Allow-Origin', origin);
     }
-    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') {
       return res.sendStatus(200);
@@ -84,6 +95,11 @@ async function main() {
     host: HOST,
   }, runtimeConfig);
   await sessionManager.init();
+
+  // Speaker authority (feature 086): global spoken-reply permission, audio
+  // stream subscribers, rate buckets. Loads data/speaker-prefs.json (default off).
+  configureMessagingClient(MESSAGING_URL);
+  await getSpeakerAuthority().init();
 
   // Initialize response store for cross-card prompt protocol
   const responseStore = new ResponseStore();
@@ -112,9 +128,11 @@ async function main() {
 
   // API routes
   app.use('/api', createApiRouter(sessionManager, responseStore));
+  app.use('/api', createSpeakRouter(sessionManager));
 
   // Also mount at root for convenience
   app.use('/', createApiRouter(sessionManager, responseStore));
+  app.use('/', createSpeakRouter(sessionManager));
 
   // Track server start time for uptime calculation
   const startTime = Date.now();

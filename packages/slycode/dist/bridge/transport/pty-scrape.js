@@ -1,6 +1,6 @@
 /**
  * pty-scrape transport (feature 085) — the pre-seam behaviour for Claude,
- * Codex and Gemini, unchanged:
+ * and Codex, unchanged:
  *
  *  - identity: bridge-assigned `--session-id` when the provider declares
  *    `sessionIdFlag` (feature 081), else transcript-file detection after

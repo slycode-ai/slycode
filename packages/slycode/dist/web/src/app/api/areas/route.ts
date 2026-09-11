@@ -5,8 +5,17 @@ import { getSlycodeRoot } from '@/lib/paths';
 
 export async function GET() {
   const repoRoot = getSlycodeRoot();
-  const areaIndexPath = path.join(repoRoot, '.claude', 'skills', 'context-priming', 'references', 'area-index.md');
-  const areasDir = path.join(repoRoot, '.claude', 'skills', 'context-priming', 'references', 'areas');
+  // context-priming may live under .claude/ or, in workspaces without one
+  // (pure Codex/OpenCode projects), under .agents/ — first existing wins.
+  const candidateRefDirs = ['.claude', '.agents', '.opencode'].map(dir =>
+    path.join(repoRoot, dir, 'skills', 'context-priming', 'references'),
+  );
+  let refDir = candidateRefDirs[0];
+  for (const dir of candidateRefDirs) {
+    try { await fs.access(path.join(dir, 'area-index.md')); refDir = dir; break; } catch { /* next */ }
+  }
+  const areaIndexPath = path.join(refDir, 'area-index.md');
+  const areasDir = path.join(refDir, 'areas');
 
   const areas: string[] = [];
 

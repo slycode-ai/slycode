@@ -7,11 +7,12 @@ import { TelegramChannel } from './channels/telegram.js';
 import { BridgeClient } from './bridge-client.js';
 import { StateManager } from './state.js';
 import { KanbanClient } from './kanban-client.js';
-import { SlyActionFilter } from './sly-action-filter.js';
+import { SlyActionFilter, fetchSpeakerState } from './sly-action-filter.js';
 import { transcribeAudio, validateSttConfig } from './stt.js';
-import { textToSpeech, convertToOgg, renderTtsAudio } from './tts.js';
+import { textToSpeech, convertToOgg, renderTtsAudio, RenderTimeoutError, RenderCancelledError } from './tts.js';
+import { SpeechRenderer } from './tts-render.js';
 import * as audioArchive from './audio-archive.js';
-import { searchVoices } from './voices.js';
+import { searchVoices, searchVoicesStrict, VoicesUnavailableError } from './voices.js';
 import type { Channel, InlineButton, ServiceConfig, VoiceConfig, NavigationTarget, SlyActionConfig, ResponseMode, BridgeSessionInfo, Project } from './types.js';
 import { projectSessionKeys, escapeRegex, resolveCanonicalProjectId } from './session-keys.js';
 import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
@@ -608,11 +609,15 @@ async function executeQuickCommand(
     ? kanban.getCard(target.projectId, target.cardId)
     : null;
 
+  // Speaker permission snapshot for the card context (feature 086); fetched
+  // at dispatch, never cached.
+  const speakerState = cardInfo ? await fetchSpeakerState(bridge.getBaseUrl()) : undefined;
   const resolved = actionFilter.buildFullPrompt(cmd.prompt, {
     card: cardInfo?.card,
     project: project || undefined,
     stage: cardInfo?.stage || target.stage,
     projectPath: project?.path,
+    speakerState,
   });
 
   // Wrap with channel header so the terminal session knows to reply via messaging
@@ -971,7 +976,7 @@ function setupChannel(
       'Commands:\n' +
       '/switch - Navigate terminals (global, project, card)\n' +
       '/search - Search cards (or quick access to active/recent)\n' +
-      '/provider - Select AI provider (Claude/Gemini/Codex)\n' +
+      '/provider - Select AI provider\n' +
       '/model - Select model for current provider\n' +
       '/sly - Sly Actions for active session\n' +
       '/global - Switch to global terminal\n' +
@@ -1970,6 +1975,8 @@ async function main() {
   const bridge = new BridgeClient(serviceConfig.bridgeUrl);
   const kanban = new KanbanClient(state.getProjects());
   const actionFilter = new SlyActionFilter();
+  // Shared render cache for /tts/generate and /tts/render (feature 086).
+  const speechRenderer = new SpeechRenderer(voiceConfig);
 
   console.log(`Projects loaded: ${state.getProjects().length}`);
 
@@ -2321,9 +2328,12 @@ async function main() {
 
       let buffer: Buffer;
       try {
-        const result = await renderTtsAudio(text, voiceConfig, { format: fmt, voiceIdOverride: effectiveVoiceId });
+        const result = await speechRenderer.renderSpeech({ text, format: fmt, voiceId: effectiveVoiceId });
         buffer = result.buffer;
       } catch (err) {
+        if (err instanceof RenderTimeoutError) {
+          return res.status(504).json({ ok: false, error: 'render_timeout', message: err.message });
+        }
         return res.status(502).json({ ok: false, error: 'tts_failed', message: (err as Error).message });
       }
 
@@ -2362,6 +2372,185 @@ async function main() {
     }
   });
 
+  // POST /tts/render — render TTS audio and return the bytes inline (feature
+  // 086, used by the bridge's speak orchestration). Never writes to disk and
+  // never emits to any channel. Structural invariant: this handler must not
+  // reference `channel` anywhere.
+  app.post('/tts/render', async (req, res) => {
+    try {
+      const { text, voiceId, format, projectId, session } = req.body ?? {};
+
+      if (typeof text !== 'string' || text.length === 0) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'text must be a non-empty string' });
+      }
+      const maxText = parseInt(process.env.TTS_GENERATE_MAX_TEXT || '5000', 10);
+      if (text.length > maxText) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: `text exceeds ${maxText} characters` });
+      }
+      const fmt: 'mp3' = format ?? 'mp3';
+      if (fmt !== 'mp3') {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: "format must be 'mp3'" });
+      }
+      if (voiceId !== undefined && (typeof voiceId !== 'string' || voiceId.length === 0)) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'voiceId must be a non-empty string when provided' });
+      }
+      if (projectId !== undefined && (typeof projectId !== 'string' || projectId.length === 0)) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'projectId must be a non-empty string when provided' });
+      }
+      if (session !== undefined && (typeof session !== 'string' || session.length === 0)) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'session must be a non-empty string when provided' });
+      }
+      if (!voiceConfig.elevenlabsApiKey) {
+        return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
+      }
+      if (projectId !== undefined && !resolveCanonicalProjectId(projectId, state.getProjects())) {
+        return res.status(404).json({
+          ok: false,
+          error: 'unknown_project',
+          message: `Unknown project: '${projectId}'. Pass a project id, name, or session key.`,
+        });
+      }
+
+      // Same voice resolution as /tts/generate: explicit → project/session → env.
+      const effectiveVoiceId: string | undefined =
+        voiceId ?? state.resolveContextVoice({ projectId, session })?.id;
+
+      // A caller that hangs up (bridge timeout, killed CLI) must not keep a paid
+      // render queued: abort it so undispatched work is dropped from the queue.
+      const abort = new AbortController();
+      req.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      try {
+        const result = await speechRenderer.renderSpeech({ text, format: 'mp3', voiceId: effectiveVoiceId, signal: abort.signal });
+        return res.json({
+          ok: true,
+          voiceId: result.voiceId,
+          format: 'mp3',
+          bytes: result.buffer.length,
+          cached: result.cached,
+          dataBase64: result.buffer.toString('base64'),
+        });
+      } catch (err) {
+        if (err instanceof RenderCancelledError) {
+          if (res.writableEnded || res.destroyed) return;
+          return res.status(499).json({ ok: false, error: 'render_cancelled', message: err.message });
+        }
+        if (err instanceof RenderTimeoutError) {
+          return res.status(504).json({ ok: false, error: 'render_timeout', message: err.message });
+        }
+        return res.status(502).json({ ok: false, error: 'tts_failed', message: (err as Error).message });
+      }
+    } catch (err) {
+      res.status(500).json({ ok: false, error: 'internal_error', message: (err as Error).message });
+    }
+  });
+
+  // --- Project voice (feature 086) ------------------------------------------
+  // GET/PUT/DELETE /projects/:id/voice — read, set or clear a project's own
+  // TTS voice without going through Telegram. `:id` accepts a project id,
+  // sessionKey, alias or display name; the literal `_session` resolves the
+  // project from `?session=` / body.session (the caller's SLYCODE_SESSION).
+  // Writes touch ONLY the project's entry (no top-level mirror) and persist
+  // strictly. Never references `channel`.
+  function resolveProjectParam(req: express.Request): string | null {
+    const raw = String(req.params.id);
+    const session = (typeof req.query.session === 'string' && req.query.session)
+      || (typeof req.body?.session === 'string' ? req.body.session : undefined);
+    if (raw === '_session') return state.resolveProjectIdFrom({ session });
+    return state.resolveProjectIdFrom({ projectId: raw });
+  }
+
+  function projectVoicePayload(projectId: string) {
+    const v = state.getProjectVoice(projectId);
+    const envDefault = voiceConfig.elevenlabsVoiceId
+      ? { id: voiceConfig.elevenlabsVoiceId, name: 'env default' }
+      : null;
+    const effective = v.effective ?? envDefault;
+    const source: 'project' | 'inherited' | 'env' | null = v.source ?? (envDefault ? 'env' : null);
+    return { ok: true, projectId, stored: v.stored, effective, source };
+  }
+
+  app.get('/projects/:id/voice', (req, res) => {
+    const projectId = resolveProjectParam(req);
+    if (!projectId) {
+      return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
+    }
+    res.json(projectVoicePayload(projectId));
+  });
+
+  app.put('/projects/:id/voice', async (req, res) => {
+    try {
+      const projectId = resolveProjectParam(req);
+      if (!projectId) {
+        return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
+      }
+      const { voiceId, voiceName } = req.body ?? {};
+      const hasId = typeof voiceId === 'string' && voiceId.length > 0;
+      const hasName = typeof voiceName === 'string' && voiceName.trim().length > 0;
+      if (hasId === hasName) {
+        return res.status(400).json({ ok: false, error: 'bad_request', message: 'Provide exactly one of voiceId or voiceName' });
+      }
+
+      let chosen: { id: string; name: string };
+      if (hasId) {
+        chosen = { id: voiceId, name: typeof voiceName === 'string' && voiceName ? voiceName : voiceId };
+      } else {
+        if (!voiceConfig.elevenlabsApiKey) {
+          return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
+        }
+        const wanted = String(voiceName).trim();
+        let candidates;
+        try {
+          candidates = await searchVoicesStrict(voiceConfig.elevenlabsApiKey, wanted);
+        } catch (err) {
+          if (err instanceof VoicesUnavailableError) {
+            return res.status(502).json({ ok: false, error: 'voices_unavailable', message: err.message });
+          }
+          throw err;
+        }
+        const exact = candidates.filter(v => v.name.trim().toLowerCase() === wanted.toLowerCase());
+        if (exact.length === 0) {
+          return res.status(404).json({
+            ok: false,
+            error: 'voice_not_found',
+            message: `No voice named exactly '${wanted}'. Use \`sly-messaging voices "${wanted}"\` to list candidates and set by id.`,
+            candidates: candidates.slice(0, 10).map(v => ({ voice_id: v.voice_id, name: v.name, category: v.category })),
+          });
+        }
+        if (exact.length > 1) {
+          return res.status(409).json({
+            ok: false,
+            error: 'voice_ambiguous',
+            message: `${exact.length} voices are named '${wanted}'; set by id instead.`,
+            candidates: exact.map(v => ({ voice_id: v.voice_id, name: v.name, category: v.category })),
+          });
+        }
+        chosen = { id: exact[0].voice_id, name: exact[0].name };
+      }
+
+      try {
+        state.setProjectVoice(projectId, chosen);
+      } catch (err) {
+        return res.status(500).json({ ok: false, error: 'persist_failed', message: `Voice not saved: ${(err as Error).message}` });
+      }
+      res.json(projectVoicePayload(projectId));
+    } catch (err) {
+      res.status(500).json({ ok: false, error: 'internal_error', message: (err as Error).message });
+    }
+  });
+
+  app.delete('/projects/:id/voice', (req, res) => {
+    const projectId = resolveProjectParam(req);
+    if (!projectId) {
+      return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
+    }
+    try {
+      state.clearProjectVoice(projectId);
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: 'persist_failed', message: `Voice not cleared: ${(err as Error).message}` });
+    }
+    res.json(projectVoicePayload(projectId));
+  });
+
   // GET /voices/search — search ElevenLabs voices by name (personal + shared
   // library) and return matches with their voice IDs. Never emits to any
   // channel; exists so other services can resolve voice IDs without their own
@@ -2387,6 +2576,9 @@ async function main() {
       status: 'ok',
       channel: channel?.name || null,
       ready: channel?.isReady() || false,
+      // TTS readiness (feature 086): the web speaker toggle and the bridge
+      // read this to report availability honestly.
+      tts: !!voiceConfig.elevenlabsApiKey,
     });
   });
 

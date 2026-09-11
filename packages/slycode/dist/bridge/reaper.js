@@ -1,7 +1,7 @@
 /**
  * Orphan provider reaper (feature 078).
  *
- * Periodically scans /proc for provider CLI processes (claude/codex/gemini)
+ * Periodically scans /proc for provider CLI processes (claude/codex/opencode)
  * that were spawned by a SlyCode bridge, lost their bridge (orphaned), and
  * have been inactive for a long time — then terminates them. Without this,
  * every bridge death (restart, crash, HMR purge) leaks 30-340 MB provider

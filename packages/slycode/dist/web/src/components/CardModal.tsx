@@ -22,6 +22,8 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { getProviderColor } from '@/lib/provider-colors';
 import { VoiceControlBar } from './VoiceControlBar';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
+import { SpeakerToggle } from './SpeakerToggle';
+import { formatSpeakerLine } from '@/lib/speaker-line';
 import { VoiceErrorPopup } from './VoiceErrorPopup';
 import { useVoice } from '@/contexts/VoiceContext';
 import { readStatus, formatStatusForPrompt } from '@/lib/status';
@@ -760,6 +762,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       for (const line of formatStatusForPrompt(statusObj)) ctxLines.push(line);
     }
   }
+  // Speaker permission snapshot (feature 086) — runtime state, a separate line after the
+  // status metadata, never inside the quoted status block. Live value from the bridge stream.
+  ctxLines.push(formatSpeakerLine(voice.speaker.enabled === null ? 'unknown' : voice.speaker.enabled ? 'on' : 'off'));
   ctxLines.push(ctxChecklist.length > 0 ? `Checklist: ${ctxCheckedCount}/${ctxChecklist.length} checked` : 'Checklist: none');
   ctxLines.push(`Notes: ${ctxNotesCount}`);
 
@@ -1572,6 +1577,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                     if (Date.now() - voiceSettingsClosedAtRef.current < 200) return;
                     voice.setShowSettings(!voice.showSettings);
                   }}
+                  beforeSettings={
+                    <SpeakerToggle
+                      speaker={voice.speaker}
+                      hideOnNarrow={voice.voiceState === 'recording' || voice.voiceState === 'paused' || voice.voiceState === 'transcribing'}
+                    />
+                  }
                 />
               </div>
             )}
@@ -2636,6 +2647,8 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             settings={voice.settings.voice}
             onSave={(patch) => voice.updateSettings({ voice: patch })}
             onClose={() => { voiceSettingsClosedAtRef.current = Date.now(); voice.setShowSettings(false); }}
+            speaker={voice.speaker}
+            saveError={voice.settingsSaveError}
           />
         </VoicePopoverPortal>,
         document.body,

@@ -37,4 +37,15 @@ export type ResolveProjectIdResult = {
  * matches.
  */
 export declare function resolveCanonicalProjectId(key: string, projects: ProjectKeyShape[]): ResolveProjectIdResult;
+/**
+ * Card-session name shape shared with the bridge — LOCKSTEP with
+ * bridge/src/session-name.ts (parseSessionName). Matches both the current
+ * `{project}:{provider}:card:{cardId}` and the legacy provider-less
+ * `{project}:card:{cardId}` forms. Keep the regex identical in both places.
+ */
+export declare const CARD_SESSION_PATTERN: RegExp;
+export declare function parseCardSessionName(name: string): {
+    projectKey: string;
+    cardId: string;
+} | null;
 export {};

@@ -1,6 +1,6 @@
 {
   "name": "@slycode/create-slycode",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Create a new SlyCode workspace",
   "bin": {
     "create-slycode": "./bin/create-slycode.js"
@@ -43,6 +43,7 @@
   },
   "overrides": {
     "form-data": "^4.0.6",
-    "ws": "^8.20.2"
+    "ws": "^8.20.2",
+    "multer": "^2.3.0"
   }
 }

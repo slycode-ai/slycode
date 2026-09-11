@@ -50,7 +50,6 @@ const providerTabs: { id: ProviderId; label: string }[] = [
   { id: 'claude', label: 'Claude' },
   { id: 'agents', label: 'Agents' },
   { id: 'codex', label: 'Codex' },
-  { id: 'gemini', label: 'Gemini' },
 ];
 
 export function CliAssetsTab() {
@@ -431,14 +430,14 @@ export function CliAssetsTab() {
       {/* Sub-view description */}
       <p className="mb-3 text-xs text-void-400 dark:text-void-500">
         {activeView === 'projects' && 'Assign assets from the store to individual projects and keep them in sync.'}
-        {activeView === 'store' && 'The canonical source for each asset. Deploy to projects across providers like Claude, Codex, and Gemini.'}
+        {activeView === 'store' && 'The canonical source for each asset. Deploy to projects across providers like Claude Code, Codex, and OpenCode.'}
         {activeView === 'updates' && 'SlyCode updates land here. Review what changed and choose to accept or skip each one.'}
       </p>
 
       {/* Agents provider info */}
       {activeProvider === 'agents' && (
         <div className="mx-1 rounded-md border border-void-200 bg-void-50 px-3 py-2 text-xs text-void-500 dark:border-void-700 dark:bg-void-900 dark:text-void-400">
-          <strong className="text-void-700 dark:text-void-300">Agents</strong> deploys to <code className="rounded bg-void-200 px-1 dark:bg-void-800">.agents/skills/</code> — the universal cross-tool directory read by both Codex CLI and Gemini CLI. Use this for skills that should work across tools without provider-specific overrides.
+          <strong className="text-void-700 dark:text-void-300">Agents</strong> deploys to <code className="rounded bg-void-200 px-1 dark:bg-void-800">.agents/skills/</code> — the universal cross-tool directory read natively by Codex CLI and OpenCode. Use this for skills that should work across tools without provider-specific overrides.
         </div>
       )}
 
@@ -480,7 +479,7 @@ export function CliAssetsTab() {
             // Fetch each provider's matrix to find every project+provider where it's
             // installed, then review the batch — the plan route classifies per-file
             // fates and newer-copy conflicts (feature 084).
-            const providers: ProviderId[] = ['claude', 'agents', 'codex', 'gemini'];
+            const providers: ProviderId[] = ['claude', 'agents', 'codex'];
             const changes: PendingChange[] = [];
 
             const matrices = await Promise.all(

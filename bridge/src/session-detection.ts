@@ -131,7 +131,7 @@ export type AssignedIdVerdict = 'verified' | 'pending' | 'fallback';
  * Assigned-id verification verdict (feature 081 fallback): if a future CLI
  * update drops or ignores --session-id, the bridge must notice and fall back
  * to file detection instead of confidently recording an id no transcript
- * carries. 'pending' = keep waiting (providers create files lazily — Gemini
+ * carries. 'pending' = keep waiting (providers create files lazily — some CLIs
  * takes ~30s, and only input events trigger checks); 'fallback' = the id
  * provably never materialized: null it and re-arm detection.
  */

@@ -1,8 +1,8 @@
 ---
 name: messaging
-version: 2.5.0
-updated: 2026-06-06
-description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc.
+version: 2.6.0
+updated: 2026-09-08
+description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc), give short spoken summaries in the web terminal (speak / voice reply / speaker), and manage a project's TTS voice (project voice). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc., or when the user asks for spoken summaries, voice replies, or to change the project voice.
 ---
 
 # Messaging Response Skill
@@ -100,6 +100,66 @@ sly-messaging generate "Your narration" --project slycode              # use a p
   via `send-file` → waits for the user's reaction).
 - `send --tts` is still the right tool when you're *generating* fresh
   speech from text — `send-file` only delivers what's already on disk.
+
+## Spoken Replies in the Web Terminal (`speak`)
+
+The web UI has a **global speaker toggle** (next to the record-message
+controls in the card modal, the global panel and the floating voice widget).
+It is a **permission gate, not an instruction**: sound being on does NOT
+mean the user wants spoken replies from you.
+
+**Use `speak` ONLY when the user has explicitly asked THIS session for
+spoken summaries** (e.g. "end your replies with a short casual spoken
+summary"). Card context may carry a `Speaker permission: on/off/unknown`
+snapshot line — that is state, not an ask.
+
+```bash
+sly-messaging speak "tests pass, one thing left to check on the modal"
+```
+
+- Keep it **short and casual**: a heads-up, not a read-out of your reply.
+  Default limit 60 words (user-adjustable in the gear settings).
+- Renders with the calling project's voice (same voice Telegram uses for
+  that project). Style comes from the user's ask, not from `/tone`.
+- Plays in every browser where the SlyCode web app is open. The output line
+  `Spoken (delivered to N browser(s))` means delivered, not necessarily heard.
+- Works from card, global and atlas terminals; only from a SlyCode terminal
+  (`SLYCODE_SESSION` + `SLYCODE_BRIDGE_URL` are set by the bridge).
+- Never routes through Telegram. It is not a substitute for a Telegram
+  reply: a `(Reply using /messaging | Mode: ...)` footer means the Telegram
+  path (`send`, `send --tts`), not `speak`.
+
+**Refusals — stop, do not work around them.** A refusal costs no credit.
+Never fall back to `generate` or `send --tts` to "make sound anyway".
+
+| Message | What to do |
+|---|---|
+| `sound is off — don't create sound unless asked to again` | Stop making audio for the rest of the session unless the user asks again. |
+| `speaker is on but no browser is connected — nobody would hear this; reply in text` | Reply in text only. |
+| `spoken summary too long: N words / M chars, limit is W words / C chars; shorten and retry` | Shorten and retry once. |
+| `nothing to speak (only tags or punctuation)` | Write real words or skip it. |
+| `spoken summaries budget reached for this session (12 per 10 min); continue in text` | Continue in text. |
+| `voice service unavailable: <reason>` | Tell the user once, continue in text. |
+| `no registered session (...)` | You are not in a SlyCode terminal; do not retry. |
+
+## Project Voice (`voice set|show|clear`)
+
+Each project has its own TTS voice, shared by Telegram voice replies and
+terminal `speak`. Change it from any terminal when the user asks:
+
+```bash
+sly-messaging voices british                         # search voices (id  name (category) — description)
+sly-messaging voice set <voice-id> --project slycode # set by id (preferred)
+sly-messaging voice set "Rachel" --project slycode   # set by exact name (must match exactly one voice)
+sly-messaging voice show --project slycode           # stored + effective voice
+sly-messaging voice clear --project slycode          # back to the inherited default
+```
+
+- `--project` accepts a project id, display name or session key; it defaults
+  to the calling session's project when omitted.
+- `clear` resets to the current inherited default, not to "no voice".
+- Ambiguous or unknown names fail loudly; a search-service failure is
+  reported as such, not as "not found". Never pick the first fuzzy hit.
 
 ## When to Use Voice (`--tts`)
 
@@ -242,6 +302,7 @@ If `sly-messaging send` fails, follow these rules:
 - **Don't retry** — if the send fails, it's almost certainly a configuration issue, not a transient error. Retrying will just produce the same error.
 - **Inform the user once** — tell them messaging failed and include the error message. Then continue with your task normally. Don't let a messaging failure block your work.
 - **Don't block on it** — messaging is a convenience for the user, not a requirement for completing work. If it fails, just communicate via the normal conversation output.
+- **`speak` refusals are final** — a refusal ("sound is off", "no browser is connected", "too long", "budget reached") is the user's setting or state, not an error. Do not retry it in a loop, and never work around it with `generate` or `send --tts`.
 - **Suggest a fix** — tell the user: "Messaging isn't working. You can either configure it (set up Telegram credentials in .env and start the messaging service) or remove the messaging skill from this project to stop these errors."
 
 ## Important Notes

@@ -9,7 +9,7 @@
 import type { ProviderConfig } from './provider-utils.js';
 /**
  * Historical conversation-id shape accepted by the manual link route: UUIDs
- * (Claude, Gemini) and Codex rollout ids. Providers with other id shapes
+ * (Claude) and Codex rollout ids. Providers with other id shapes
  * declare `idPattern` in providers.json.
  */
 export declare const DEFAULT_ID_PATTERN: RegExp;

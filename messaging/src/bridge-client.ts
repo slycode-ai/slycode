@@ -1,4 +1,5 @@
 import type { BridgeSessionInfo, BridgeCreateSessionRequest, Channel, InstructionFileCheck } from './types.js';
+import { parseCardSessionName } from './session-keys.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -31,6 +32,11 @@ function isFetchError(err: unknown): boolean {
 
 export class BridgeClient {
   private baseUrl: string;
+
+  /** Base URL the client was constructed with (used for one-off probes such as GET /speaker). */
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
 
   constructor(bridgeUrl: string) {
     this.baseUrl = bridgeUrl.replace(/\/$/, '');
@@ -78,7 +84,6 @@ export class BridgeClient {
 
   /** Get card IDs with currently active sessions (isActive from /stats). */
   async getActiveCardSessions(projectIds: string[]): Promise<Set<string>> {
-    const cardPattern = /^([^:]+):(?:[^:]+:)?card:(.+)$/;
     const projectSet = new Set(projectIds);
     const result = new Set<string>();
 
@@ -92,9 +97,9 @@ export class BridgeClient {
 
       for (const session of stats.sessions) {
         if (!session.isActive) continue;
-        const match = session.name.match(cardPattern);
-        if (match && projectSet.has(match[1])) {
-          result.add(match[2]);
+        const parsed = parseCardSessionName(session.name);
+        if (parsed && projectSet.has(parsed.projectKey)) {
+          result.add(parsed.cardId);
         }
       }
     } catch {
@@ -106,7 +111,6 @@ export class BridgeClient {
 
   /** Get lastActive timestamps for card sessions (from /sessions, includes stopped). */
   async getCardSessionRecency(projectIds: string[]): Promise<Map<string, string>> {
-    const cardPattern = /^([^:]+):(?:[^:]+:)?card:(.+)$/;
     const projectSet = new Set(projectIds);
     const result = new Map<string, string>();
 
@@ -114,9 +118,9 @@ export class BridgeClient {
       const sessions = await this.listSessions();
       for (const session of sessions) {
         if (!session.lastActive) continue;
-        const match = session.name.match(cardPattern);
-        if (match && projectSet.has(match[1])) {
-          const cardId = match[2];
+        const parsed = parseCardSessionName(session.name);
+        if (parsed && projectSet.has(parsed.projectKey)) {
+          const cardId = parsed.cardId;
           const existing = result.get(cardId);
           // Keep the most recent lastActive if multiple sessions exist for same card
           if (!existing || session.lastActive > existing) {

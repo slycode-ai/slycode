@@ -20,6 +20,7 @@ import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
 import { computeSessionKey } from './session-keys';
 import { readStatus, formatStatusForPrompt } from './status';
+import { fetchSpeakerState, formatSpeakerLine, type SpeakerSnapshot } from './speaker-line';
 import { atomicWriteFile } from './atomic-write';
 import { withBoardLock } from './board-lock';
 
@@ -450,6 +451,7 @@ function buildRunHeader(
   card: KanbanCard,
   config: AutomationConfig,
   trigger: 'scheduled' | 'manual',
+  speakerState: SpeakerSnapshot = 'unknown',
 ): string {
   const now = new Date();
   const lines: string[] = ['=== AUTOMATION RUN ==='];
@@ -480,6 +482,8 @@ function buildRunHeader(
   if (statusObj) {
     for (const line of formatStatusForPrompt(statusObj, now)) lines.push(line);
   }
+  // Speaker permission snapshot (feature 086) — runtime state, outside the quoted status block.
+  lines.push(formatSpeakerLine(speakerState));
 
   lines.push('======================');
   return lines.join('\n');
@@ -557,7 +561,7 @@ export async function triggerAutomation(
 
   // Build prompt with run header + card context + description as instruction
   const contextLines: string[] = [
-    buildRunHeader(card, config, options.trigger),
+    buildRunHeader(card, config, options.trigger, await fetchSpeakerState(BRIDGE_URL)),
     '',
   ];
   if (card.areas.length > 0) {

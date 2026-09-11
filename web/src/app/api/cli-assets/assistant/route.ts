@@ -12,6 +12,8 @@ import { getSlycodeRoot } from '@/lib/paths';
 import { validateAssetName } from '@/lib/asset-path-guard';
 import type { ProviderId, AssetType } from '@/lib/types';
 
+const VALID_PROVIDERS: ProviderId[] = ['claude', 'agents', 'codex'];
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -29,6 +31,12 @@ export async function POST(request: NextRequest) {
         { error: 'mode, provider, and assetType are required' },
         { status: 400 },
       );
+    }
+
+    // A stale/unknown provider id (e.g. one removed from the placement
+    // targets, #0343) must 400, not render an "undefined" prompt.
+    if (!VALID_PROVIDERS.includes(provider)) {
+      return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
     }
 
     if (mode === 'create' && (!assetName || !description)) {
@@ -118,7 +126,6 @@ function buildCreatePrompt(
     claude: 'Claude Code',
     agents: 'Agents (Universal)',
     codex: 'Codex CLI',
-    gemini: 'Gemini CLI',
   };
 
   const typeGuidance: Record<string, string> = {
@@ -154,8 +161,8 @@ All four fields are mandatory. The description should summarize the ${assetType}
 ${provider === 'agents' ? `
 ## Provider-Neutral Language
 
-Since this asset targets the universal .agents/ directory (used by both Codex CLI and Gemini CLI), you MUST write all text in provider-neutral language:
-- Do NOT mention specific tools like "Claude Code", "Codex CLI", or "Gemini CLI"
+Since this asset targets the universal .agents/ directory (read by cross-tool CLIs such as Codex and OpenCode), you MUST write all text in provider-neutral language:
+- Do NOT name specific tools (e.g. "Claude Code" or "Codex CLI")
 - Use generic terms like "the AI assistant" or "the agent" instead
 - The content should work identically across any AI coding tool that reads .agents/
 ` : ''}
@@ -174,7 +181,6 @@ function buildModifyPrompt(
     claude: 'Claude Code',
     agents: 'Agents (Universal)',
     codex: 'Codex CLI',
-    gemini: 'Gemini CLI',
   };
 
   const changesSection = changes

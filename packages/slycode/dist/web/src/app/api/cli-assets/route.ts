@@ -19,13 +19,19 @@ import type { ProviderId, AssetType, AssetInfo, CliAssetsData } from '@/lib/type
 
 export const dynamic = 'force-dynamic';
 
-const PROVIDERS: ProviderId[] = ['claude', 'agents', 'codex', 'gemini'];
+const PROVIDERS: ProviderId[] = ['claude', 'agents', 'codex'];
 const ASSET_TYPES: AssetType[] = ['skill', 'agent'];
 
 export async function GET(request: NextRequest) {
   try {
     const registry = await loadRegistry();
-    const provider = request.nextUrl.searchParams.get('provider') as ProviderId | null;
+    const providerParam = request.nextUrl.searchParams.get('provider');
+    // A supplied-but-unknown provider id (e.g. a bookmark for a removed
+    // provider, #0343) must fail loudly, not silently scan claude.
+    if (providerParam !== null && !PROVIDERS.includes(providerParam as ProviderId)) {
+      return NextResponse.json({ error: `Unknown provider: ${providerParam}` }, { status: 400 });
+    }
+    const provider = providerParam as ProviderId | null;
 
     // Always scan the flat canonical store
     const storeData = scanStore();

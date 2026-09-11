@@ -469,6 +469,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {railTab === 'files' && (
                   <FileTree
+                    projectId={projectId}
                     tree={tree}
                     error={treeError}
                     activePath={scene.kind === 'editor' ? scene.target.path : scene.kind === 'file' ? scene.path : undefined}

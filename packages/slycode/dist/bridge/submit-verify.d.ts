@@ -13,7 +13,6 @@
  *  - Long (multi-line) pastes render as placeholders with a count field:
  *      Claude  "[Pasted text #1 +21 lines]"   (count = payload lines - 1)
  *      Codex   "[Pasted Content 3199 chars]"  (count = exact payload chars)
- *      Gemini  "[Pasted Text: 22 lines]"      (count = payload lines)
  *  - Short pastes render literally (whitespace-mangled).
  *  - Codex's empty-input hint text ROTATES between runs → success is keyed on
  *    the DISAPPEARANCE of queued_ours, never on a positive "empty" match.
@@ -29,7 +28,7 @@
  * extractInputRegion arm) — it is NOT the provider registry. A provider that
  * is driven by a non-PTY transport (feature 085) never appears here.
  */
-export declare const SUBMIT_PROVIDERS: readonly ["claude", "codex", "gemini"];
+export declare const SUBMIT_PROVIDERS: readonly ["claude", "codex"];
 export type SubmitProvider = typeof SUBMIT_PROVIDERS[number];
 export declare function isSubmitProvider(provider: string | undefined | null): provider is SubmitProvider;
 export type InputRegionClassification = 'empty' | 'queued_ours' | 'queued_other' | 'no_input_region' | 'unrecognized';
@@ -57,7 +56,7 @@ export interface InputRegion {
 export declare function extractInputRegion(provider: SubmitProvider, snapshot: string): InputRegion;
 /**
  * Parse a paste placeholder out of (normalized or raw) input-region text.
- * Matches all three providers' formats, whitespace-insensitively.
+ * Matches both providers' formats, whitespace-insensitively.
  */
 export declare function parsePastePlaceholder(text: string): PastePlaceholder | null;
 /** Unicode code-point length (Codex's placeholder count unit; String.length is UTF-16). */

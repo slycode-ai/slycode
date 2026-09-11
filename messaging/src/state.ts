@@ -145,6 +145,24 @@ export class StateManager {
 
   private saveState(): void {
     try {
+      this.writeStateFile();
+    } catch (err) {
+      console.warn('Could not save state:', (err as Error).message);
+    }
+  }
+
+  /**
+   * Persist and THROW on failure. Used by callers whose HTTP/CLI contract
+   * must not report success for an in-memory change that would vanish on
+   * restart (project voice setter, feature 086). Existing callers keep the
+   * log-only saveState().
+   */
+  private saveStateStrict(): void {
+    this.writeStateFile();
+  }
+
+  private writeStateFile(): void {
+    {
       atomicWriteFileSync(getStateFile(), JSON.stringify({
         targetType: this.state.targetType,
         selectedProjectId: this.state.selectedProjectId,
@@ -161,8 +179,6 @@ export class StateManager {
         targetPrefs: this.targetPrefs,
         chatId: this.chatId,
       }, null, 2));
-    } catch (err) {
-      console.warn('Could not save state:', (err as Error).message);
     }
   }
 
@@ -470,6 +486,52 @@ export class StateManager {
     if (v) return { id: v.id, name: v.name || v.id };
     if (this.voiceId) return { id: this.voiceId, name: this.voiceName || this.voiceId };
     return null;
+  }
+
+  /**
+   * Resolve a project id from an explicit id/name/key or from a session name
+   * (first segment). Reloads the registry first so projects added after
+   * service start resolve. Returns null when nothing matches.
+   */
+  resolveProjectIdFrom(opts: { projectId?: string; session?: string }): string | null {
+    this.reloadProjects();
+    if (opts.projectId) {
+      return resolveCanonicalProjectId(opts.projectId, this.state.projects)?.id ?? null;
+    }
+    if (opts.session) return this.projectIdFromSession(opts.session);
+    return null;
+  }
+
+  // --- Project-explicit voice (feature 086) ---------------------------------
+  //
+  // Unlike setVoice/clearVoice these take an explicit project id, NEVER touch
+  // the top-level mirror (which is the workspace default and the inheritance
+  // source for projects without an entry), and persist strictly so a failed
+  // write surfaces to the HTTP/CLI caller.
+
+  /** Stored = the project's own override; effective = stored → top-level (env default is the caller's fallback). */
+  getProjectVoice(projectId: string): { stored: { id: string; name: string } | null; effective: { id: string; name: string } | null; source: 'project' | 'inherited' | null } {
+    const v = this.prefsFor(projectId)?.voice;
+    const stored = v ? { id: v.id, name: v.name || v.id } : null;
+    if (stored) return { stored, effective: stored, source: 'project' };
+    if (this.voiceId) return { stored: null, effective: { id: this.voiceId, name: this.voiceName || this.voiceId }, source: 'inherited' };
+    return { stored: null, effective: null, source: null };
+  }
+
+  setProjectVoice(projectId: string, voice: { id: string; name: string }): void {
+    this.writePref(projectId, 'voice', { id: voice.id, name: voice.name || voice.id });
+    this.saveStateStrict();
+  }
+
+  /**
+   * Clear the project's override. This resets the project to the CURRENT
+   * inherited default: anchorProjectsFromRegistry() re-anchors the top-level
+   * voice into the entry on the next reload, so "clear" never means
+   * "permanently follow the workspace default" nor "force the env voice".
+   */
+  clearProjectVoice(projectId: string): void {
+    this.clearPref(projectId, 'voice');
+    this.saveStateStrict();
   }
 
   setVoice(id: string, name: string): void {

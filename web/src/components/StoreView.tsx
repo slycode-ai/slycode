@@ -278,7 +278,6 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
   const providers: { id: ProviderId; label: string }[] = [
     { id: 'claude', label: 'Claude' },
     { id: 'codex', label: 'Codex' },
-    { id: 'gemini', label: 'Gemini' },
   ];
 
   return (

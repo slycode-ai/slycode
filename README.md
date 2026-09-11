@@ -2,7 +2,7 @@
 
 A workspace manager for AI coding agents.
 
-SlyCode gives each task its own workspace — terminal, context, and persistent session — so you can pick up any task exactly where you left off. It works with Claude Code, Codex, and OpenCode (Gemini CLI is still wired in), runs wherever you do — at your desk, on your phone, or walking through a park — and it's free for individuals.
+SlyCode gives each task its own workspace — terminal, context, and persistent session — so you can pick up any task exactly where you left off. It works with Claude Code, Codex, and OpenCode, runs wherever you do — at your desk, on your phone, or walking through a park — and it's free for individuals.
 
 ![A card with its terminal open, mid-task](documentation/assets/readme/card-terminal.png)
 
@@ -32,7 +32,7 @@ Because each card keeps its scope contained, the AI stays focused longer. The se
 
 - **Embedded terminals in cards** — the card is the workspace, not just a tracker
 - **Mobile + voice via Telegram** — full AI interaction from your phone, anywhere. Slack, Teams, and other channels coming soon.
-- **Multi-provider support** — Claude Code, Codex, OpenCode (any model OpenCode can reach: ChatGPT, API keys, open models), Gemini CLI. Switch per card or per project.
+- **Multi-provider support** — Claude Code, Codex, OpenCode (any model OpenCode can reach: ChatGPT, API keys, open models). Switch per card or per project.
 - **Session persistence** — come back to any card and continue exactly where you stopped
 - **Code Mode** — flip a project into a zoomable map of its codebase — areas, key files and symbols with AI-written summaries — and open the editor from any of them
 
@@ -188,19 +188,16 @@ SlyCode works with multiple AI coding agents:
 | Claude Code | `claude` | Supported |
 | Codex | `codex` | Supported |
 | OpenCode | `opencode` | Supported — driven over its built-in API. Local models configured in `opencode.json` (Ollama, LM Studio, …) need no login; cloud models need `opencode auth login` once per machine (ChatGPT Plus/Pro OAuth, API keys). Claude Pro/Max subscriptions can't be used inside OpenCode (Anthropic's terms); use an Anthropic API key for Claude models there |
-| Gemini CLI | `gemini` | Supported — API key required for personal Google accounts |
 
 - Switch providers per card or per project from the web UI or Telegram
 - `slycode doctor` checks which providers are installed on your machine
 - Each provider's CLI must be installed separately — SlyCode orchestrates them, it doesn't bundle them
 
-**Gemini CLI with a personal Google account needs an API key.** Google has retired the individual Gemini Code Assist sign-in that personal Google accounts used, so for those accounts "Sign in with Google" no longer gets you a working session. Licensed Code Assist Standard/Enterprise, Google Cloud, and API-key authentication still work. The SlyCode path: create a key in Google AI Studio, add `GEMINI_API_KEY=<key>` to your workspace `.env`, and restart SlyCode.
-
 ## Known Limitations
 
 - **Designed for one operator.** One shared dashboard password, no per-user accounts. Teams is the multi-user tier (below).
 - **Localhost by default.** The dashboard binds to `127.0.0.1`. Telegram control from your phone works without exposing the dashboard or opening an inbound port (your messages transit Telegram's servers); to open the dashboard itself on your phone we put it behind Tailscale (`tailscale serve` in front of the web port) rather than the public internet. `npx slycode config host 0.0.0.0` exists if you know what you're doing.
-- **Provider CLIs change under us.** Claude Code, Codex, and Gemini update their terminal UIs often. When one drifts, prompts into a running session are reported as unverified rather than assumed delivered, and we ship a fix — `npx slycode update` picks it up. OpenCode is driven over its API rather than its screen, so it isn't exposed to this.
+- **Provider CLIs change under us.** Claude Code and Codex update their terminal UIs often. When one drifts, prompts into a running session are reported as unverified rather than assumed delivered, and we ship a fix — `npx slycode update` picks it up. OpenCode is driven over its API rather than its screen, so it isn't exposed to this.
 - **Telegram is the only messaging channel today.** Slack and Teams are on the roadmap.
 
 ## License
@@ -219,12 +216,11 @@ For commercial licensing, visit [slycode.ai](https://slycode.ai).
 
 SlyCode is a workspace manager — it doesn't provide AI services directly. You authenticate with your own provider accounts and are responsible for complying with your chosen provider's Terms of Service.
 
-**A note on API keys vs subscription plans:** Consumer subscription plans — Claude Max, ChatGPT Plus, Google AI Pro, and similar — are designed for ordinary individual interactive use. SlyCode is licensed for individual use on the free tier. If you're using SlyCode with multiple people, you'll need the Teams tier and API key authentication (usage-based billing) rather than personal subscription plans.
+**A note on API keys vs subscription plans:** Consumer subscription plans — Claude Max, ChatGPT Plus, and similar — are designed for ordinary individual interactive use. SlyCode is licensed for individual use on the free tier. If you're using SlyCode with multiple people, you'll need the Teams tier and API key authentication (usage-based billing) rather than personal subscription plans.
 
 Review your provider's terms:
 - [Anthropic Terms of Service](https://www.anthropic.com/legal/consumer-terms)
 - [OpenAI Terms of Use](https://openai.com/policies/terms-of-use/)
-- [Google AI Terms of Service](https://ai.google.dev/gemini-api/terms)
 
 ## Teams
 

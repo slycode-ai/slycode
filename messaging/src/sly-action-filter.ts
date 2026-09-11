@@ -3,6 +3,33 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { SlyActionsFile, SlyActionConfig, NavigationTarget, KanbanCard, Project } from './types.js';
 
+// --- Speaker permission snapshot (feature 086) ------------------------------
+// LOCKSTEP with web/src/lib/speaker-line.ts and the mirrored helper in
+// scripts/kanban.js: the wording must stay identical across all three.
+
+export type SpeakerState = 'on' | 'off' | 'unknown';
+
+export function formatSpeakerLine(state: SpeakerState): string {
+  return `Speaker permission: ${state} (snapshot; use sly-messaging speak only if the user explicitly asked this session for spoken summaries; the command checks current state).`;
+}
+
+/**
+ * Fetch the bridge's global speaker flag at dispatch time. 500 ms budget;
+ * any failure (bridge down, old bridge without /speaker, timeout) → 'unknown'.
+ */
+export async function fetchSpeakerState(bridgeUrl: string, timeoutMs = 500): Promise<SpeakerState> {
+  try {
+    const res = await fetch(`${bridgeUrl}/speaker`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return 'unknown';
+    const data = await res.json() as { enabled?: unknown };
+    if (data.enabled === true) return 'on';
+    if (data.enabled === false) return 'off';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function getWorkspaceRoot(): string {
@@ -253,8 +280,10 @@ export class SlyActionFilter {
     project?: Project;
     stage?: string;
     projectPath?: string;
+    /** Speaker permission snapshot (feature 086); omit to leave the line out. */
+    speakerState?: SpeakerState;
   }): string {
-    const { card, project, stage, projectPath } = context;
+    const { card, project, stage, projectPath, speakerState } = context;
     const lines: string[] = [];
 
     lines.push(`Project: ${project?.name || 'unknown'} (${projectPath || ''})`);
@@ -301,6 +330,9 @@ export class SlyActionFilter {
     } else {
       lines.push('Problems: none');
     }
+
+    // Runtime-state line (feature 086), separate from card metadata.
+    if (speakerState !== undefined) lines.push(formatSpeakerLine(speakerState));
 
     return lines.join('\n');
   }
@@ -350,6 +382,7 @@ export class SlyActionFilter {
       stage?: string;
       projectPath?: string;
       terminalClass?: string;
+      speakerState?: SpeakerState;
     },
   ): string {
     // Pre-render context blocks
@@ -361,6 +394,7 @@ export class SlyActionFilter {
         project: context.project,
         stage: context.stage,
         projectPath: context.projectPath,
+        speakerState: context.speakerState,
       });
       resolved = resolved.replace(/\{\{cardContext\}\}/g, cardCtx);
     }

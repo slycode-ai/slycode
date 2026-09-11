@@ -1,30 +1,132 @@
-export async function textToSpeech(text, config, voiceIdOverride) {
+export const TTS_MODEL_ID = 'eleven_v3';
+/** Per-request ElevenLabs timeout (feature 086). */
+export const TTS_RENDER_TIMEOUT_MS = parseInt(process.env.TTS_RENDER_TIMEOUT_MS || '20000', 10);
+/** Max concurrent ElevenLabs requests; extra callers queue (never rejected). */
+export const TTS_RENDER_CONCURRENCY = 2;
+/** Thrown when a render (queue wait + ElevenLabs call) exceeds its deadline. */
+export class RenderTimeoutError extends Error {
+    constructor(ms) {
+        super(`ElevenLabs render timed out after ${ms}ms`);
+        this.name = 'RenderTimeoutError';
+    }
+}
+/** Thrown when the caller abandoned the request (client disconnected) before or during the render. */
+export class RenderCancelledError extends Error {
+    constructor() {
+        super('render cancelled by caller');
+        this.name = 'RenderCancelledError';
+    }
+}
+let ttsActive = 0;
+const ttsWaiters = [];
+function releaseTtsSlot() {
+    ttsActive--;
+    const next = ttsWaiters.shift();
+    if (next)
+        next.grant();
+}
+async function acquireTtsSlot(opts) {
+    let released = false;
+    const release = () => {
+        if (released)
+            return;
+        released = true;
+        releaseTtsSlot();
+    };
+    if (opts.signal?.aborted)
+        throw new RenderCancelledError();
+    if (ttsActive < TTS_RENDER_CONCURRENCY) {
+        ttsActive++;
+        return release;
+    }
+    await new Promise((resolve, reject) => {
+        const waiter = {
+            grant: () => { cleanup(); ttsActive++; resolve(); },
+            cancel: (err) => { cleanup(); reject(err); },
+        };
+        const remaining = Math.max(0, opts.deadline - Date.now());
+        const timer = setTimeout(() => dropWaiter(new RenderTimeoutError(opts.timeoutMs)), remaining);
+        const onAbort = () => dropWaiter(new RenderCancelledError());
+        function cleanup() {
+            clearTimeout(timer);
+            opts.signal?.removeEventListener('abort', onAbort);
+        }
+        function dropWaiter(err) {
+            const i = ttsWaiters.indexOf(waiter);
+            if (i >= 0)
+                ttsWaiters.splice(i, 1);
+            waiter.cancel(err);
+        }
+        opts.signal?.addEventListener('abort', onAbort, { once: true });
+        ttsWaiters.push(waiter);
+    });
+    return release;
+}
+/** Test-only visibility into the semaphore. */
+export function ttsSemaphoreState() {
+    return { active: ttsActive, waiting: ttsWaiters.length };
+}
+export async function textToSpeech(text, config, voiceIdOverride, opts = {}) {
     const voiceId = voiceIdOverride || config.elevenlabsVoiceId;
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'xi-api-key': config.elevenlabsApiKey,
-            'Accept': 'audio/mpeg',
-        },
-        body: JSON.stringify({
-            text,
-            model_id: 'eleven_v3',
-            voice_settings: {
-                stability: 0.5,
-                similarity_boost: 0.75,
-                speed: config.elevenlabsSpeed,
-            },
-            output_format: 'mp3_44100_128',
-        }),
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`ElevenLabs API error (${response.status}): ${errorText}`);
+    const timeoutMs = opts.timeoutMs ?? TTS_RENDER_TIMEOUT_MS;
+    const doFetch = opts.fetchImpl ?? fetch;
+    // One deadline covers queue residence AND the ElevenLabs call.
+    const deadline = Date.now() + timeoutMs;
+    const release = await acquireTtsSlot({ deadline, signal: opts.signal, timeoutMs });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
+    const onAbort = () => controller.abort();
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    const abortError = () => (opts.signal?.aborted ? new RenderCancelledError() : new RenderTimeoutError(timeoutMs));
+    try {
+        let response;
+        try {
+            response = await doFetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'xi-api-key': config.elevenlabsApiKey,
+                    'Accept': 'audio/mpeg',
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: TTS_MODEL_ID,
+                    voice_settings: {
+                        stability: 0.5,
+                        similarity_boost: 0.75,
+                        speed: config.elevenlabsSpeed,
+                    },
+                    output_format: 'mp3_44100_128',
+                }),
+                signal: controller.signal,
+            });
+        }
+        catch (err) {
+            if (controller.signal.aborted)
+                throw abortError();
+            throw err;
+        }
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`ElevenLabs API error (${response.status}): ${errorText}`);
+        }
+        let arrayBuffer;
+        try {
+            arrayBuffer = await response.arrayBuffer();
+        }
+        catch (err) {
+            if (controller.signal.aborted)
+                throw abortError();
+            throw err;
+        }
+        return Buffer.from(arrayBuffer);
     }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    finally {
+        clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
+        release();
+    }
 }
 /**
  * Render TTS audio in the requested format.
@@ -41,7 +143,7 @@ export async function textToSpeech(text, config, voiceIdOverride) {
  * format fallbacks without a second API call.
  */
 export async function renderTtsAudio(text, config, opts) {
-    const sourceMp3 = opts.sourceMp3 ?? await textToSpeech(text, config, opts.voiceIdOverride);
+    const sourceMp3 = opts.sourceMp3 ?? await textToSpeech(text, config, opts.voiceIdOverride, { signal: opts.signal });
     if (opts.format === 'mp3') {
         return { buffer: sourceMp3, format: 'mp3', sourceMp3 };
     }

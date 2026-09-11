@@ -13,7 +13,6 @@
  *  - Long (multi-line) pastes render as placeholders with a count field:
  *      Claude  "[Pasted text #1 +21 lines]"   (count = payload lines - 1)
  *      Codex   "[Pasted Content 3199 chars]"  (count = exact payload chars)
- *      Gemini  "[Pasted Text: 22 lines]"      (count = payload lines)
  *  - Short pastes render literally (whitespace-mangled).
  *  - Codex's empty-input hint text ROTATES between runs → success is keyed on
  *    the DISAPPEARANCE of queued_ours, never on a positive "empty" match.
@@ -29,7 +28,7 @@
  * extractInputRegion arm) — it is NOT the provider registry. A provider that
  * is driven by a non-PTY transport (feature 085) never appears here.
  */
-export const SUBMIT_PROVIDERS = ['claude', 'codex', 'gemini'];
+export const SUBMIT_PROVIDERS = ['claude', 'codex'];
 export function isSubmitProvider(provider) {
     return !!provider && SUBMIT_PROVIDERS.includes(provider);
 }
@@ -45,7 +44,7 @@ export function normalizeForMatch(text) {
 const DIALOG_MARKERS = [
     /do you trust/i, // Codex + Claude trust-folder dialogs
     /press enter to continue/i, // Codex trust dialog footer
-    /waiting for authentication/i, // Gemini auth-wait screen (captured in spike)
+    /waiting for authentication/i, // CLI auth-wait screens (captured in spike)
     /update available/i, // CLI update prompts (user-observed on Codex)
     /new version/i,
     /login required|please log ?in/i,
@@ -55,14 +54,25 @@ export function hasDialogMarkers(snapshot) {
 }
 /** A line consisting only of box-drawing horizontal bars (Claude's input separators). */
 const CLAUDE_SEPARATOR = /^\s*─{10,}\s*$/;
-/** Codex footer: "gpt-5.5 medium · ~/path", "tab to queue message100% context left", etc. */
-const CODEX_FOOTER = /(·\s*(~|\/)|context left|tab to queue)/;
-/** Gemini input region delimiters: runs of upper/lower half-blocks. */
-const GEMINI_TOP = /^\s*▄{10,}\s*$/;
-const GEMINI_BOTTOM = /^\s*▀{10,}\s*$/;
+/**
+ * Codex footer: "gpt-5.5 medium · ~/path", "tab to queue message100% context left", etc.
+ * The cwd after the `·` is a Unix path on Linux/macOS (`~/…` or `/…`); on
+ * Windows Codex prints it natively — `~\projects\x` when under the profile,
+ * or a bare drive path `C:\Users\…` / `D:\work` otherwise — so the anchor
+ * accepts a drive letter too (card #0351). Without it every Windows Codex
+ * screen read as "no footer" → unrecognized → ambiguous.
+ */
+const CODEX_FOOTER = /(·\s*(~|\/|[A-Za-z]:[\\/])|context left|tab to queue)/;
+/**
+ * Claude prompt marker. Linux/macOS render `❯` (U+276F). On a Windows console
+ * without WT_SESSION (exactly what node-pty/ConPTY gives the bridge) Claude
+ * Code falls back to ASCII symbols and the prompt becomes a plain `>` — the
+ * separator rows stay `─` (box drawing survives the fallback). Card #0351:
+ * the `❯`-only check made every Windows Claude screen unrecognized.
+ */
+const CLAUDE_PROMPT_MARKERS = ['❯', '>'];
 /** Known per-provider empty-input hint patterns (normalized, whitespace-stripped). */
 const CLAUDE_HINT = /^try["“].*["”]$/i; // ❯ Try "fix lint errors"
-const GEMINI_HINT = /^typeyourmessageor@path\/to\/file$/i;
 function splitLines(snapshot) {
     return snapshot.split(/\r?\n/);
 }
@@ -88,10 +98,18 @@ export function extractInputRegion(provider, snapshot) {
         if (bottom - top < 2)
             return { found: false, text: '' };
         const region = lines.slice(top + 1, bottom);
-        if (!region[0] || !region[0].trimStart().startsWith('❯'))
+        const first = region[0]?.trimStart() ?? '';
+        const marker = CLAUDE_PROMPT_MARKERS.find(m => first.startsWith(m));
+        if (!marker)
             return { found: false, text: '' };
-        const text = region.join('\n').replace(/❯/g, '');
-        return { found: true, text };
+        if (marker === '❯') {
+            // `❯` never occurs in user text — strip every occurrence (legacy behaviour).
+            return { found: true, text: region.join('\n').replace(/❯/g, '') };
+        }
+        // ASCII `>` DOES occur in payloads ("a > b", quoted mail) — strip only the
+        // leading marker on the prompt line, never inside the text.
+        const stripped = [region[0].replace(/^(\s*)>/, '$1'), ...region.slice(1)];
+        return { found: true, text: stripped.join('\n') };
     }
     if (provider === 'codex') {
         // Composer marker drift: Codex ≤0.137 rendered the editable composer AND
@@ -133,34 +151,12 @@ export function extractInputRegion(provider, snapshot) {
         const text = region.join('\n').replace(/[›»]/g, '');
         return { found: true, text };
     }
-    // gemini
-    let topIdx = -1;
-    for (let i = lines.length - 1; i >= 0; i--) {
-        if (GEMINI_TOP.test(lines[i])) {
-            topIdx = i;
-            break;
-        }
-    }
-    if (topIdx === -1)
-        return { found: false, text: '' };
-    let bottomIdx = -1;
-    for (let i = topIdx + 1; i < lines.length; i++) {
-        if (GEMINI_BOTTOM.test(lines[i])) {
-            bottomIdx = i;
-            break;
-        }
-    }
-    if (bottomIdx === -1 || bottomIdx - topIdx < 2)
-        return { found: false, text: '' };
-    const region = lines.slice(topIdx + 1, bottomIdx);
-    // Strip the leading marker (* unfocused / > focused) from the first line only.
-    const first = region[0].replace(/^\s*[*>]\s?/, '');
-    const text = [first, ...region.slice(1)].join('\n');
-    return { found: true, text };
+    // Unknown/unhandled provider layout — treat as unparseable, never guess.
+    return { found: false, text: '' };
 }
 /**
  * Parse a paste placeholder out of (normalized or raw) input-region text.
- * Matches all three providers' formats, whitespace-insensitively.
+ * Matches both providers' formats, whitespace-insensitively.
  */
 export function parsePastePlaceholder(text) {
     const n = normalizeForMatch(text).toLowerCase();
@@ -168,9 +164,6 @@ export function parsePastePlaceholder(text) {
     if (m)
         return { kind: 'chars', count: parseInt(m[1], 10) };
     m = n.match(/\[pastedtext#?\d*\+(\d+)lines?\]/);
-    if (m)
-        return { kind: 'lines', count: parseInt(m[1], 10) };
-    m = n.match(/\[pastedtext:?(\d+)lines?\]/);
     if (m)
         return { kind: 'lines', count: parseInt(m[1], 10) };
     // Claude countless form: "[Pasted text #2]" — long single-line pastes
@@ -213,7 +206,8 @@ function payloadQueued(regionText, expected) {
             // UTF-16 and over-counts astral characters (emoji) → use code points.
             return Math.abs(placeholder.count - codePointLength(expected)) <= 2;
         }
-        // Claude reports payloadLines-1 ("+21 lines" for 22), Gemini payloadLines.
+        // Claude reports payloadLines-1 ("+21 lines" for 22); keep a ±-tolerant
+        // window so off-by-one rendering differences never fail verification.
         const payloadLines = expected.split('\n').length;
         return placeholder.count >= payloadLines - 2 && placeholder.count <= payloadLines + 1;
     }
@@ -259,11 +253,6 @@ export function countMatchingPlaceholders(snapshot, expected) {
         if (c >= payloadLines - 2 && c <= payloadLines + 1)
             count++;
     }
-    for (const m of n.matchAll(/\[pastedtext:(\d+)lines?\]/g)) {
-        const c = parseInt(m[1], 10);
-        if (c >= payloadLines - 2 && c <= payloadLines + 1)
-            count++;
-    }
     return count;
 }
 /**
@@ -284,8 +273,6 @@ export function classifyInputRegion(provider, snapshot, expected) {
     if (norm.length === 0)
         return 'empty';
     if (provider === 'claude' && CLAUDE_HINT.test(norm))
-        return 'empty';
-    if (provider === 'gemini' && GEMINI_HINT.test(norm))
         return 'empty';
     if (provider === 'codex') {
         // Codex shows a ROTATING hint when empty ("Explain this codebase", ...).

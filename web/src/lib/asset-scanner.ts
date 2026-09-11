@@ -537,7 +537,7 @@ export function findNonImportedForProvider(
 
 /**
  * Scan assets for a specific provider in a project directory.
- * Uses provider-specific paths (e.g. .gemini/commands/ for Gemini).
+ * Uses provider-specific paths from provider-paths.ts (e.g. .codex/skills/ for Codex).
  */
 export function scanProviderAssets(
   projectPath: string,

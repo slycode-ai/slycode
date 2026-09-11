@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { getSlycodeRoot } from '@/lib/paths';
+import { atomicWriteFile } from '@/lib/atomic-write';
 
 function getSettingsPath(): string {
   return path.join(getSlycodeRoot(), 'data', 'settings.json');
@@ -18,8 +19,19 @@ const DEFAULT_SETTINGS = {
       submitPasteOnly: 'Shift+Enter',
       clear: 'Escape',
     },
+    maxSpeakWords: 60,
+    speechBubbleMode: 'auto-hide',
   },
 };
+
+// Serialise writers (feature 086): the toggle, the gear popover and other tabs
+// can PUT concurrently; read-merge-write without a queue lost updates.
+let writeChain: Promise<void> = Promise.resolve();
+function serialised<T>(fn: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(fn, fn);
+  writeChain = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 export async function GET() {
   try {
@@ -61,6 +73,14 @@ function validateVoiceSettings(voice: unknown): string | null {
       return '"voice.maxRecordingSeconds" must be a positive number';
     }
   }
+  if (v.maxSpeakWords !== undefined) {
+    if (typeof v.maxSpeakWords !== 'number' || !Number.isFinite(v.maxSpeakWords) || v.maxSpeakWords < 1 || v.maxSpeakWords > 200) {
+      return '"voice.maxSpeakWords" must be a number between 1 and 200';
+    }
+  }
+  if (v.speechBubbleMode !== undefined && v.speechBubbleMode !== 'auto-hide' && v.speechBubbleMode !== 'keep') {
+    return '"voice.speechBubbleMode" must be "auto-hide" or "keep"';
+  }
   if (v.shortcuts !== undefined) {
     if (typeof v.shortcuts !== 'object' || v.shortcuts === null) {
       return '"voice.shortcuts" must be an object';
@@ -89,15 +109,18 @@ export async function PUT(request: Request) {
     }
 
     const settingsPath = getSettingsPath();
-    let existing: Record<string, unknown>;
-    try {
-      existing = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    } catch {
-      existing = { ...DEFAULT_SETTINGS };
-    }
-
-    const merged = deepMerge(existing, updates as Record<string, unknown>);
-    await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+    const merged = await serialised(async () => {
+      let existing: Record<string, unknown>;
+      try {
+        existing = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      } catch {
+        existing = { ...DEFAULT_SETTINGS };
+      }
+      const next = deepMerge(existing, updates as Record<string, unknown>);
+      // Atomic replace: readers (including the bridge's admission check) never see a half-written file.
+      await atomicWriteFile(settingsPath, JSON.stringify(next, null, 2) + '\n');
+      return next;
+    });
     return NextResponse.json(merged);
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

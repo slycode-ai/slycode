@@ -1,6 +1,6 @@
 # @slycode/slycode
 
-The SlyCode CLI — workspace manager and command-center server for AI coding agents (Claude Code, Codex, OpenCode, Gemini CLI).
+The SlyCode CLI — workspace manager and command-center server for AI coding agents (Claude Code, Codex, OpenCode).
 
 Most users start a new workspace via the scaffold tool:
 
@@ -46,7 +46,7 @@ If your toolchain is missing, the SlyCode install will print an actionable prefl
 
 ## Providers
 
-Claude Code, Codex, OpenCode (`npm i -g opencode-ai`, then `opencode auth login`), and Gemini CLI are installed separately — SlyCode orchestrates them, it doesn't bundle them. Gemini CLI with a personal Google account needs an API key: add `GEMINI_API_KEY=<key>` to your workspace `.env` and restart SlyCode.
+Claude Code, Codex, and OpenCode (`npm i -g opencode-ai`, then `opencode auth login`) are installed separately — SlyCode orchestrates them, it doesn't bundle them.
 
 ## Diagnostics
 

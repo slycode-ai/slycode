@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-09-11
+
+### Added
+- Speaker-gated agent voice replies — a new speaker toggle in the web UI grants agents permission to reply with short spoken summaries that play in any open browser tab. One browser tab holds audio (elected via BroadcastChannel), the bottom-left speech bubble names who's speaking, and there's a Play button if your browser blocks autoplay. Playback pauses during voice dictation. Agents use the new `sly-messaging speak` command; refusals (speaker off, no listener, too long, rate limited, tts unavailable) are surfaced with exact wording and never charge you for a request that didn't play. Per-project voice selection is now available via `sly-messaging voice set|show|clear --project`.
+- Cross-project card prompting — an agent working in one project can now prompt a card in a different project. Use `sly-kanban prompt --project <name> <card>`. Off by default per project; opt in from the new **Allow cross-project prompts** checkbox in dashboard settings (also togglable by editing `kanban.json`'s `settings.allowCrossProjectPrompts`). New `sly-kanban projects` subcommand lists what's addressable. Kanban skill v1.19.0 documents it.
+
+### Fixed
+- Cross-card prompts to Windows sessions now verify reliably. Claude Code on Windows/ConPTY falls back to an ASCII `>` prompt marker instead of `❯`, and Codex on Windows renders its footer path natively (`C:\Users\…`). Submit-verify used to read both as "no anchor" and mark the send unverified. Now it accepts both.
+- Config file writes for MCP servers (`.mcp.json`, `.codex/config.toml`, and the like) are now atomic — a crash mid-write can no longer leave you with a truncated credentials file.
+- `sly-kanban areas` and the web areas API now find area-index files across `.claude`, `.agents`, and `.opencode` skills directories instead of assuming `.claude`. Pure Codex or OpenCode workspaces get their areas back.
+- Markdown code blocks are now readable in light mode.
+- Code Mode file tree remembers which folders you have expanded per project across page reloads.
+
+### Changed
+- Gemini CLI is no longer a supported provider. Google ended Gemini CLI service for individual accounts in June 2026, so the provider set is now Claude Code, Codex CLI and OpenCode. The provider entry, scaffold overlay, terminal-chrome classifiers, session detection, asset placement targets (`.gemini/`) and all docs have been removed. Existing Gemini session records remain visible as ended sessions; resuming one reports the provider as unknown. A stored default pointing at the removed provider now falls back to the first enabled provider automatically.
+- Security dep wave — Next.js patched to 16.3.4 (image-optimization RCE), plus updated pins for sharp, multer, and js-yaml. Auth gate middleware renamed to `web/src/proxy.ts` for Next 16.3's new Proxy convention (transparent — same behaviour, new filename).
+- Messaging skill v2.6.0 — covers the new speaker-toggle voice-reply workflow and `speak` command.
+- Kanban skill v1.19.0 — covers `--project` cross-project prompting and the `projects` subcommand.
+- context-priming skill v1.2.2 — minor guidance polish.
+
 ## [0.4.7] - 2026-09-02
 
 ### Fixed

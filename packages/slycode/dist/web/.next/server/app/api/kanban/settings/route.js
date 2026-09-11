@@ -1,0 +1,10 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/kanban/settings/route.js")
+R.c("server/chunks/[root-of-the-server]__1nql8g1._.js")
+R.c("server/chunks/_1-y54si._.js")
+R.c("server/chunks/[root-of-the-server]__0_ke6b0._.js")
+R.c("server/chunks/[root-of-the-server]__15bjnu5._.js")
+R.c("server/chunks/node_modules_next_1zc5q0a._.js")
+R.c("server/chunks/src_lib_09eh-ab._.js")
+R.c("server/chunks/_next-internal_server_app_api_kanban_settings_route_actions_0al9nap.js")
+R.m(53616)
+module.exports=R.m(53616).exports

@@ -11,7 +11,7 @@
  * SAFETY: the synthetic processes use a made-up provider command name
  * ("slyreapertest") and the reaper instance under test is configured with
  * ONLY that name — it can never evaluate, let alone signal, a real
- * claude/codex/gemini process. Everything lives in a mkdtemp dir and all
+ * claude/codex/opencode process. Everything lives in a mkdtemp dir and all
  * spawned processes are killed in the finally block.
  *
  * Run:  cd bridge && ./node_modules/.bin/tsx scripts/reaper-selftest.ts

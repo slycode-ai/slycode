@@ -29,9 +29,9 @@ const nextConfig: NextConfig = {
   // traces the import ("failed to convert rope into string"); web-tree-sitter
   // fs-loads its own .wasm relative to its module dir, which bundling breaks.
   serverExternalPackages: ["@vscode/ripgrep", "web-tree-sitter"],
-  // Auth gate (Feature 068): middleware runs on the Node.js runtime (stable in
-  // Next 16, set via `export const config.runtime = 'nodejs'` in middleware.ts)
-  // so it can read ~/.slycode/auth.json and verify the cookie with node:crypto.
+  // Auth gate (Feature 068): src/proxy.ts (Next 16 Proxy convention, formerly
+  // middleware.ts) always runs on the Node.js runtime, so it can read
+  // ~/.slycode/auth.json and verify the cookie with node:crypto.
   // Only include devHostname in dev mode — production builds should not leak infra details
   ...(process.env.NODE_ENV !== 'production' && {
     allowedDevOrigins: [

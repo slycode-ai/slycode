@@ -65,14 +65,23 @@ export function applyProviderPrefs<T extends {
   const providers: Record<string, unknown> = {};
   for (const id of ids) providers[id] = data.providers[id];
 
-  // Defaults must respect the disabled list too: a machine whose stored
-  // default points at a disabled provider would otherwise keep trying it
-  // (observed: OpenCode-only box still opening Claude). Rewritten in the
-  // RESPONSE only — the stored file keeps the user's preference, so
-  // re-enabling the provider restores it.
+  // Defaults must point at a provider that survives filtering: a stored
+  // default naming a DISABLED provider (observed: OpenCode-only box still
+  // opening Claude) — or a DELETED one (a provider removed from the registry,
+  // e.g. the card #0343 provider purge) — would otherwise keep being handed to
+  // every consumer. Test membership in the surviving list, not the disabled
+  // set, so both cases fall back. Rewritten in the RESPONSE only — the stored
+  // file keeps the user's preference, so re-enabling the provider restores it.
   const firstEnabled = ids[0];
-  const fix = <D extends { provider?: string }>(d: D | undefined): D | undefined =>
-    d?.provider && disabled.has(d.provider) && firstEnabled ? { ...d, provider: firstEnabled } : d;
+  const fix = <D extends { provider?: string; model?: string }>(d: D | undefined): D | undefined => {
+    if (!(d?.provider && !ids.includes(d.provider) && firstEnabled)) return d;
+    // Rewriting the provider must also drop the stored model — a model id
+    // belongs to the provider it was chosen for (review finding on #0343:
+    // a stale default forwarded its old provider's model to the fallback
+    // provider's session creation). Valid defaults keep their model.
+    const { model: _dropped, ...rest } = d;
+    return { ...rest, provider: firstEnabled } as D;
+  };
   let defaults = data.defaults;
   if (defaults && firstEnabled) {
     const projects = defaults.projects

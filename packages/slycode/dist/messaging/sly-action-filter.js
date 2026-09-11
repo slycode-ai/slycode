@@ -1,6 +1,29 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+export function formatSpeakerLine(state) {
+    return `Speaker permission: ${state} (snapshot; use sly-messaging speak only if the user explicitly asked this session for spoken summaries; the command checks current state).`;
+}
+/**
+ * Fetch the bridge's global speaker flag at dispatch time. 500 ms budget;
+ * any failure (bridge down, old bridge without /speaker, timeout) → 'unknown'.
+ */
+export async function fetchSpeakerState(bridgeUrl, timeoutMs = 500) {
+    try {
+        const res = await fetch(`${bridgeUrl}/speaker`, { signal: AbortSignal.timeout(timeoutMs) });
+        if (!res.ok)
+            return 'unknown';
+        const data = await res.json();
+        if (data.enabled === true)
+            return 'on';
+        if (data.enabled === false)
+            return 'off';
+        return 'unknown';
+    }
+    catch {
+        return 'unknown';
+    }
+}
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function getWorkspaceRoot() {
     if (process.env.SLYCODE_HOME)
@@ -218,7 +241,7 @@ export class SlyActionFilter {
      * Always includes checklist, notes, and problems sections for information density.
      */
     buildCardContextHeader(context) {
-        const { card, project, stage, projectPath } = context;
+        const { card, project, stage, projectPath, speakerState } = context;
         const lines = [];
         lines.push(`Project: ${project?.name || 'unknown'} (${projectPath || ''})`);
         lines.push('');
@@ -269,6 +292,9 @@ export class SlyActionFilter {
         else {
             lines.push('Problems: none');
         }
+        // Runtime-state line (feature 086), separate from card metadata.
+        if (speakerState !== undefined)
+            lines.push(formatSpeakerLine(speakerState));
         return lines.join('\n');
     }
     /**
@@ -313,6 +339,7 @@ export class SlyActionFilter {
                 project: context.project,
                 stage: context.stage,
                 projectPath: context.projectPath,
+                speakerState: context.speakerState,
             });
             resolved = resolved.replace(/\{\{cardContext\}\}/g, cardCtx);
         }

@@ -301,6 +301,11 @@ export async function start(_args: string[]): Promise<void> {
     }
   }
   const hasMessagingChannel = !!(envVars.TELEGRAM_BOT_TOKEN || envVars.SLACK_TOKEN);
+  // TTS-only workspaces (feature 086): the messaging service also hosts
+  // ElevenLabs rendering for spoken terminal replies, so an ElevenLabs key
+  // alone is reason enough to start it. services.messaging=false still wins.
+  const hasTts = !!envVars.ELEVENLABS_API_KEY;
+  const messagingUrl = `http://127.0.0.1:${config.ports.messaging}`;
 
   // Determine entry points
   // In packaged mode: node_modules/slycode/dist/{service}
@@ -325,6 +330,9 @@ export async function start(_args: string[]): Promise<void> {
         HOSTNAME: host,
         HOST: host,
         BRIDGE_URL: `http://127.0.0.1:${config.ports.bridge}`,
+        // Web → messaging (speaker availability + project voice), feature 086.
+        // Without this the prod web app probed the dev port and disabled the toggle.
+        MESSAGING_URL: messagingUrl,
       } as Record<string, string>,
     },
     {
@@ -335,7 +343,7 @@ export async function start(_args: string[]): Promise<void> {
       entryPoint: distDir
         ? path.join(distDir, 'bridge', 'index.js')
         : path.join(workspace, 'bridge', 'dist', 'index.js'),
-      extraEnv: { ...envVars, BRIDGE_HOST: '127.0.0.1', HOST: '127.0.0.1' } as Record<string, string>,
+      extraEnv: { ...envVars, BRIDGE_HOST: '127.0.0.1', HOST: '127.0.0.1', MESSAGING_URL: messagingUrl } as Record<string, string>,
     },
     {
       name: 'Messaging',
@@ -355,9 +363,9 @@ export async function start(_args: string[]): Promise<void> {
       continue;
     }
 
-    // Skip messaging if no channels are configured
-    if (svc.name === 'Messaging' && !hasMessagingChannel) {
-      console.log(`  ⊘ ${svc.name}: skipped (no channels configured — add TELEGRAM_BOT_TOKEN to .env)`);
+    // Skip messaging only when it has nothing to do: no chat channel AND no TTS
+    if (svc.name === 'Messaging' && !hasMessagingChannel && !hasTts) {
+      console.log(`  ⊘ ${svc.name}: skipped (no channels or TTS configured — add TELEGRAM_BOT_TOKEN or ELEVENLABS_API_KEY to .env)`);
       continue;
     }
 

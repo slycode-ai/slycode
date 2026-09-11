@@ -99,3 +99,19 @@ export function getBridgeUrl(): string {
   }
   return 'http://127.0.0.1:3004';
 }
+
+/**
+ * Get the messaging service URL for server-side HTTP calls (feature 086:
+ * TTS availability probe). Mirrors getBridgeUrl(): in production the
+ * launcher exports MESSAGING_URL (or the workspace .env's
+ * MESSAGING_SERVICE_PORT); in dev, port-specific keys are deliberately NOT
+ * loaded from the parent .env (see transcribe route's loadEnv skip list), so
+ * we use messaging's own dev default.
+ */
+export function getMessagingUrl(): string {
+  if (process.env.NODE_ENV === 'production') {
+    if (process.env.MESSAGING_URL) return process.env.MESSAGING_URL;
+    if (process.env.MESSAGING_SERVICE_PORT) return `http://127.0.0.1:${process.env.MESSAGING_SERVICE_PORT}`;
+  }
+  return 'http://127.0.0.1:3005';
+}

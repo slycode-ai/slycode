@@ -6,6 +6,8 @@ import { submitVerified, notifyDeliveryFailure } from '@/lib/submit-verified';
 import { useVoiceShortcuts } from '@/hooks/useVoiceShortcuts';
 import { useSettings } from '@/hooks/useSettings';
 import { FloatingVoiceWidget } from '@/components/FloatingVoiceWidget';
+import { SpeechBubble } from '@/components/SpeechBubble';
+import { useSpeakerController, type SpeakerController } from '@/hooks/useSpeakerController';
 import type { VoiceState, VoiceClaimant, VoiceSettings, AppSettings, TerminalHandle } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +42,11 @@ interface VoiceContextValue {
   // Settings
   settings: AppSettings;
   updateSettings: (patch: { voice?: Partial<VoiceSettings> }) => Promise<AppSettings | null>;
+  /** Last settings save failure (spoken-reply controls surface it instead of failing silently). */
+  settingsSaveError: string | null;
+
+  // Spoken replies (feature 086): global permission, availability, playback
+  speaker: SpeakerController;
 
   // Terminal registry
   registerTerminal: (id: string, handle: TerminalHandle) => void;
@@ -83,7 +90,10 @@ interface GlobalFocusTarget {
 
 export function VoiceProvider({ children }: { children: ReactNode }) {
   // ---- Settings (single instance) ----
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, saveError: settingsSaveError } = useSettings();
+
+  // ---- Spoken replies: permission, election, player (single instance per tab) ----
+  const speaker = useSpeakerController();
 
   // ---- Terminal handle registry ----
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
@@ -173,6 +183,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const voiceRecorder = useVoiceRecorder({
     maxRecordingSeconds: settings.voice.maxRecordingSeconds,
     onTranscriptionComplete: handleTranscriptionComplete,
+    // The microphone would transcribe the agent's own spoken reply: pause
+    // playback before capture opens, resume once the stream is released.
+    onBeforeCapture: speaker.pausePlayback,
+    onCaptureEnd: speaker.resumePlayback,
   });
 
   // ---- Claim/release implementation ----
@@ -319,6 +333,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     currentClaimantId,
     settings,
     updateSettings,
+    settingsSaveError,
+    speaker,
     registerTerminal,
     unregisterTerminal,
     submitModeRef: globalSubmitModeRef,
@@ -332,6 +348,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     <VoiceContext.Provider value={contextValue}>
       {children}
       <FloatingVoiceWidget />
+      <SpeechBubble />
     </VoiceContext.Provider>
   );
 }

@@ -99,3 +99,16 @@ export function resolveCanonicalProjectId(
 
   return null;
 }
+
+/**
+ * Card-session name shape shared with the bridge — LOCKSTEP with
+ * bridge/src/session-name.ts (parseSessionName). Matches both the current
+ * `{project}:{provider}:card:{cardId}` and the legacy provider-less
+ * `{project}:card:{cardId}` forms. Keep the regex identical in both places.
+ */
+export const CARD_SESSION_PATTERN = /^([^:]+):(?:[^:]+:)?card:(.+)$/;
+
+export function parseCardSessionName(name: string): { projectKey: string; cardId: string } | null {
+  const m = name.match(CARD_SESSION_PATTERN);
+  return m ? { projectKey: m[1], cardId: m[2] } : null;
+}

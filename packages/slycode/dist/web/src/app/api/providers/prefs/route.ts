@@ -57,14 +57,15 @@ export async function PUT(request: Request) {
   try {
     const providers = await fullProviderList();
     const known = new Set(Object.keys(providers));
-    const unknown = [...order, ...disabled].filter(id => !known.has(id));
-    if (unknown.length > 0) {
-      return NextResponse.json({ error: `unknown provider id(s): ${unknown.join(', ')}` }, { status: 400 });
-    }
-    if (disabled.length >= known.size) {
+    // Silently drop ids the registry no longer knows (a provider removed from
+    // providers.json — e.g. card #0343). Rejecting them would poison every
+    // save from a client whose stored prefs predate the removal.
+    const cleanOrder = order.filter(id => known.has(id));
+    const cleanDisabled = disabled.filter(id => known.has(id));
+    if (cleanDisabled.length >= known.size) {
       return NextResponse.json({ error: 'at least one provider must stay enabled' }, { status: 400 });
     }
-    await writeProviderPrefs({ order, disabled });
+    await writeProviderPrefs({ order: cleanOrder, disabled: cleanDisabled });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: 'failed to save provider prefs' }, { status: 500 });

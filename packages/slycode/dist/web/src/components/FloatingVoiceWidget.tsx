@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { VoiceControlBar } from './VoiceControlBar';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
 import { VoiceErrorPopup } from './VoiceErrorPopup';
+import { SpeakerToggle } from './SpeakerToggle';
 import { useVoice } from '@/contexts/VoiceContext';
 
 /**
@@ -49,6 +50,7 @@ export function FloatingVoiceWidget() {
           if (Date.now() - settingsClosedAtRef.current < 200) return;
           voice.setShowSettings(!voice.showSettings);
         }}
+        beforeSettings={<SpeakerToggle speaker={voice.speaker} />}
       />
 
       {/* Settings popover */}
@@ -58,6 +60,8 @@ export function FloatingVoiceWidget() {
             settings={voice.settings.voice}
             onSave={(patch) => voice.updateSettings({ voice: patch })}
             onClose={() => { settingsClosedAtRef.current = Date.now(); voice.setShowSettings(false); }}
+            speaker={voice.speaker}
+            saveError={voice.settingsSaveError}
           />
         </div>
       )}

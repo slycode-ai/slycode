@@ -9,6 +9,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
+  // Last save failure, surfaced by controls that must not fail silently (spoken-reply settings, feature 086).
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings')
@@ -32,13 +34,17 @@ export function useSettings() {
       if (res.ok) {
         const data = await res.json();
         setSettings({ ...DEFAULT_SETTINGS, ...data, voice: { ...DEFAULT_VOICE_SETTINGS, ...data?.voice } });
+        setSaveError(null);
         return data as AppSettings;
       }
-    } catch {
-      // Silently fail — settings are non-critical
+      let reason = `HTTP ${res.status}`;
+      try { reason = (await res.json())?.error || reason; } catch { /* non-JSON */ }
+      setSaveError(`Settings not saved: ${reason}`);
+    } catch (err) {
+      setSaveError(`Settings not saved: ${err instanceof Error ? err.message : 'request failed'}`);
     }
     return null;
   }, []);
 
-  return { settings, updateSettings, isLoading };
+  return { settings, updateSettings, isLoading, saveError };
 }

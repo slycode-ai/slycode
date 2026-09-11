@@ -12,10 +12,56 @@
  *   had opened those dirs themselves.
  * A user-collapse wins over the CURRENT auto-reveal, but a fresh navigation
  * into that folder re-reveals it (new intent beats old collapse).
+ *
+ * The USER layer is persisted per project in sessionStorage (same tier as the
+ * ResultDeck / atlas-terminal open state in CodeModeView) so it survives
+ * Board↔Code Mode flips, rail-tab switches and a reload in the same tab.
+ * The AUTO layer is never persisted.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OpenTarget, TreeNode } from './types';
+
+const TREE_STATE_CAP = 500;
+
+interface PersistedTreeState { open: string[]; closed: string[] }
+
+function treeStorageKey(projectId: string): string {
+  return `slycode-code-mode-tree:${projectId}`;
+}
+
+function loadTreeState(projectId: string): PersistedTreeState {
+  if (typeof window === 'undefined') return { open: [], closed: [] };
+  try {
+    const raw = sessionStorage.getItem(treeStorageKey(projectId));
+    if (!raw) return { open: [], closed: [] };
+    const parsed = JSON.parse(raw) as Partial<PersistedTreeState>;
+    const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+    return { open: strs(parsed.open), closed: strs(parsed.closed) };
+  } catch {
+    return { open: [], closed: [] };
+  }
+}
+
+function saveTreeState(projectId: string, state: PersistedTreeState): void {
+  try {
+    if (state.open.length === 0 && state.closed.length === 0) {
+      sessionStorage.removeItem(treeStorageKey(projectId));
+    } else {
+      sessionStorage.setItem(treeStorageKey(projectId), JSON.stringify(state));
+    }
+  } catch { /* private mode / quota — in-memory state still works */ }
+}
+
+function collectDirs(nodes: TreeNode[], out: Set<string>): Set<string> {
+  for (const n of nodes) {
+    if (n.type === 'dir') {
+      out.add(n.path);
+      if (n.children) collectDirs(n.children, out);
+    }
+  }
+  return out;
+}
 
 function ancestorsOf(filePath: string): string[] {
   const parts = filePath.split('/');
@@ -25,15 +71,29 @@ function ancestorsOf(filePath: string): string[] {
 }
 
 interface FileTreeProps {
+  projectId: string;
   tree: TreeNode[] | null;
   error: string | null;
   activePath?: string;
   onOpenFile: (target: OpenTarget) => void;
 }
 
-export function FileTree({ tree, error, activePath, onOpenFile }: FileTreeProps) {
-  const [userOpen, setUserOpen] = useState<Set<string>>(() => new Set());
-  const [userClosed, setUserClosed] = useState<Set<string>>(() => new Set());
+export function FileTree({ projectId, tree, error, activePath, onOpenFile }: FileTreeProps) {
+  // Hydrate the durable layer synchronously so the first render already shows
+  // the remembered expansion (no collapsed→expanded flash on re-entry).
+  const [userOpen, setUserOpen] = useState<Set<string>>(() => new Set(loadTreeState(projectId).open));
+  const [userClosed, setUserClosed] = useState<Set<string>>(() => new Set(loadTreeState(projectId).closed));
+
+  // Persist on change. Once the tree is known, prune dirs that no longer
+  // exist so stale paths don't accumulate; cap defensively.
+  const knownDirs = useMemo(() => (tree ? collectDirs(tree, new Set()) : null), [tree]);
+  useEffect(() => {
+    const keep = (p: string) => !knownDirs || knownDirs.has(p);
+    saveTreeState(projectId, {
+      open: [...userOpen].filter(keep).slice(0, TREE_STATE_CAP),
+      closed: [...userClosed].filter(keep).slice(0, TREE_STATE_CAP),
+    });
+  }, [projectId, userOpen, userClosed, knownDirs]);
 
   // Fresh navigation clears user-collapses along the new target's ancestor
   // chain so the reveal wins (derive-from-props pattern — no effect).

@@ -1,4 +1,11 @@
 import type { SlyActionsFile, SlyActionConfig, NavigationTarget, KanbanCard, Project } from './types.js';
+export type SpeakerState = 'on' | 'off' | 'unknown';
+export declare function formatSpeakerLine(state: SpeakerState): string;
+/**
+ * Fetch the bridge's global speaker flag at dispatch time. 500 ms budget;
+ * any failure (bridge down, old bridge without /speaker, timeout) → 'unknown'.
+ */
+export declare function fetchSpeakerState(bridgeUrl: string, timeoutMs?: number): Promise<SpeakerState>;
 export declare class SlyActionFilter {
     private actionsFile;
     private cacheTimestamp;
@@ -19,6 +26,8 @@ export declare class SlyActionFilter {
         project?: Project;
         stage?: string;
         projectPath?: string;
+        /** Speaker permission snapshot (feature 086); omit to leave the line out. */
+        speakerState?: SpeakerState;
     }): string;
     /**
      * Build the project context block for project-scoped terminals.
@@ -41,6 +50,7 @@ export declare class SlyActionFilter {
         stage?: string;
         projectPath?: string;
         terminalClass?: string;
+        speakerState?: SpeakerState;
     }): string;
     getTerminalClass(target: NavigationTarget): string;
 }

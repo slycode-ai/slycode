@@ -5,6 +5,8 @@ import { saveScreenshot } from './screenshot-utils.js';
 import { checkInstructionFile, getProvider, setInstructionFileSuppressed } from './provider-utils.js';
 import { idPatternFor } from './provider-registry.js';
 import { getGitStatus } from './git-utils.js';
+import { getSpeakerAuthority } from './speaker.js';
+import { getMessagingClient } from './messaging-client.js';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 /**
  * Hex-escape control bytes inside a payload before injecting it into the
@@ -154,6 +156,45 @@ export function createApiRouter(sessionManager, responseStore) {
             sessionManager.removeSSEClient(name, res);
         });
     });
+    // ---- Spoken replies (feature 086): global speaker permission + app-wide audio stream ----
+    const speakerState = async () => {
+        const speaker = getSpeakerAuthority();
+        const health = await getMessagingClient().health();
+        const s = speaker.getState();
+        return { enabled: s.enabled, revision: s.revision, subscribers: s.subscribers, messaging: { configured: health.configured, tts: health.tts } };
+    };
+    router.get('/speaker', async (_req, res) => {
+        res.json(await speakerState());
+    });
+    // Idempotent. OFF bumps the permission revision and persists before responding.
+    router.put('/speaker', async (req, res) => {
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== 'boolean') {
+            return res.status(400).json({ error: 'bad_request', message: 'body must be { enabled: boolean }' });
+        }
+        try {
+            await getSpeakerAuthority().setEnabled(enabled);
+            res.json(await speakerState());
+        }
+        catch (err) {
+            res.status(500).json({ error: 'persist_failed', message: err.message });
+        }
+    });
+    // App-wide audio stream: one per browser (tabs elect a holder client-side).
+    // Subscriber count here is what admission uses as "is anybody listening".
+    router.get('/audio/stream', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+        const speaker = getSpeakerAuthority();
+        const id = speaker.addSubscriber(res);
+        res.write(`event: speaker-state\ndata: ${JSON.stringify(speaker.stateEvent())}\n\n`);
+        req.on('close', () => speaker.removeSubscriber(id));
+    });
+    // POST /sessions/:name/speak — admission + render orchestration lives in
+    // speak-route.ts (spec 086 Task 8); wired from index.ts alongside this router.
     // Terminal input — async to support chunked writes on Windows
     router.post('/sessions/:name/input', async (req, res) => {
         const name = decodeURIComponent(req.params.name);

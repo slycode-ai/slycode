@@ -4,7 +4,6 @@
  * Store holds MCP configs in a common JSON format.
  * Transformers convert to/from each provider's native format:
  *   Claude:  JSON in .claude/settings.json (mcpServers key)
- *   Gemini:  JSON in .gemini/settings.json (mcpServers key)
  *   Codex:   TOML in .codex/config.toml ([mcp_servers.name] section)
  */
 
@@ -12,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import type { ProviderId } from './types';
 import { getProviderMcpConfigPath } from './provider-paths';
+import { atomicWriteFileSync } from './atomic-write';
 
 // ============================================================================
 // Common MCP Config Type
@@ -68,27 +68,6 @@ export function transformToClaudeMcp(config: CommonMcpConfig): Record<string, un
     if (config.args?.length) entry.args = config.args;
     if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
     if (config.timeout) entry.timeout = config.timeout;
-  }
-
-  return { [config.name]: entry };
-}
-
-/**
- * Transform common config to Gemini's mcpServers format.
- * Gemini also uses JSON, similar to Claude.
- */
-export function transformToGeminiMcp(config: CommonMcpConfig): Record<string, unknown> {
-  const entry: Record<string, unknown> = {};
-
-  if (config.url) {
-    // HTTP transport — Gemini uses httpUrl (NOT url; url means SSE in Gemini)
-    entry.httpUrl = config.url;
-    if (config.headers && Object.keys(config.headers).length > 0) entry.headers = config.headers;
-  } else if (config.command) {
-    // Stdio transport
-    entry.command = config.command;
-    if (config.args?.length) entry.args = config.args;
-    if (config.env && Object.keys(config.env).length > 0) entry.env = config.env;
   }
 
   return { [config.name]: entry };
@@ -154,7 +133,7 @@ export function activateMcp(
   if (provider === 'codex') {
     return activateCodexMcp(configPath, config);
   } else {
-    return activateJsonMcp(configPath, config, provider);
+    return activateJsonMcp(configPath, config);
   }
 }
 
@@ -177,13 +156,12 @@ export function deactivateMcp(
 }
 
 // ============================================================================
-// JSON-based MCP (Claude, Gemini)
+// JSON-based MCP (Claude)
 // ============================================================================
 
 function activateJsonMcp(
   configPath: string,
   config: CommonMcpConfig,
-  provider: ProviderId,
 ): ActivateResult {
   let existing: Record<string, unknown> = {};
   try {
@@ -199,15 +177,13 @@ function activateJsonMcp(
   // Skip if an entry with this name already exists
   if (config.name in mcpServers) return 'already_exists';
 
-  const transformed = provider === 'claude'
-    ? transformToClaudeMcp(config)
-    : transformToGeminiMcp(config);
+  const transformed = transformToClaudeMcp(config);
 
   Object.assign(mcpServers, transformed);
   existing.mcpServers = mcpServers;
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
+  atomicWriteFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
   return 'deployed';
 }
 
@@ -264,7 +240,7 @@ export function mergeMcpFile(srcPath: string, dstPath: string): McpMergeResult {
 
   dst.mcpServers = dstServers;
   fs.mkdirSync(path.dirname(dstPath), { recursive: true });
-  fs.writeFileSync(dstPath, JSON.stringify(dst, null, 2) + '\n');
+  atomicWriteFileSync(dstPath, JSON.stringify(dst, null, 2) + '\n');
   return result;
 }
 
@@ -278,9 +254,10 @@ function deactivateJsonMcp(configPath: string, mcpName: string): void {
 
     delete mcpServers[mcpName];
     existing.mcpServers = mcpServers;
-    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
+    atomicWriteFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
   } catch {
-    // Config file corrupt or unreadable
+    // Config file corrupt or unreadable. The write is atomic (tmp+rename),
+    // so a failure here leaves the previous file intact.
   }
 }
 
@@ -307,7 +284,7 @@ function activateCodexMcp(configPath: string, config: CommonMcpConfig): Activate
   content = content.trimEnd() + '\n\n' + tomlSection + '\n';
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, content);
+  atomicWriteFileSync(configPath, content);
   return 'deployed' as const;
 }
 
@@ -317,9 +294,10 @@ function deactivateCodexMcp(configPath: string, mcpName: string): void {
   try {
     let content = fs.readFileSync(configPath, 'utf-8');
     content = removeTomlSection(content, `mcp_servers.${mcpName}`);
-    fs.writeFileSync(configPath, content);
+    atomicWriteFileSync(configPath, content);
   } catch {
-    // Config file corrupt or unreadable
+    // Config file corrupt or unreadable. The write is atomic (tmp+rename),
+    // so a failure here leaves the previous file intact.
   }
 }
 

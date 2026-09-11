@@ -1,0 +1,120 @@
+module.exports=[82398,e=>{"use strict";var t=e.i(89171),a=e.i(22734),r=e.i(14747),s=e.i(7367),n=e.i(12202);let o=["claude","agents","codex"];async function i(e){try{var i,l,d,u,c,p,h,m,f,v,g,R,C,y,x,w,$,P;let T,A,E,{mode:b,provider:N,assetType:S,assetName:M,description:k,changes:I}=await e.json();if(!b||!N||!S)return t.NextResponse.json({error:"mode, provider, and assetType are required"},{status:400});if(!o.includes(N))return t.NextResponse.json({error:`Unknown provider: ${N}`},{status:400});if("create"===b&&(!M||!k))return t.NextResponse.json({error:"assetName and description are required for create mode"},{status:400});if("modify"===b&&!M)return t.NextResponse.json({error:"assetName is required for modify mode"},{status:400});if(void 0!==M&&!(0,n.validateAssetName)(M))return t.NextResponse.json({error:"Invalid asset name"},{status:400});let O=(0,s.getSlycodeRoot)();if("mcp"===S)A=r.default.join(O,`store/mcp/${M}.json`);else{let e="skill"===S?"skills":"agents",t="skill"===S?`store/${e}/${M}/SKILL.md`:`store/${e}/${M}.md`;A=r.default.join(O,t)}let q=r.default.join(O,"documentation","reference","ai_cli_providers.md");if("modify"===b&&!a.default.existsSync(A)){if("mcp"===S)return t.NextResponse.json({error:`Could not find MCP config '${M}' at ${A}`},{status:404});if("skill"!==S)return t.NextResponse.json({error:`Could not find asset '${M}' in store at ${A}`},{status:404})}return E="mcp"===S?"create"===b?(i=M,l=k,d=A,`Create an MCP (Model Context Protocol) server configuration called "${i}".
+
+**Output file:** \`${d}\`
+
+## What this MCP server should do
+${l}
+
+## Research steps
+
+1. Research the MCP server package described above — find the correct npm package name, command, and required arguments
+2. Check if there are any required environment variables or setup steps
+3. Determine whether this is a stdio MCP (runs locally via command) or HTTP MCP (connects to a URL)
+
+## Store JSON format
+
+There are two transport types. Use the one that matches the MCP server:
+
+### Stdio MCP (runs a local process)
+\`\`\`json
+{
+  "name": "${i}",
+  "command": "<executable, e.g. npx, node, python>",
+  "args": ["<arguments to launch the MCP server>"],
+  "env": {
+    "API_KEY": "\${API_KEY}"
+  },
+  "description": "<concise one-line description>",
+  "version": "1.0.0",
+  "updated": "<today's date, YYYY-MM-DD>"
+}
+\`\`\`
+
+### HTTP MCP (connects to a remote URL)
+\`\`\`json
+{
+  "name": "${i}",
+  "url": "https://<mcp-server-url>",
+  "headers": {
+    "Authorization": "Bearer \${API_KEY}"
+  },
+  "description": "<concise one-line description>",
+  "version": "1.0.0",
+  "updated": "<today's date, YYYY-MM-DD>"
+}
+\`\`\`
+
+## Key points
+- \`name\` must be \`${i}\`
+- **Stdio**: \`command\` is the executable (usually \`npx\`), \`args\` is an array, \`env\` holds environment variables with \`\${PLACEHOLDER}\` values
+- **HTTP**: \`url\` is the MCP server endpoint, \`headers\` is optional (for auth tokens etc.)
+- Do NOT include both \`command\` and \`url\` — pick one transport type
+- \`description\`, \`version\`, and \`updated\` are required metadata fields
+- The file must be valid JSON
+
+Write the config to \`${d}\`.`):(u=M,c=I||"",p=A,`Modify the MCP server configuration "${u}".
+
+**File to modify:** \`${p}\`
+
+Read the file, then apply these changes:
+
+${c||"Review and improve this MCP configuration. Verify the package exists, update to latest version, and ensure all fields are correct."}
+
+## Rules
+- Keep the JSON structure intact
+- Update \`version\` (patch increment, e.g. 1.0.0 → 1.0.1)
+- Update \`updated\` to today's date
+- Keep \`name\` as \`${u}\`
+- The file must be valid JSON
+
+Write the updated file back to \`${p}\`.`):"create"===b?(h=N,m=S,f=M,v=k,g=A,R=q,T={claude:"Claude Code",agents:"Agents (Universal)",codex:"Codex CLI"},`Create a new ${T[h]} ${m} called "${f}".
+
+**Format reference:** \`${R}\`
+**Output file:** \`${g}\`
+
+## What it should do
+${v}
+
+## ${m.charAt(0).toUpperCase()+m.slice(1)} format
+${({skill:"Skills are SKILL.md files that give the AI specialized knowledge or workflows. They can be invoked via slash commands. They describe when/how to use the skill and can include a references/ subdirectory for supporting files. The skill directory structure is: skillname/SKILL.md and optionally skillname/references/*.md.",agent:"Agents are custom agent definitions that configure specialized behavior, purpose, capabilities, and tool usage."})[m]||""}
+
+Read the format reference for ${T[h]}-specific conventions, then create the ${m}.
+
+## Required frontmatter
+
+\`\`\`yaml
+---
+name: ${f}
+version: 1.0.0
+updated: <today's date, YYYY-MM-DD>
+description: "<concise one-line summary>"
+---
+\`\`\`
+
+All four fields are mandatory. The description should summarize the ${m}'s purpose in one line.
+${"agents"===h?`
+## Provider-Neutral Language
+
+Since this asset targets the universal .agents/ directory (read by cross-tool CLIs such as Codex and OpenCode), you MUST write all text in provider-neutral language:
+- Do NOT name specific tools (e.g. "Claude Code" or "Codex CLI")
+- Use generic terms like "the AI assistant" or "the agent" instead
+- The content should work identically across any AI coding tool that reads .agents/
+`:""}
+Write the complete file to \`${g}\`.`):(C=N,y=S,x=M,w=I||"",$=A,P=q,`Modify the ${({claude:"Claude Code",agents:"Agents (Universal)",codex:"Codex CLI"})[C]} ${y} "${x}".
+
+**File to modify:** \`${$}\`
+**Format reference:** \`${P}\`
+
+Read the file, then apply these changes:
+
+${w||"Review and improve this asset. Fix any issues, improve clarity, and ensure it follows best practices."}
+
+## Frontmatter rules
+- Bump the \`version\` (patch increment, e.g. 1.0.0 → 1.0.1)
+- Update \`updated\` to today's date
+- Keep all other frontmatter fields intact (\`name\`, \`description\`)
+- If any required field is missing, add it
+
+Write the updated file back to \`${$}\`.`),t.NextResponse.json({prompt:E,outputPath:A})}catch(e){return console.error("Asset assistant failed:",e),t.NextResponse.json({error:"Failed to generate assistant prompt",details:String(e)},{status:500})}}e.s(["POST",0,i])},36688,e=>{"use strict";var t=e.i(47909),a=e.i(74017),r=e.i(96250),s=e.i(59756),n=e.i(61916),o=e.i(74677),i=e.i(69741),l=e.i(16795),d=e.i(87718),u=e.i(95169),c=e.i(47587),p=e.i(66012),h=e.i(70101),m=e.i(74838),f=e.i(10372),v=e.i(93695);e.i(52474);var g=e.i(220);let R=new t.AppRouteRouteModule({definition:{kind:a.RouteKind.APP_ROUTE,page:"/api/cli-assets/assistant/route",pathname:"/api/cli-assets/assistant",filename:"route",bundlePath:""},distDir:".next",relativeProjectDir:"",resolvedPagePath:"[project]/src/app/api/cli-assets/assistant/route.ts",nextConfigOutput:"standalone",userland:()=>e.r(82398),...{}}),{workAsyncStorage:C,workUnitAsyncStorage:y,serverHooks:x}=R;async function w(e,t,r){r.requestMeta&&(0,s.setRequestMeta)(e,r.requestMeta),R.isDev&&(0,s.addRequestMeta)(e,"devRequestTimingInternalsEnd",process.hrtime.bigint());let C="/api/cli-assets/assistant/route";C=C.replace(/\/index$/,"")||"/";let y=await R.prepare(e,t,{srcPage:C,multiZoneDraftMode:!1});if(!y)return t.statusCode=400,t.end("Bad Request"),null==r.waitUntil||r.waitUntil.call(r,Promise.resolve()),null;let{buildId:x,deploymentId:w,params:$,nextConfig:P,parsedUrl:T,isDraftMode:A,prerenderManifest:E,routerServerContext:b,isOnDemandRevalidate:N,revalidateOnlyGenerated:S,resolvedPathname:M,clientReferenceManifest:k,serverActionsManifest:I}=y,O=(0,i.normalizeAppPath)(C),q=!!(E.dynamicRoutes[O]||E.routes[M]),U=async()=>((null==b?void 0:b.render404)?await b.render404(e,t,T,!1):t.end("This page could not be found"),null);if(q&&!A){let e=!!E.routes[M],t=E.dynamicRoutes[O];if(t&&!1===t.fallback&&!e){if(P.adapterPath)return await U();throw new v.NoFallbackError}}let _=null;!q||R.isDev||A||(_="/index"===(_=M)?"/":_);let j=!0===R.isDev||!q,D=q&&!j;I&&k&&(0,o.setManifestsSingleton)({page:C,clientReferenceManifest:k,serverActionsManifest:I});let H=e.method||"GET",L=(0,n.getTracer)(),K=L.getActiveScopeSpan(),F=!!(null==b?void 0:b.isWrappedByNextServer),Y=!!(0,s.getRequestMeta)(e,"minimalMode"),B=(0,s.getRequestMeta)(e,"incrementalCache")||await R.getIncrementalCache(e,P,E,Y);null==B||B.resetRequestCache(),globalThis.__incrementalCache=B;let W={params:$,previewProps:E.preview,renderOpts:{experimental:{authInterrupts:!!P.experimental.authInterrupts,useCacheTimeout:P.experimental.useCacheTimeout},cacheComponents:!!P.cacheComponents,validationLevel:P.experimental.instantInsights.validationLevel,supportsDynamicResponse:j,incrementalCache:B,hmrRefreshHash:(0,s.getRequestMeta)(e,"hmrRefreshHash"),cacheLifeProfiles:P.cacheLife,staticPageGenerationTimeout:P.staticPageGenerationTimeout,waitUntil:r.waitUntil,onClose:e=>{t.on("close",e)},onAfterTaskError:void 0,onInstrumentationRequestError:(t,a,r,s)=>R.onRequestError(e,t,r,s,b)},sharedContext:{buildId:x,deploymentId:w}},z=new l.NodeNextRequest(e),G=new l.NodeNextResponse(t),J=d.NextRequestAdapter.fromNodeNextRequest(z,(0,d.signalFromNodeResponse)(t)),V=async({previousCacheEntry:a})=>{try{if(!Y&&N&&S&&!a)return t.statusCode=404,t.setHeader("x-nextjs-cache","REVALIDATED"),t.end("This page could not be found"),null;let s=await R.handle(J,W);e.fetchMetrics=W.renderOpts.fetchMetrics;let n=W.renderOpts.pendingWaitUntil;n&&r.waitUntil&&(r.waitUntil(n),n=void 0);let o=W.renderOpts.collectedTags;if(!q)return await (0,p.sendResponse)(z,G,s,n),null;{let e=await s.blob(),t=(0,h.toNodeOutgoingHttpHeaders)(s.headers);o&&(t[f.NEXT_CACHE_TAGS_HEADER]=o),!t["content-type"]&&e.type&&(t["content-type"]=e.type);let a=void 0!==W.renderOpts.collectedRevalidate&&!(W.renderOpts.collectedRevalidate>=f.INFINITE_CACHE)&&W.renderOpts.collectedRevalidate,r=void 0===W.renderOpts.collectedExpire||W.renderOpts.collectedExpire>=f.INFINITE_CACHE?!1!==a&&a>0?P.expireTime:void 0:W.renderOpts.collectedExpire;return{value:{kind:g.CachedRouteKind.APP_ROUTE,status:s.status,body:Buffer.from(await e.arrayBuffer()),headers:t},cacheControl:{revalidate:a,expire:r}}}}catch(t){throw(null==a?void 0:a.isStale)&&await R.onRequestError(e,t,{routerKind:"App Router",routePath:C,routeType:"route",revalidateReason:(0,c.getRevalidateReason)({isStaticGeneration:D,isOnDemandRevalidate:N})},!1,b),t}},X=async(s,o)=>{try{var i,l;let s=await R.handleResponse({req:e,nextConfig:P,cacheKey:_,routeKind:a.RouteKind.APP_ROUTE,isFallback:!1,prerenderManifest:E,isRoutePPREnabled:!1,isOnDemandRevalidate:N,revalidateOnlyGenerated:S,responseGenerator:V,waitUntil:r.waitUntil,isMinimalMode:Y});if(!q)return;if((null==s||null==(i=s.value)?void 0:i.kind)!==g.CachedRouteKind.APP_ROUTE)throw Object.defineProperty(Error(`Invariant: app-route received invalid cache entry ${null==s||null==(l=s.value)?void 0:l.kind}`),"__NEXT_ERROR_CODE",{value:"E701",enumerable:!1,configurable:!0});Y||t.setHeader("x-nextjs-cache",N?"REVALIDATED":s.isMiss?"MISS":s.isStale?"STALE":"HIT"),A&&t.setHeader("Cache-Control","private, no-cache, no-store, max-age=0, must-revalidate");let n=(0,h.fromNodeOutgoingHttpHeaders)(s.value.headers);Y&&q||n.delete(f.NEXT_CACHE_TAGS_HEADER),!s.cacheControl||t.getHeader("Cache-Control")||n.get("Cache-Control")||n.set("Cache-Control",(0,m.getCacheControlHeader)(s.cacheControl)),await (0,p.sendResponse)(z,G,new Response(s.value.body,{headers:n,status:s.value.status||200}));return}catch(t){if(t instanceof v.NoFallbackError||await R.onRequestError(e,t,{routerKind:"App Router",routePath:O,routeType:"route",revalidateReason:(0,c.getRevalidateReason)({isStaticGeneration:D,isOnDemandRevalidate:N})},!1,b),q)throw t;await (0,p.sendResponse)(z,G,new Response(null,{status:500}));return}finally{(()=>{if(!s)return;let e=t.statusCode;s.setAttributes({"http.status_code":e,"next.rsc":!1}),e&&e>=500&&(s.setStatus({code:n.SpanStatusCode.ERROR}),s.setAttribute("error.type",e.toString()));let a=L.getRootSpanAttributes();if(!a)return;if(a.get("next.span_type")!==u.BaseServerSpan.handleRequest)return console.warn(`Unexpected root span type '${a.get("next.span_type")}'. Please report this Next.js issue https://github.com/vercel/next.js`);let r=a.get("next.route")||O,i=`${H} ${r}`;s.setAttributes({"next.route":r,"http.route":r,"next.span_name":i}),s.updateName(i),o&&o!==s&&(o.setAttribute("http.route",r),o.updateName(i))})()}};if(F&&K)await X(K,void 0);else{let t=L.getActiveScopeSpan();await L.withPropagatedContext(e.headers,()=>L.trace(u.BaseServerSpan.handleRequest,{spanName:`${H} ${C}`,kind:n.SpanKind.SERVER,attributes:{"http.method":H,"http.target":e.url}},e=>X(e,t)),void 0,!F)}}e.s(["handler",0,w,"patchFetch",0,function(){return(0,r.patchFetch)({workAsyncStorage:C,workUnitAsyncStorage:y})},"routeModule",0,R,"serverHooks",0,x,"workAsyncStorage",0,C,"workUnitAsyncStorage",0,y])}];
+
+//# sourceMappingURL=_1erd4cd._.js.map

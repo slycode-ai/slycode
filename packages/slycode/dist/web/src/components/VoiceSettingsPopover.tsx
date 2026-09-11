@@ -1,12 +1,18 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import type { VoiceSettings } from '@/lib/types';
+import type { SpeechBubbleMode, VoiceSettings } from '@/lib/types';
+import { DEFAULT_MAX_SPEAK_WORDS, MAX_SPEAK_WORDS_MAX, MAX_SPEAK_WORDS_MIN } from '@/lib/types';
+import type { SpeakerController } from '@/hooks/useSpeakerController';
 
 interface VoiceSettingsPopoverProps {
   settings: VoiceSettings;
   onSave: (settings: Partial<VoiceSettings>) => void;
   onClose: () => void;
+  /** Spoken replies (feature 086): availability for the status line. */
+  speaker?: SpeakerController;
+  /** Last settings save failure — shown inline so spoken-reply limits never fail silently. */
+  saveError?: string | null;
 }
 
 function ShortcutInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -54,23 +60,28 @@ function ShortcutInput({ label, value, onChange }: { label: string; value: strin
   );
 }
 
-export function VoiceSettingsPopover({ settings, onSave, onClose }: VoiceSettingsPopoverProps) {
+export function VoiceSettingsPopover({ settings, onSave, onClose, speaker, saveError }: VoiceSettingsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [shortcuts, setShortcuts] = useState({ ...settings.shortcuts });
   const [autoSubmit, setAutoSubmit] = useState(settings.autoSubmitTerminal);
   const [maxMinutes, setMaxMinutes] = useState(Math.round(settings.maxRecordingSeconds / 60));
+  const [maxSpeakWords, setMaxSpeakWords] = useState(settings.maxSpeakWords ?? DEFAULT_MAX_SPEAK_WORDS);
+  const [bubbleMode, setBubbleMode] = useState<SpeechBubbleMode>(settings.speechBubbleMode ?? 'auto-hide');
 
   // Auto-save on close via cleanup
-  const stateRef = useRef({ shortcuts, autoSubmit, maxMinutes });
-  stateRef.current = { shortcuts, autoSubmit, maxMinutes };
+  const stateRef = useRef({ shortcuts, autoSubmit, maxMinutes, maxSpeakWords, bubbleMode });
+  stateRef.current = { shortcuts, autoSubmit, maxMinutes, maxSpeakWords, bubbleMode };
 
   useEffect(() => {
     return () => {
-      const { shortcuts: sc, autoSubmit: as_, maxMinutes: mm } = stateRef.current;
+      const { shortcuts: sc, autoSubmit: as_, maxMinutes: mm, maxSpeakWords: msw, bubbleMode: bm } = stateRef.current;
+      const words = Number.isFinite(msw) ? Math.min(MAX_SPEAK_WORDS_MAX, Math.max(MAX_SPEAK_WORDS_MIN, Math.round(msw))) : DEFAULT_MAX_SPEAK_WORDS;
       onSave({
         shortcuts: sc,
         autoSubmitTerminal: as_,
         maxRecordingSeconds: Math.max(1, mm) * 60,
+        maxSpeakWords: words,
+        speechBubbleMode: bm,
       });
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,6 +168,69 @@ export function VoiceSettingsPopover({ settings, onSave, onClose }: VoiceSetting
             className="w-16 rounded border border-void-300 bg-void-50 px-2 py-1 text-center text-xs text-void-700 outline-none dark:border-void-600 dark:bg-void-700 dark:text-void-300"
           />
         </div>
+      </div>
+
+      {/* Spoken replies (feature 086) */}
+      <div className="mt-3 space-y-3 border-t border-void-200 pt-3 dark:border-void-600">
+        <div className="text-xs font-medium text-void-500 dark:text-void-400">Spoken replies</div>
+
+        {speaker && (
+          <div className="flex items-start gap-2 text-xs">
+            <span
+              aria-hidden="true"
+              className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                speaker.enabled === null ? 'bg-void-400' : speaker.available ? 'bg-green-500' : 'bg-amber-400'
+              }`}
+            />
+            <span className="min-w-0 text-void-600 dark:text-void-400">
+              {speaker.enabled === null
+                ? 'Checking the voice service…'
+                : speaker.available
+                  ? (speaker.enabled ? 'Available. Sound is allowed.' : 'Available. Sound is off.')
+                  : speaker.availability.messagingRunning === false
+                    ? 'Unavailable: the messaging service is off. Start it to allow spoken replies.'
+                    : 'Unavailable: set ELEVENLABS_API_KEY in the messaging .env, then restart the messaging service.'}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-void-600 dark:text-void-400">Max length (words)</span>
+          <input
+            type="number"
+            min={MAX_SPEAK_WORDS_MIN}
+            max={MAX_SPEAK_WORDS_MAX}
+            value={maxSpeakWords}
+            onChange={(e) => setMaxSpeakWords(parseInt(e.target.value) || DEFAULT_MAX_SPEAK_WORDS)}
+            className="w-16 rounded border border-void-300 bg-void-50 px-2 py-1 text-center text-xs text-void-700 outline-none dark:border-void-600 dark:bg-void-700 dark:text-void-300"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-void-600 dark:text-void-400">Caption</span>
+          <div role="radiogroup" aria-label="Caption behaviour" className="inline-flex rounded-md border border-void-300 p-0.5 dark:border-void-600">
+            {(['auto-hide', 'keep'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={bubbleMode === m}
+                onClick={() => setBubbleMode(m)}
+                className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                  bubbleMode === m
+                    ? 'bg-neon-blue-400/20 text-[#2490b5] dark:text-neon-blue-400'
+                    : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200'
+                }`}
+              >
+                {m === 'auto-hide' ? 'Auto-hide' : 'Keep until dismissed'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {saveError && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400">{saveError}</p>
+        )}
       </div>
     </div>
   );

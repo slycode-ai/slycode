@@ -1,6 +1,6 @@
 ---
 name: challenge-implementation
-version: 1.2.0
+version: 1.2.1
 label: "Challenge Impl"
 description: "Send implementation to another AI provider for adversarial code review and methodology analysis"
 group: "Card Actions"
@@ -23,7 +23,6 @@ Send the completed implementation for card `{{card.id}}` to a different AI provi
 **Pick the target provider** (must be different from yourself):
 - **Claude** → send to `codex`
 - **Codex** → send to `claude`
-- **Gemini** → try `claude` first; if that fails, try `codex`
 - **OpenCode** → try `claude` first; if that fails, try `codex`
 
 **Optionally** add a context note before sending:

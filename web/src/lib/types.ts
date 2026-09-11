@@ -88,7 +88,7 @@ export interface ChecklistItem {
 
 export interface AgentNote {
   id: number;              // Sequential integer (1, 2, 3...)
-  agent?: string;          // "Claude", "Codex", "Gemini", "User", etc.
+  agent?: string;          // "Claude", "Codex", "OpenCode", "User", etc.
   text: string;            // Note content, max ~3000 characters
   timestamp: string;       // ISO 8601, auto-set on creation
   summary?: boolean;       // True if this is a summary note (from `notes summarize`)
@@ -199,11 +199,22 @@ export interface ChangedCard {
   type: CardChangeType;
 }
 
+/**
+ * Project-owned board settings (root of documentation/kanban.json). Lives in
+ * the board so it travels with the project's repo and the CLI can read it from
+ * the file it already loads. Absent keys mean "off".
+ */
+export interface KanbanBoardSettings {
+  /** Feature #0350: let agents in OTHER projects prompt this project's cards. Default off. */
+  allowCrossProjectPrompts?: boolean;
+}
+
 export interface KanbanBoard {
   project_id: string;
   stages: KanbanStages;
   last_updated: string;
   nextCardNumber?: number;
+  settings?: KanbanBoardSettings;
 }
 
 // ============================================================================
@@ -371,7 +382,7 @@ export const TEMPLATE_VARIABLES = {
 // Provider Types
 // ============================================================================
 
-export type ProviderId = 'claude' | 'agents' | 'codex' | 'gemini';
+export type ProviderId = 'claude' | 'agents' | 'codex';
 
 // ============================================================================
 // CLI Assets Types (Asset Management)
@@ -582,11 +593,21 @@ export interface VoiceShortcuts {
   clear: string;
 }
 
+export type SpeechBubbleMode = 'auto-hide' | 'keep';
+
 export interface VoiceSettings {
   autoSubmitTerminal: boolean;
   maxRecordingSeconds: number;
   shortcuts: VoiceShortcuts;
+  /** Spoken replies (feature 086): max words per `sly-messaging speak` clip. Clamped 1..200. */
+  maxSpeakWords: number;
+  /** Spoken replies: caption bubble auto-hides after a few seconds, or stays until dismissed. */
+  speechBubbleMode: SpeechBubbleMode;
 }
+
+export const MAX_SPEAK_WORDS_MIN = 1;
+export const MAX_SPEAK_WORDS_MAX = 200;
+export const DEFAULT_MAX_SPEAK_WORDS = 60;
 
 export interface AppSettings {
   voice: VoiceSettings;
@@ -602,6 +623,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
     submitPasteOnly: 'Shift+Enter',
     clear: 'Escape',
   },
+  maxSpeakWords: DEFAULT_MAX_SPEAK_WORDS,
+  speechBubbleMode: 'auto-hide',
 };
 
 export interface TerminalHandle {

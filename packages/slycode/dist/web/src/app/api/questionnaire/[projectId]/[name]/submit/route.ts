@@ -10,6 +10,7 @@ import {
   QuestionnaireValidationError,
 } from '@/lib/questionnaire';
 import { getBridgeUrl } from '@/lib/paths';
+import { fetchSpeakerState, formatSpeakerLine } from '@/lib/speaker-line';
 import { loadRegistry } from '@/lib/registry';
 import { sessionNameCandidates } from '@/lib/session-keys';
 import { autoStatusQuestionnaireSubmitted } from '@/lib/status';
@@ -86,7 +87,9 @@ export async function POST(
     throw err;
   }
 
-  const message = buildSubmitMessage(questionnaire, ref);
+  // Speaker permission snapshot (feature 086), fetched at dispatch (bounded, 'unknown' on failure).
+  const speakerLine = formatSpeakerLine(await fetchSpeakerState(getBridgeUrl()));
+  const message = `${speakerLine}\n\n${buildSubmitMessage(questionnaire, ref)}`;
   const autoSubmit = body.autoSubmit !== false;
 
   // Resolve the bridge URL and build alias-aware session-name candidates.

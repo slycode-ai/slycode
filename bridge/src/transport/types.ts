@@ -6,7 +6,7 @@
  * how a prompt is delivered and confirmed, how the provider's sessions are
  * enumerated for recovery, and what to do at spawn/stop. Two implementations:
  *
- *   pty-scrape   — Claude, Codex, Gemini: transcript-file detection + the
+ *   pty-scrape   — Claude, Codex: transcript-file detection + the
  *                  snapshot-classifier delivery ladder (existing behaviour,
  *                  delegated back into SessionManager unchanged).
  *   opencode-api — OpenCode: the TUI process serves an HTTP API on a

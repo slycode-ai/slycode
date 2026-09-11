@@ -3,6 +3,10 @@ import type { VoiceState } from '@/lib/types';
 
 interface UseVoiceRecorderOptions {
   maxRecordingSeconds: number;
+  /** Feature 086: called right before the microphone opens (pause spoken-reply playback). */
+  onBeforeCapture?: () => void;
+  /** Feature 086: called when the microphone stream is released (resume playback). */
+  onCaptureEnd?: () => void;
   /**
    * Deliver a transcript to its target. Return an error message (string) when
    * it could NOT be delivered — the recorder then enters the error state and
@@ -27,7 +31,7 @@ interface UseVoiceRecorderReturn {
   retryTranscription: () => Promise<void>;
 }
 
-export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete }: UseVoiceRecorderOptions): UseVoiceRecorderReturn {
+export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete, onBeforeCapture, onCaptureEnd }: UseVoiceRecorderOptions): UseVoiceRecorderReturn {
   const [state, setState] = useState<VoiceState>('idle');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -134,10 +138,15 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
     return text;
   }, []);
 
+  const captureOpenRef = useRef(false);
   const releaseStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-  }, []);
+    if (captureOpenRef.current) {
+      captureOpenRef.current = false;
+      onCaptureEnd?.();
+    }
+  }, [onCaptureEnd]);
 
   /**
    * Hand a transcript to the delivery callback. On success everything retained
@@ -183,6 +192,8 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
       setElapsedSeconds(0);
       batchStartRef.current = 0;
 
+      captureOpenRef.current = true;
+      onBeforeCapture?.();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (generation !== generationRef.current) {
         // Cleared (modal closed / voice reclaimed) while the permission
@@ -222,7 +233,7 @@ export function useVoiceRecorder({ maxRecordingSeconds, onTranscriptionComplete 
     } finally {
       startingRef.current = false;
     }
-  }, [state, startTimer, releaseStream]);
+  }, [state, startTimer, releaseStream, onBeforeCapture]);
 
   const pauseRecording = useCallback(() => {
     if (state !== 'recording') return;

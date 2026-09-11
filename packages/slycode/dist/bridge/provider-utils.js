@@ -66,13 +66,13 @@ export function buildProviderCommand(opts) {
     if (!resume && model && provider.model?.flag) {
         args.push(provider.model.flag, model);
     }
-    // Resume flag (Claude/Gemini style)
+    // Resume flag (Claude-style)
     if (resume && provider.resume.supported && provider.resume.type === 'flag') {
         if (sessionId) {
             args.push(provider.resume.flag, sessionId);
         }
         else if (!provider.resume.requiresId) {
-            // No GUID — just pass the flag (Gemini resumes latest)
+            // No GUID — just pass the flag (provider resumes latest)
             args.push(provider.resume.flag);
         }
         // requiresId + no id: fall through to a fresh spawn (never "resume latest")
@@ -102,7 +102,7 @@ export function supportsSessionDetection(provider) {
     return provider.resume.detectSession === true;
 }
 // Priority order for finding a copy source when instruction file is missing
-const INSTRUCTION_FILE_PRIORITY = ['CLAUDE.md', 'AGENTS.md', 'CODEX.md', 'GEMINI.md'];
+const INSTRUCTION_FILE_PRIORITY = ['CLAUDE.md', 'AGENTS.md', 'CODEX.md'];
 export function instructionFilePrefsPath() {
     if (process.env.SLYCODE_INSTRUCTION_PREFS_PATH)
         return process.env.SLYCODE_INSTRUCTION_PREFS_PATH;
@@ -167,8 +167,8 @@ export async function setInstructionFileSuppressed(providerId, cwd, suppressed) 
 /**
  * Check if a provider's instruction file exists in the given directory.
  * Detection order:
- * 1. Primary file exists (e.g. CLAUDE.md for Claude, GEMINI.md for Gemini) → no action
- * 2. Alt file exists (e.g. CODEX.md for Codex, AGENTS.md for Gemini) → offer to copy it to primary
+ * 1. Primary file exists (e.g. CLAUDE.md for Claude) → no action
+ * 2. Alt file exists (e.g. CODEX.md for Codex) → offer to copy it to primary
  * 3. Any other instruction file exists → offer to copy it
  * 4. No instruction files at all → no action (nothing to copy from)
  */

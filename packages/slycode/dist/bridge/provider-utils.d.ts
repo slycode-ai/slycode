@@ -128,8 +128,8 @@ export declare function setInstructionFileSuppressed(providerId: string, cwd: st
 /**
  * Check if a provider's instruction file exists in the given directory.
  * Detection order:
- * 1. Primary file exists (e.g. CLAUDE.md for Claude, GEMINI.md for Gemini) → no action
- * 2. Alt file exists (e.g. CODEX.md for Codex, AGENTS.md for Gemini) → offer to copy it to primary
+ * 1. Primary file exists (e.g. CLAUDE.md for Claude) → no action
+ * 2. Alt file exists (e.g. CODEX.md for Codex) → offer to copy it to primary
  * 3. Any other instruction file exists → offer to copy it
  * 4. No instruction files at all → no action (nothing to copy from)
  */

@@ -1,6 +1,6 @@
 ---
 name: challenge
-version: 1.2.0
+version: 1.2.1
 label: "Challenge"
 description: "Send design to another AI provider for adversarial review and synthesis"
 group: "Card Actions"
@@ -23,7 +23,6 @@ Send the current design work for card `{{card.id}}` to a different AI provider f
 **Pick the target provider** (must be different from yourself):
 - **Claude** → send to `codex`
 - **Codex** → send to `claude`
-- **Gemini** → try `claude` first; if that fails, try `codex`
 - **OpenCode** → try `claude` first; if that fails, try `codex`
 
 **Optionally** add a context note before sending:

@@ -37,7 +37,6 @@ export function colorSetFromHex(hex: string): ProviderColorSet {
 export const providerColors: Record<string, ProviderColorSet> = {
   claude: colorSetFromHex('#d4764e'),
   codex: colorSetFromHex('#6b8fae'),
-  gemini: colorSetFromHex('#8b7ec8'),
 };
 
 /** Hydrate from registry entries (idempotent). */

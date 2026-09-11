@@ -2,9 +2,8 @@
  * Provider Paths — maps provider IDs to their asset directory conventions
  *
  * Claude:  .claude/{skills,agents}
- * Agents:  .agents/skills/ — universal cross-tool directory read by both Codex and Gemini
+ * Agents:  .agents/skills/ — universal cross-tool directory (read natively by Codex and OpenCode)
  * Codex:   .codex/skills/ — Codex-specific overrides
- * Gemini:  .gemini/{skills,agents}
  */
 
 import path from 'path';
@@ -31,12 +30,21 @@ const PROVIDER_PATHS: Record<ProviderId, ProviderAssetPaths> = {
     agents: null,                      // Codex has no agents — uses profiles
     mcpConfig: '.codex/config.toml',
   },
-  gemini: {
-    skills: '.gemini/skills',
-    agents: '.gemini/agents',
-    mcpConfig: '.gemini/settings.json',
-  },
 };
+
+/**
+ * Runtime guard for provider ids arriving from query params / request bodies.
+ * A stale or unknown id (e.g. a bookmarked URL for a removed provider) must
+ * produce a clean miss, never an `undefined[key]` TypeError.
+ */
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === 'string' && value in PROVIDER_PATHS;
+}
+
+/** Lookup that tolerates unknown ids (returns undefined instead of throwing). */
+function pathsFor(provider: ProviderId): ProviderAssetPaths | undefined {
+  return PROVIDER_PATHS[provider];
+}
 
 // ============================================================================
 // Path Resolution
@@ -54,7 +62,7 @@ export function getProviderAssetDir(
   if (assetType === 'mcp') return null; // MCP uses config files, not a directory
 
   const key = assetType === 'skill' ? 'skills' : 'agents';
-  const relativePath = PROVIDER_PATHS[provider][key];
+  const relativePath = pathsFor(provider)?.[key];
   if (!relativePath) return null;
 
   return path.join(projectPath, relativePath);
@@ -89,7 +97,7 @@ export function getProviderAssetFilePath(
 export function isAssetTypeSupported(provider: ProviderId, assetType: AssetType): boolean {
   if (assetType === 'mcp') return true; // All providers support MCP
   const key = assetType === 'skill' ? 'skills' : 'agents';
-  return PROVIDER_PATHS[provider][key] !== null;
+  return (pathsFor(provider)?.[key] ?? null) !== null;
 }
 
 /**
@@ -100,7 +108,7 @@ export function getProviderMcpConfigPath(
   projectPath: string,
   provider: ProviderId,
 ): string | null {
-  const configPath = PROVIDER_PATHS[provider].mcpConfig;
+  const configPath = pathsFor(provider)?.mcpConfig;
   if (!configPath) return null;
   return path.join(projectPath, configPath);
 }
@@ -115,12 +123,12 @@ export function getProviderRelativeDir(
 ): string | null {
   if (assetType === 'mcp') return null;
   const key = assetType === 'skill' ? 'skills' : 'agents';
-  return PROVIDER_PATHS[provider][key];
+  return pathsFor(provider)?.[key] ?? null;
 }
 
 /**
  * Get provider paths configuration (for UI display).
  */
 export function getProviderPaths(provider: ProviderId): ProviderAssetPaths {
-  return { ...PROVIDER_PATHS[provider] };
+  return { ...(pathsFor(provider) ?? { skills: null, agents: null, mcpConfig: null }) };
 }

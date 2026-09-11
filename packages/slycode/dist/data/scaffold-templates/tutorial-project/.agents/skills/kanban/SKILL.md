@@ -100,7 +100,6 @@ Agent notes are a shared scratchpad on each card for passing context between age
 **Always identify yourself with `--agent`:**
 - Claude: `--agent "Claude"`
 - Codex: `--agent "Codex"`
-- Gemini: `--agent "Gemini"`
 - Notes added from the web UI are automatically tagged as `User`
 
 **Limits:** Max 30 notes per card, max 3000 characters per note.

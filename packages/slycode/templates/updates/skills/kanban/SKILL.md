@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.17.0
-updated: 2026-08-30
+version: 1.19.0
+updated: 2026-09-09
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -30,6 +30,7 @@ Manage kanban cards via CLI: `sly-kanban <command>`
 | `respond` | Reply to a cross-card prompt (--wait callback) |
 | `session` | Manage a card's terminal sessions (list, relink, link, dismiss, stop) |
 | `areas` | List available areas |
+| `projects` | List registered projects — the refs for `--project` and each project's cross-project setting |
 
 ## Card Identification
 
@@ -259,7 +260,6 @@ Agent notes are a shared scratchpad on each card for passing context between age
 **Always identify yourself with `--agent`:**
 - Claude: `--agent "Claude"`
 - Codex: `--agent "Codex"`
-- Gemini: `--agent "Gemini"`
 - OpenCode: `--agent "OpenCode"`
 - Notes added from the web UI are automatically tagged as `User`
 
@@ -663,6 +663,41 @@ The submit endpoint enforces three checks:
 
 Use `--force` to bypass all guards.
 
+### Targeting a card in another project
+
+Directors, automations and agents sometimes hand work to a card in a **different registered project** (a release here triggering copy changes on the website, say). The official — and only — route is the `--project` flag:
+
+```bash
+# Find the ref (id, session key, or name all work as --project values)
+sly-kanban projects
+
+# Prompt a card in another project
+sly-kanban prompt --project slycode-web 0053 "Update the providers page" --wait --timeout 300
+
+# Read-only commands accept --project too (show, search, board, notes list/search,
+# checklist list, problem list, status, questionnaire list/answers, session list)
+sly-kanban show --project slycode-web 0053
+sly-kanban notes --project "SlyCode Web" 0053 list
+```
+
+**The target project must have "Accept cross-project prompts" switched on** — its owner does that in the SlyCode web UI (that project's header → defaults popover). It is **off by default**, and there is no CLI setter. The flag is the target project's policy: `--project` to another project is gated by it **whoever is asking** — an agent session or a human at a shell alike. When it is off the prompt is refused before anything happens:
+
+```
+Refused: project "SlyCode Web" (slycode-web) does not accept cross-project prompts.
+...
+Tell the user the target project refused the prompt and leave the setting decision to them.
+```
+
+Exit code is `3` (distinct from ordinary failures). **If refused, stop and report to the user. There is no other official route** — do not look for one. The same exit code with a "matches more than one registered project" message means the registry has colliding session keys/aliases; report that too, the owner fixes the registry.
+
+What happens when it is accepted:
+
+- The session is created (or resumed) on the target project's own card, in the target project's directory, with the target project's default provider. It shows up on that card's Terminal tab like any other session.
+- The receiving agent sees a `Called from: <project> #NNNN (session …) — cross-project` line in its injected card context, so it knows who is asking (and whom it answers with `sly-kanban respond`).
+- Both boards log a `card_prompt` event; the target card's auto-status reads `Prompt received from <project>`.
+
+`--project` cannot write to another project's card (`update`, `move`, `notes add`, …are refused). If something on that card needs changing, ask the card to do it via `prompt`. The same explicit-instruction rule as ordinary cross-card prompts applies: only target another project when a user, card description, or automation tells you to.
+
 ## Card Session Management
 
 Every card's terminal sessions are bridge records that can occasionally need
@@ -702,8 +737,7 @@ targeted automatically); with multiple sessions the CLI asks you to specify.
   will fail visibly if the id is wrong. This is the all-else-fails recovery
   path: search the provider's transcript directory manually (Claude:
   `~/.claude/projects/<cwd-slug>/*.jsonl`, Codex:
-  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, Gemini:
-  `~/.gemini/tmp/<slug>/chats/session-*.json`), identify the conversation you
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`), identify the conversation you
   want by reading its content, then bind its id to the card.
 - **OpenCode keeps sessions in a database, not files.** Ids look like
   `ses_faf07c43bffelW0gFiGTTG1PSr` (accepted by `--guid`). List them with
@@ -733,3 +767,4 @@ The CLI provides clear error messages:
 - Changes are visible in the web UI on refresh
 - Archived cards are hidden by default (use `--include-archived` to see them). They live in cold storage (`documentation/kanban-archive.json`), managed automatically by the CLI/web — archive/unarchive round-trips cards between the files; never edit either file directly
 - All timestamps are in ISO format
+- For spoken summaries in the web terminal (`sly-messaging speak`, only when the user asks) or to change a project's TTS voice, load the **messaging** skill

@@ -995,3 +995,21 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .active-glow-board-btn { animation: none; box-shadow: 0 0 10px 3px rgba(56, 189, 248, 0.45); }
 }
+
+/* ========== Spoken replies: speech bubble (feature 086) ========== */
+
+/* One hairline that fills while a clip plays — the bubble's only motion. */
+@keyframes speech-bubble-fill {
+  from { width: 0; }
+  to { width: 100%; }
+}
+.speech-bubble-progress {
+  width: 0;
+  animation: speech-bubble-fill 24s linear forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .speech-bubble-progress {
+    animation: none;
+    width: 100%;
+  }
+}

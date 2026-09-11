@@ -3,7 +3,7 @@
  *
  * Single place the web server derives provider-dependent lists from
  * data/providers.json — badge detection rules, direct-path dot-dirs, labels —
- * instead of hardcoding 'claude' | 'codex' | 'gemini'. Server only (uses fs);
+ * instead of hardcoding a provider union. Server only (uses fs);
  * client components go through /api/providers (see use-providers.ts).
  */
 import fs from 'fs';

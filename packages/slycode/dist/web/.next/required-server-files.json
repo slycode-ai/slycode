@@ -19,6 +19,7 @@
       "jsx",
       "js"
     ],
+    "instrumentationClientInject": [],
     "poweredByHeader": true,
     "compress": true,
     "images": {
@@ -105,6 +106,7 @@
       }
     },
     "outputFileTracingRoot": "/home/ec2-user/projects/claude_master/web",
+    "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
       "default": {
@@ -145,7 +147,9 @@
     },
     "cacheHandlers": {},
     "experimental": {
-      "appNewScrollHandler": false,
+      "appNewScrollHandler": true,
+      "coldCacheBadge": false,
+      "devValidationWorker": true,
       "useSkewCookie": false,
       "cssChunking": true,
       "multiZoneDraftMode": false,
@@ -155,10 +159,15 @@
       "linkNoTouchStart": false,
       "caseSensitiveRoutes": false,
       "cachedNavigations": false,
-      "partialFallbacks": false,
       "dynamicOnHover": false,
-      "varyParams": false,
-      "prefetchInlining": false,
+      "useOffline": false,
+      "varyParams": true,
+      "optimisticRouting": true,
+      "instrumentationClientRouterTransitionEvents": false,
+      "prefetchInlining": {
+        "maxSize": 2048,
+        "maxBundleSize": 10240
+      },
       "preloadEntriesOnStart": true,
       "clientRouterFilter": true,
       "clientRouterFilterRedirects": false,
@@ -169,6 +178,7 @@
       "cpus": 1,
       "memoryBasedWorkersCount": false,
       "imgOptConcurrency": null,
+      "imgOptOperationCache": null,
       "imgOptTimeoutInSeconds": 7,
       "imgOptMaxInputPixels": 268402689,
       "imgOptSequentialRead": null,
@@ -178,6 +188,7 @@
       "nextScriptWorkers": false,
       "scrollRestoration": false,
       "externalDir": false,
+      "devMemoryThresholdRestart": true,
       "disableOptimizedLoading": false,
       "gzipSize": true,
       "craCompat": false,
@@ -185,6 +196,7 @@
       "fullySpecified": false,
       "swcTraceProfiling": false,
       "forceSwcTransforms": false,
+      "requestInsights": false,
       "largePageDataBytes": 128000,
       "typedEnv": false,
       "parallelServerCompiles": false,
@@ -194,16 +206,16 @@
       "webpackMemoryOptimizations": false,
       "optimizeServerReact": true,
       "strictRouteTypes": false,
-      "useTypeScriptCli": false,
-      "viewTransition": false,
+      "useTypeScriptCli": true,
       "removeUncaughtErrorAndRejectionListeners": false,
-      "validateRSCRequestHeaders": false,
+      "validateRSCRequestHeaders": true,
       "staleTimes": {
         "dynamic": 0,
         "static": 300
       },
       "reactDebugChannel": true,
       "serverComponentsHmrCache": true,
+      "serverComponentsHmrCancellation": false,
       "staticGenerationMaxConcurrency": 8,
       "staticGenerationMinPagesPerWorker": 25,
       "transitionIndicator": false,
@@ -217,9 +229,10 @@
       "hideLogsAfterAbort": false,
       "mcpServer": true,
       "turbopackFileSystemCacheForDev": true,
-      "turbopackFileSystemCacheForBuild": false,
+      "turbopackFileSystemCacheForBuild": true,
       "turbopackInferModuleSideEffects": true,
       "turbopackPluginRuntimeStrategy": "childProcesses",
+      "turbopackMemoryEvictionMode": "auto",
       "optimizePackageImports": [
         "lucide-react",
         "date-fns",
@@ -297,6 +310,10 @@
         "react-icons/vsc",
         "react-icons/wi"
       ],
+      "useCacheTimeout": 54,
+      "instantInsights": {
+        "validationLevel": "warning"
+      },
       "trustHostHeader": false,
       "isExperimentalCompile": false
     },
@@ -310,6 +327,7 @@
     "turbopack": {
       "root": "/home/ec2-user/projects/claude_master/web"
     },
+    "repoRoot": "/home/ec2-user/projects/claude_master",
     "distDirRoot": ".next"
   },
   "appDir": "/home/ec2-user/projects/claude_master/web",
