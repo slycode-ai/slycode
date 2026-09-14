@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import type { GitLogEntry } from './types';
 import { formatDate } from '@/lib/date-format';
+import Tooltip from '../Tooltip';
 
 interface LogViewProps {
   projectId: string;
@@ -42,19 +43,19 @@ export function LogView({ projectId, path, onShowCommit }: LogViewProps) {
       </p>
       <div className="max-w-3xl">
         {entries.map(e => (
-          <button
-            key={e.hash}
-            onClick={() => onShowCommit(e.hash, e.subject)}
-            title="Show what this commit changed"
-            className="flex w-full items-baseline gap-3 border-b border-(--cm-line) py-1.5 text-left font-mono text-[12px] transition-colors hover:bg-(--cm-panel3)"
-          >
+          <Tooltip key={e.hash} content={`${e.subject}\n\nShow what this commit changed`}>
+            <button
+              onClick={() => onShowCommit(e.hash, e.subject)}
+              className="flex w-full items-baseline gap-3 border-b border-(--cm-line) py-1.5 text-left font-mono text-[12px] transition-colors hover:bg-(--cm-panel3)"
+            >
             <span className="shrink-0 text-(--cm-atlas)">{e.shortHash}</span>
-            <span className="min-w-0 flex-1 truncate text-(--cm-text)" title={e.subject}>{e.subject}</span>
+            <span className="min-w-0 flex-1 truncate text-(--cm-text)">{e.subject}</span>
             <span className="hidden shrink-0 text-[10.5px] text-(--cm-muted) sm:inline">{e.author}</span>
             <span className="shrink-0 text-[10.5px] text-(--cm-faint)">
               {formatDate(e.date)}
             </span>
-          </button>
+            </button>
+          </Tooltip>
         ))}
         {entries.length === 0 && <p className="font-mono text-[12px] text-(--cm-faint)">no commits</p>}
       </div>

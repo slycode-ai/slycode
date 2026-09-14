@@ -89,11 +89,11 @@ const CLAUDE_SEPARATOR = /^\s*─{10,}\s*$/;
 const CODEX_FOOTER = /(·\s*(~|\/|[A-Za-z]:[\\/])|context left|tab to queue)/;
 
 /**
- * Claude prompt marker. Linux/macOS render `❯` (U+276F). On a Windows console
- * without WT_SESSION (exactly what node-pty/ConPTY gives the bridge) Claude
- * Code falls back to ASCII symbols and the prompt becomes a plain `>` — the
- * separator rows stay `─` (box drawing survives the fallback). Card #0351:
- * the `❯`-only check made every Windows Claude screen unrecognized.
+ * Claude prompt marker. `❯` (U+276F) everywhere — the REAL Windows capture
+ * (2026-09-13, ConPTY, card #0351) renders `❯` too; the Windows failure was
+ * the snapshot path joining rows (see terminal-snapshot.ts), not the glyph.
+ * ASCII `>` is kept only as a cheap tolerance for consoles that do fall back
+ * to ASCII symbols; it has no captured fixture.
  */
 const CLAUDE_PROMPT_MARKERS = ['❯', '>'] as const;
 

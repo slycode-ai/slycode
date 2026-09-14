@@ -18,6 +18,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import type { Response } from 'express';
+import { ClipStore, clipSourceKey, type ClipSummary, type StoredClip } from './clip-store.js';
 import { broadcastSse } from './sse.js';
 import { countSpeech, isEmptySpeech, exceedsLimits, resolveLimits, type SpeechLimits } from './speech-limits.js';
 import type { SessionKind } from './session-name.js';
@@ -230,6 +231,8 @@ export class SpeakerAuthority {
   private readonly subscribers = new Map<string, Response>();
   private readonly subscriberSet = new Set<Response>();
   private readonly outcomes = new Map<string, SpeakOutcome>();
+  /** Recent delivered clips per source so the card header can replay after a refresh. */
+  readonly clips = new ClipStore();
   private readonly outcomeMaxEntries: number;
   private readonly outcomeTtlMs: number;
   private readonly heartbeatMs: number;
@@ -378,6 +381,24 @@ export class SpeakerAuthority {
     });
     if (r.dead > 0) this.reconcileSubscribers();
     return r.sent;
+  }
+
+  // -- recent clips (replay after refresh) --
+
+  rememberClip(sessionName: string, clip: ClipEvent): void {
+    this.clips.remember(clipSourceKey(sessionName), clip);
+  }
+
+  listClips(sessionName: string): ClipSummary[] {
+    return this.clips.list(clipSourceKey(sessionName));
+  }
+
+  getClip(sessionName: string, clipId: string): StoredClip | null {
+    return this.clips.get(clipSourceKey(sessionName), clipId);
+  }
+
+  forgetClips(sessionName: string): number {
+    return this.clips.forget(clipSourceKey(sessionName));
   }
 
   // -- admission --

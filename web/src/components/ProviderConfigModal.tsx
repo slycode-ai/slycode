@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invalidateProviders, fetchProviders } from '@/lib/use-providers';
+import Tooltip from './Tooltip';
 
 interface Row {
   id: string;
@@ -131,24 +132,30 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
                   {r.displayName}
                 </span>
                 <div className="flex items-center">
-                  <button
-                    onClick={() => move(i, -1)}
-                    disabled={i === 0}
-                    title="Move up"
-                    aria-label={`Move ${r.displayName} up`}
-                    className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
-                  </button>
-                  <button
-                    onClick={() => move(i, 1)}
-                    disabled={i === rows.length - 1}
-                    title="Move down"
-                    aria-label={`Move ${r.displayName} down`}
-                    className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
-                  </button>
+                  <Tooltip content="Move up">
+                    <span className="inline-flex">
+                      <button
+                        onClick={() => move(i, -1)}
+                        disabled={i === 0}
+                        aria-label={`Move ${r.displayName} up`}
+                        className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
+                      </button>
+                    </span>
+                  </Tooltip>
+                  <Tooltip content="Move down">
+                    <span className="inline-flex">
+                      <button
+                        onClick={() => move(i, 1)}
+                        disabled={i === rows.length - 1}
+                        aria-label={`Move ${r.displayName} down`}
+                        className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+                    </span>
+                  </Tooltip>
                 </div>
                 <button
                   onClick={() => toggle(i)}

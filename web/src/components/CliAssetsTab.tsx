@@ -10,6 +10,7 @@ import { UpdatesView } from './UpdatesView';
 import { AssetAssistant } from './AssetAssistant';
 import { StoreImportDiffViewer } from './StoreImportDiffViewer';
 import { DeployReviewModal } from './DeployReviewModal';
+import Tooltip from './Tooltip';
 
 interface ProjectInfo {
   id: string;
@@ -405,10 +406,12 @@ export function CliAssetsTab() {
             </button>
           )}
 
+          <Tooltip content="Refresh assets" placement="bottom">
+          <span className="inline-flex">
           <button
             onClick={refreshCliAssets}
             disabled={refreshing}
-            title="Refresh assets"
+            aria-label="Refresh assets"
             className="rounded-md border border-void-200 bg-void-50 p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-700 dark:border-void-700 dark:bg-void-900 dark:hover:bg-void-800 dark:hover:text-void-200 disabled:opacity-50"
           >
             <svg
@@ -421,6 +424,8 @@ export function CliAssetsTab() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
+          </span>
+          </Tooltip>
         </div>
       </div>
 

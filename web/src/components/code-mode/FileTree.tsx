@@ -21,6 +21,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OpenTarget, TreeNode } from './types';
+import Tooltip from '../Tooltip';
 
 const TREE_STATE_CAP = 500;
 
@@ -187,21 +188,22 @@ function TreeRow({
   const active = node.path === activePath;
   return (
     <li>
-      <button
-        ref={active ? (el) => { activeRef.current = el; } : undefined}
-        onClick={() => onOpenFile({ path: node.path })}
-        style={pad}
-        className={`block w-full truncate rounded px-1 py-[1px] text-left leading-[1.9] ${
-          active
-            ? 'bg-(--cm-atlas-dim) text-(--cm-atlas)'
-            : node.ignored
-              ? 'text-(--cm-faint) italic hover:bg-(--cm-panel3) hover:text-(--cm-muted)'
-              : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
-        }`}
-        title={node.ignored ? `${node.path} · gitignored (editable)` : node.path}
-      >
-        {node.name}
-      </button>
+      <Tooltip content={node.ignored ? `${node.path} · gitignored (editable)` : node.path} placement="right">
+        <button
+          ref={active ? (el) => { activeRef.current = el; } : undefined}
+          onClick={() => onOpenFile({ path: node.path })}
+          style={pad}
+          className={`block w-full truncate rounded px-1 py-[1px] text-left leading-[1.9] ${
+            active
+              ? 'bg-(--cm-atlas-dim) text-(--cm-atlas)'
+              : node.ignored
+                ? 'text-(--cm-faint) italic hover:bg-(--cm-panel3) hover:text-(--cm-muted)'
+                : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
+          }`}
+        >
+          {node.name}
+        </button>
+      </Tooltip>
     </li>
   );
 }

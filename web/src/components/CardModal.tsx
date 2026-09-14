@@ -30,6 +30,7 @@ import { readStatus, formatStatusForPrompt } from '@/lib/status';
 import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
 import { formatDate } from '@/lib/date-format';
 import { formatCardNumber } from '@/lib/kanban-numbering';
+import Tooltip from './Tooltip';
 
 interface VoiceFocusTarget {
   type: 'input' | 'terminal';
@@ -1421,30 +1422,33 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                   autoFocus
                 />
               ) : (
-                <h2
-                  onClick={() => setIsEditingTitle(true)}
-                  className="cursor-pointer text-base sm:text-xl font-bold text-void-900 hover:text-blue-600 dark:text-void-100 dark:hover:text-blue-400"
-                  title="Click to edit"
-                >
-                  {card.title}
-                </h2>
+                <Tooltip content="Click to edit" placement="bottom">
+                  <h2
+                    onClick={() => setIsEditingTitle(true)}
+                    className="cursor-pointer text-base sm:text-xl font-bold text-void-900 hover:text-blue-600 dark:text-void-100 dark:hover:text-blue-400"
+                  >
+                    {card.title}
+                  </h2>
+                </Tooltip>
               )}
               {!isCreateMode && (
-                <button
-                  onClick={handleCopyTitle}
-                  className="mt-1 flex-shrink-0 rounded p-1 text-void-400 hover:bg-void-200/50 hover:text-void-600 dark:hover:bg-void-700/50 dark:hover:text-void-300"
-                  title={copiedTitle ? 'Copied!' : 'Copy title'}
-                >
-                  {copiedTitle ? (
-                    <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                  )}
-                </button>
+                <Tooltip content={copiedTitle ? 'Copied!' : 'Copy title'} placement="bottom">
+                  <button
+                    onClick={handleCopyTitle}
+                    aria-label={copiedTitle ? 'Copied!' : 'Copy title'}
+                    className="mt-1 flex-shrink-0 rounded p-1 text-void-400 hover:bg-void-200/50 hover:text-void-600 dark:hover:bg-void-700/50 dark:hover:text-void-300"
+                  >
+                    {copiedTitle ? (
+                      <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -1452,101 +1456,107 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             <div className="flex items-center gap-1.5 sm:gap-3">
             {/* Automation toggle switch — disabled for archived cards */}
             {!isCreateMode && (
-              <label className={`flex items-center gap-1 sm:gap-2 ${card.archived ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`} title={card.archived ? 'Unarchive card before enabling automation' : 'Toggle automation mode'}>
-                <span className={`hidden sm:inline text-xs font-medium ${isAutomation ? 'text-orange-600 dark:text-orange-400' : 'text-void-500 dark:text-void-400'}`}>
-                  Automation
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isAutomation}
-                  disabled={!!card.archived}
-                  onClick={() => {
-                    if (card.archived) return;
-                    if (isAutomation) {
-                      // Toggle off — remove automation config
-                      const { automation: _, ...rest } = card;
-                      onUpdate({ ...rest, updated_at: new Date().toISOString() } as KanbanCard);
-                      onAutomationToggle?.(false);
-                    } else {
-                      // Toggle on — add default automation config
-                      const defaultConfig: AutomationConfigType = {
-                        enabled: false,
-                        schedule: '',
-                        scheduleType: 'recurring',
-                        provider: 'claude',
-                        freshSession: false,
-                        reportViaMessaging: false,
-                      };
-                      onUpdate({ ...card, automation: defaultConfig, updated_at: new Date().toISOString() });
-                      onAutomationToggle?.(true);
-                    }
-                  }}
-                  className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                    card.archived ? 'cursor-not-allowed' : 'cursor-pointer'
-                  } ${
-                    isAutomation
-                      ? 'bg-orange-500 focus:ring-orange-500'
-                      : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      isAutomation ? 'translate-x-4' : 'translate-x-0'
+              <Tooltip content={card.archived ? 'Unarchive card before enabling automation' : 'Toggle automation mode'} placement="bottom">
+                <label className={`flex items-center gap-1 sm:gap-2 ${card.archived ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
+                  <span className={`hidden sm:inline text-xs font-medium ${isAutomation ? 'text-orange-600 dark:text-orange-400' : 'text-void-500 dark:text-void-400'}`}>
+                    Automation
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isAutomation}
+                    disabled={!!card.archived}
+                    onClick={() => {
+                      if (card.archived) return;
+                      if (isAutomation) {
+                        // Toggle off — remove automation config
+                        const { automation: _, ...rest } = card;
+                        onUpdate({ ...rest, updated_at: new Date().toISOString() } as KanbanCard);
+                        onAutomationToggle?.(false);
+                      } else {
+                        // Toggle on — add default automation config
+                        const defaultConfig: AutomationConfigType = {
+                          enabled: false,
+                          schedule: '',
+                          scheduleType: 'recurring',
+                          provider: 'claude',
+                          freshSession: false,
+                          reportViaMessaging: false,
+                        };
+                        onUpdate({ ...card, automation: defaultConfig, updated_at: new Date().toISOString() });
+                        onAutomationToggle?.(true);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      card.archived ? 'cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      isAutomation
+                        ? 'bg-orange-500 focus:ring-orange-500'
+                        : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
                     }`}
-                  />
-                </button>
-              </label>
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        isAutomation ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </Tooltip>
             )}
 
             {/* Archive toggle switch — disabled for automation cards */}
             {!isCreateMode && (
-              <label className={`flex items-center gap-1 sm:gap-2 ${isAutomation ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`} title={isAutomation ? 'Automation cards cannot be archived' : 'Archive card'}>
-                <span className={`hidden sm:inline text-xs font-medium ${card.archived ? 'text-red-600 dark:text-red-400' : 'text-void-500 dark:text-void-400'}`}>
-                  Archived
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={card.archived || false}
-                  disabled={isAutomation}
-                  onClick={() => {
-                    if (isAutomation) return;
-                    const updatedCard = {
-                      ...card,
-                      archived: !card.archived,
-                      updated_at: new Date().toISOString(),
-                    };
-                    onUpdate(updatedCard);
-                  }}
-                  className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                    isAutomation ? 'cursor-not-allowed' : 'cursor-pointer'
-                  } ${
-                    card.archived
-                      ? 'bg-red-500 focus:ring-red-500'
-                      : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      card.archived ? 'translate-x-4' : 'translate-x-0'
+              <Tooltip content={isAutomation ? 'Automation cards cannot be archived' : 'Archive card'} placement="bottom">
+                <label className={`flex items-center gap-1 sm:gap-2 ${isAutomation ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
+                  <span className={`hidden sm:inline text-xs font-medium ${card.archived ? 'text-red-600 dark:text-red-400' : 'text-void-500 dark:text-void-400'}`}>
+                    Archived
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={card.archived || false}
+                    disabled={isAutomation}
+                    onClick={() => {
+                      if (isAutomation) return;
+                      const updatedCard = {
+                        ...card,
+                        archived: !card.archived,
+                        updated_at: new Date().toISOString(),
+                      };
+                      onUpdate(updatedCard);
+                    }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      isAutomation ? 'cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      card.archived
+                        ? 'bg-red-500 focus:ring-red-500'
+                        : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
                     }`}
-                  />
-                </button>
-              </label>
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        card.archived ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </Tooltip>
             )}
 
             {/* Delete button */}
             {!isCreateMode && onDelete && (
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="rounded-lg p-2 text-void-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                title="Delete card permanently"
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
+              <Tooltip content="Delete card permanently" placement="bottom">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  aria-label="Delete card permanently"
+                  className="rounded-lg p-2 text-void-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </Tooltip>
             )}
 
             {/* Close button */}
@@ -1805,36 +1815,36 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 const isActive = session.provider === selectedProvider;
                 const isEnded = !session.resumable;
                 return (
-                  <button
-                    key={session.provider}
-                    onClick={() => setSelectedProvider(session.provider)}
-                    title={isEnded ? 'Session ended — not resumable' : undefined}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                      isActive ? 'shadow-sm' : isEnded ? 'opacity-35 hover:opacity-60' : 'opacity-60 hover:opacity-90'
-                    }`}
-                    style={isActive ? {
-                      backgroundColor: colors.bg,
-                      border: `1px solid ${colors.border}`,
-                      color: colors.color,
-                      ...(isEnded ? { filter: 'saturate(0.4)' } : {}),
-                    } : {
-                      border: '1px solid transparent',
-                      color: colors.color,
-                    }}
-                  >
-                    {isEnded ? (
-                      /* Hollow ring = session record with nothing live behind it */
-                      <div className="h-1.5 w-1.5 rounded-full border border-current opacity-70" />
-                    ) : (
-                      <div className="h-1.5 w-1.5 rounded-full" style={{
-                        backgroundColor: session.status === 'running' ? '#00e676'
-                          : session.status === 'detached' ? '#ff9800'
-                          : '#6b7280',
-                        boxShadow: session.status === 'running' ? '0 0 4px rgba(0, 230, 118, 0.6)' : 'none',
-                      }} />
-                    )}
-                    {session.displayName}
-                  </button>
+                  <Tooltip key={session.provider} content={isEnded ? 'Session ended — not resumable' : undefined}>
+                    <button
+                      onClick={() => setSelectedProvider(session.provider)}
+                      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+                        isActive ? 'shadow-sm' : isEnded ? 'opacity-35 hover:opacity-60' : 'opacity-60 hover:opacity-90'
+                      }`}
+                      style={isActive ? {
+                        backgroundColor: colors.bg,
+                        border: `1px solid ${colors.border}`,
+                        color: colors.color,
+                        ...(isEnded ? { filter: 'saturate(0.4)' } : {}),
+                      } : {
+                        border: '1px solid transparent',
+                        color: colors.color,
+                      }}
+                    >
+                      {isEnded ? (
+                        /* Hollow ring = session record with nothing live behind it */
+                        <div className="h-1.5 w-1.5 rounded-full border border-current opacity-70" />
+                      ) : (
+                        <div className="h-1.5 w-1.5 rounded-full" style={{
+                          backgroundColor: session.status === 'running' ? '#00e676'
+                            : session.status === 'detached' ? '#ff9800'
+                            : '#6b7280',
+                          boxShadow: session.status === 'running' ? '0 0 4px rgba(0, 230, 118, 0.6)' : 'none',
+                        }} />
+                      )}
+                      {session.displayName}
+                    </button>
+                  </Tooltip>
                 );
               })}
               {/* "+" button — always visible on terminal tab */}
@@ -2028,72 +2038,76 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                     <div className="flex items-center gap-1">
                       <span className="text-xs font-medium text-void-500 dark:text-void-400">Docs:</span>
                       {hasDesign && (
-                        <button
-                          onClick={() => setActiveTab('design')}
-                          className="relative rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
-                          title={designRefs.join('\n')}
-                        >
-                          {/* Clipboard/pencil icon for design */}
-                          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                          </svg>
-                          {designRefs.length > 1 && (
-                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                              {designRefs.length}
-                            </span>
-                          )}
-                        </button>
+                        <Tooltip content={designRefs.join('\n')}>
+                          <button
+                            onClick={() => setActiveTab('design')}
+                            className="relative rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
+                          >
+                            {/* Clipboard/pencil icon for design */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
+                            {designRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {designRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
                       )}
                       {hasFeature && (
-                        <button
-                          onClick={() => setActiveTab('feature')}
-                          className="relative rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                          title={featureRefs.join('\n')}
-                        >
-                          {/* Checklist icon for feature */}
-                          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                          </svg>
-                          {featureRefs.length > 1 && (
-                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                              {featureRefs.length}
-                            </span>
-                          )}
-                        </button>
+                        <Tooltip content={featureRefs.join('\n')}>
+                          <button
+                            onClick={() => setActiveTab('feature')}
+                            className="relative rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                          >
+                            {/* Checklist icon for feature */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
+                            {featureRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {featureRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
                       )}
                       {hasHtml && (
-                        <button
-                          onClick={() => setActiveTab('html')}
-                          className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
-                          title={htmlRefs.join('\n')}
-                        >
-                          {/* Code-brackets icon for HTML */}
-                          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                          </svg>
-                          {htmlRefs.length > 1 && (
-                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff6a33] px-1 font-mono text-[10px] font-bold leading-none text-white">
-                              {htmlRefs.length}
-                            </span>
-                          )}
-                        </button>
+                        <Tooltip content={htmlRefs.join('\n')}>
+                          <button
+                            onClick={() => setActiveTab('html')}
+                            className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
+                          >
+                            {/* Code-brackets icon for HTML */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                            </svg>
+                            {htmlRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff6a33] px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {htmlRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
                       )}
                       {hasTest && (
-                        <button
-                          onClick={() => setActiveTab('test')}
-                          className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-                          title={testRefs.join('\n')}
-                        >
-                          {/* Checkmark box icon for test */}
-                          <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          {testRefs.length > 1 && (
-                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                              {testRefs.length}
-                            </span>
-                          )}
-                        </button>
+                        <Tooltip content={testRefs.join('\n')}>
+                          <button
+                            onClick={() => setActiveTab('test')}
+                            className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+                          >
+                            {/* Checkmark box icon for test */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {testRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {testRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   </>
@@ -2383,21 +2397,25 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                               </span>
                             )}
                             {note.summary && (
-                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title={`Summary of ${note.summarizedCount ?? '?'} notes${note.dateRange ? ` (${note.dateRange})` : ''}`}>
-                                Summary
-                              </span>
+                              <Tooltip content={`Summary of ${note.summarizedCount ?? '?'} notes${note.dateRange ? ` (${note.dateRange})` : ''}`}>
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                  Summary
+                                </span>
+                              </Tooltip>
                             )}
                             <span className="text-xs text-void-400">{timeAgo}</span>
                           </div>
-                          <button
-                            onClick={() => deleteNote(note.id)}
-                            className="rounded p-1 text-void-400 opacity-0 transition-opacity hover:bg-void-200 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-void-700 dark:hover:text-red-400"
-                            title="Delete note"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
+                          <Tooltip content="Delete note">
+                            <button
+                              onClick={() => deleteNote(note.id)}
+                              aria-label="Delete note"
+                              className="rounded p-1 text-void-400 opacity-0 transition-opacity hover:bg-void-200 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-void-700 dark:hover:text-red-400"
+                            >
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </Tooltip>
                         </div>
                         <p className="whitespace-pre-wrap text-sm text-void-700 dark:text-void-200">
                           {note.text}
@@ -2466,6 +2484,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 cardId={card.id}
                 cardAreas={card.areas}
                 projectId={projectId}
+                scheduledPrompts={card.scheduled_prompts}
                 initialProvider={selectedProvider ?? undefined}
                 parentControlsProvider={hasMultipleSessions}
                 footerClassName={terminalColor}
@@ -2526,15 +2545,17 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 {questionnaireWarning}
               </div>
             </div>
-            <button
-              onClick={() => setQuestionnaireWarning(null)}
-              className="shrink-0 rounded p-1 text-amber-700/70 transition-colors hover:bg-amber-200/50 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
-              title="Dismiss"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <Tooltip content="Dismiss">
+              <button
+                onClick={() => setQuestionnaireWarning(null)}
+                aria-label="Dismiss"
+                className="shrink-0 rounded p-1 text-amber-700/70 transition-colors hover:bg-amber-200/50 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
         )}
 

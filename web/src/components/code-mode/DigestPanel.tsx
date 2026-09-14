@@ -13,6 +13,7 @@
 
 import type { AtlasSnapshot } from './types';
 import { relTime } from './AtlasMap';
+import Tooltip from '../Tooltip';
 
 interface DigestTabProps {
   snapshot: AtlasSnapshot;
@@ -63,10 +64,10 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
             const rarelyViewed = debt !== undefined && debt.commits >= 3 && debt.views === 0;
             return (
               <div key={entry.area} className="min-w-0">
+                <Tooltip content={`Open ${meta?.name ?? entry.area}`}>
                 <button
                   onClick={() => onEnterArea(entry.area)}
                   className="flex items-center gap-1.5 font-mono text-[10.5px] text-(--cm-muted) transition-colors hover:text-(--cm-text)"
-                  title={`Open ${meta?.name ?? entry.area}`}
                 >
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta?.color ?? 'var(--cm-atlas)' }} />
                   <span className="font-semibold">{meta?.name ?? entry.area}</span>
@@ -78,6 +79,7 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
                     </span>
                   )}
                 </button>
+                </Tooltip>
                 <p className="mt-0.5 text-[12px] leading-relaxed text-(--cm-muted)">{entry.summary}</p>
               </div>
             );
@@ -90,17 +92,17 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
             <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Worth a look</p>
             <div className="space-y-0.5">
               {digest.notable.map((n, i) => (
-                <button
-                  key={i}
-                  onClick={() => onOpenFile(n.file, n.line)}
-                  className="block w-full rounded px-1.5 py-1 text-left transition-colors hover:bg-(--cm-panel3)"
-                  title={`${n.file}${n.line ? ':' + n.line : ''}`}
-                >
-                  <span className="block truncate font-mono text-[10.5px] text-(--cm-atlas)">
-                    {n.file.split('/').slice(-2).join('/')}{n.line ? `:${n.line}` : ''}
-                  </span>
-                  <span className="block text-[10.5px] leading-snug text-(--cm-muted)">{n.note}</span>
-                </button>
+                <Tooltip key={i} content={`${n.file}${n.line ? ':' + n.line : ''}`}>
+                  <button
+                    onClick={() => onOpenFile(n.file, n.line)}
+                    className="block w-full rounded px-1.5 py-1 text-left transition-colors hover:bg-(--cm-panel3)"
+                  >
+                    <span className="block truncate font-mono text-[10.5px] text-(--cm-atlas)">
+                      {n.file.split('/').slice(-2).join('/')}{n.line ? `:${n.line}` : ''}
+                    </span>
+                    <span className="block text-[10.5px] leading-snug text-(--cm-muted)">{n.note}</span>
+                  </button>
+                </Tooltip>
               ))}
             </div>
           </div>

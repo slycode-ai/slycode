@@ -1,5 +1,7 @@
 'use client';
 
+import Tooltip from './Tooltip';
+
 type FileCategory = 'staged' | 'unstaged' | 'untracked';
 
 interface ChangedFile {
@@ -79,13 +81,14 @@ export function BranchFileList({ files, hue, dark }: BranchFileListProps) {
                 >
                   {file.status}
                 </span>
-                <span
-                  className="text-xs text-white/75 truncate"
-                  style={{ fontFamily: 'var(--font-jetbrains-mono, monospace)', direction: 'rtl', textAlign: 'left' }}
-                  title={file.path}
-                >
-                  {file.path}
-                </span>
+                <Tooltip content={file.path}>
+                  <span
+                    className="text-xs text-white/75 truncate"
+                    style={{ fontFamily: 'var(--font-jetbrains-mono, monospace)', direction: 'rtl', textAlign: 'left' }}
+                  >
+                    {file.path}
+                  </span>
+                </Tooltip>
               </div>
             );
           })}

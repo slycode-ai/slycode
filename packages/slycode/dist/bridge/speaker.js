@@ -17,6 +17,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import { ClipStore, clipSourceKey } from './clip-store.js';
 import { broadcastSse } from './sse.js';
 import { countSpeech, isEmptySpeech, exceedsLimits, resolveLimits } from './speech-limits.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,8 @@ export class SpeakerAuthority {
     subscribers = new Map();
     subscriberSet = new Set();
     outcomes = new Map();
+    /** Recent delivered clips per source so the card header can replay after a refresh. */
+    clips = new ClipStore();
     outcomeMaxEntries;
     outcomeTtlMs;
     heartbeatMs;
@@ -278,6 +281,19 @@ export class SpeakerAuthority {
         if (r.dead > 0)
             this.reconcileSubscribers();
         return r.sent;
+    }
+    // -- recent clips (replay after refresh) --
+    rememberClip(sessionName, clip) {
+        this.clips.remember(clipSourceKey(sessionName), clip);
+    }
+    listClips(sessionName) {
+        return this.clips.list(clipSourceKey(sessionName));
+    }
+    getClip(sessionName, clipId) {
+        return this.clips.get(clipSourceKey(sessionName), clipId);
+    }
+    forgetClips(sessionName) {
+        return this.clips.forget(clipSourceKey(sessionName));
     }
     // -- admission --
     admit(input) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { docFileName } from '@/lib/doc-refs';
+import Tooltip from './Tooltip';
 
 /**
  * Markdown multi-attachment tab (feature 074) — index list + document viewer.
@@ -128,20 +129,24 @@ export function DocAttachmentsTab({ refs, projectId, cardId, kind, onUnlink }: D
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-void-900 dark:text-void-100">{docFileName(ref)}</div>
-                <div className="mt-0.5 truncate font-mono text-xs text-void-500 dark:text-void-400" title={ref}>
-                  {ref}
-                </div>
+                <Tooltip content={ref}>
+                  <div className="mt-0.5 truncate font-mono text-xs text-void-500 dark:text-void-400">
+                    {ref}
+                  </div>
+                </Tooltip>
               </div>
             </button>
-            <button
-              onClick={() => onUnlink(ref)}
-              className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-              title={`Unlink ${docFileName(ref)} (removes the reference; file is not deleted)`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-            </button>
+            <Tooltip content={`Unlink ${docFileName(ref)} (removes the reference; file is not deleted)`}>
+              <button
+                onClick={() => onUnlink(ref)}
+                className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                aria-label={`Unlink ${docFileName(ref)}`}
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
         ))}
       </div>
@@ -154,44 +159,52 @@ export function DocAttachmentsTab({ refs, projectId, cardId, kind, onUnlink }: D
       <div className="flex items-center justify-between gap-2 border-b border-void-200 px-4 py-2 text-xs dark:border-void-700">
         <div className="flex min-w-0 items-center gap-2">
           {refs.length > 1 && (
-            <button
-              onClick={() => setSelectedRef(null)}
-              className="flex shrink-0 items-center gap-1 text-neon-blue-500 hover:text-neon-blue-400"
-              title="All documents"
-            >
-              <span aria-hidden>←</span>
-              <span className="hidden sm:inline">All</span>
-            </button>
+            <Tooltip content="All documents" placement="bottom">
+              <button
+                onClick={() => setSelectedRef(null)}
+                className="flex shrink-0 items-center gap-1 text-neon-blue-500 hover:text-neon-blue-400"
+                aria-label="All documents"
+              >
+                <span aria-hidden>←</span>
+                <span className="hidden sm:inline">All</span>
+              </button>
+            </Tooltip>
           )}
-          <button
-            onClick={() => handleCopyPath(effectiveRef)}
-            className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
-            title={copiedPath ? 'Copied!' : `Copy path: ${effectiveRef}`}
-          >
-            {copiedPath ? (
-              <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            ) : (
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-              </svg>
-            )}
-          </button>
-          <span className="truncate font-mono text-void-700 dark:text-void-300" title={effectiveRef}>
-            {docFileName(effectiveRef)}
-          </span>
+          <Tooltip content={copiedPath ? 'Copied!' : `Copy path: ${effectiveRef}`} placement="bottom">
+            <button
+              onClick={() => handleCopyPath(effectiveRef)}
+              className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
+              aria-label="Copy path"
+            >
+              {copiedPath ? (
+                <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip content={effectiveRef} placement="bottom">
+            <span className="truncate font-mono text-void-700 dark:text-void-300">
+              {docFileName(effectiveRef)}
+            </span>
+          </Tooltip>
         </div>
-        <button
-          onClick={() => onUnlink(effectiveRef)}
-          className="flex shrink-0 items-center gap-1 rounded border border-red-300/40 px-2 py-1 text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-500/30 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-          title="Unlink this document (removes the reference; file is not deleted)"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-          </svg>
-          <span className="hidden sm:inline">Unlink</span>
-        </button>
+        <Tooltip content="Unlink this document (removes the reference; file is not deleted)" placement="bottom">
+          <button
+            onClick={() => onUnlink(effectiveRef)}
+            className="flex shrink-0 items-center gap-1 rounded border border-red-300/40 px-2 py-1 text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-500/30 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+            aria-label="Unlink this document"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            <span className="hidden sm:inline">Unlink</span>
+          </button>
+        </Tooltip>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {(loading || doc?.path !== effectiveRef) && (

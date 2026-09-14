@@ -195,6 +195,8 @@ async function runSpeak(deps, req, requestId, fingerprint) {
         expiresAt: new Date(now() + CLIP_TTL_MS).toISOString(),
     };
     const sent = deps.speaker.deliver(clip);
+    if (sent >= 0)
+        deps.speaker.rememberClip?.(resolved, clip);
     if (sent < 0) {
         return record({ status: 409, body: { ok: false, code: 'revoked', message: 'sound was switched off while rendering; the clip was not played (credit already spent)' } });
     }

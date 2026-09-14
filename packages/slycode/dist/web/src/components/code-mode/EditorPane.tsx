@@ -24,6 +24,7 @@ import { useVoice } from '@/contexts/VoiceContext';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import type { BlameLine, OpenTarget } from './types';
 import { formatDate } from '@/lib/date-format';
+import Tooltip from '../Tooltip';
 
 // Self-host Monaco (module-level, once).
 loader.config({ paths: { vs: '/monaco/vs' } });
@@ -438,17 +439,21 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
                 isActive ? 'bg-(--cm-code-bg) text-(--cm-text)' : 'text-(--cm-muted) hover:text-(--cm-text)'
               }`}
             >
-              <button onClick={() => onSelectFile(path)} className="px-3 py-1.5" title={path}>
-                {st?.dirty ? <span className="mr-1 text-(--cm-stale)">●</span> : null}
-                {path.split('/').pop()}
-              </button>
-              <button
-                onClick={() => onCloseFile(path)}
-                className="pr-2 text-(--cm-faint) opacity-0 hover:text-(--cm-text) group-hover:opacity-100"
-                title="Close"
-              >
-                ✕
-              </button>
+              <Tooltip content={path} placement="bottom">
+                <button onClick={() => onSelectFile(path)} className="px-3 py-1.5">
+                  {st?.dirty ? <span className="mr-1 text-(--cm-stale)">●</span> : null}
+                  {path.split('/').pop()}
+                </button>
+              </Tooltip>
+              <Tooltip content="Close" placement="bottom">
+                <button
+                  onClick={() => onCloseFile(path)}
+                  aria-label="Close"
+                  className="pr-2 text-(--cm-faint) opacity-0 hover:text-(--cm-text) group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </Tooltip>
             </span>
           );
         })}
@@ -456,24 +461,26 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
         <span className="ml-auto flex shrink-0 items-center gap-1.5 px-2">
           {notice && <span className="font-mono text-[10.5px] text-(--cm-atlas)">{notice}</span>}
           {onExplain && (
-            <button
-              onClick={triggerExplain}
-              className="rounded-full border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] text-(--cm-atlas) hover:brightness-110"
-              title={hasSelection ? 'Explain the selected code in the Atlas terminal' : 'Explain the word/line at the cursor in the Atlas terminal'}
-            >
-              {hasSelection ? '✦ Explain selection' : '✦ Explain'}
-            </button>
+            <Tooltip content={hasSelection ? 'Explain the selected code in the Atlas terminal' : 'Explain the word/line at the cursor in the Atlas terminal'} placement="bottom">
+              <button
+                onClick={triggerExplain}
+                className="rounded-full border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] text-(--cm-atlas) hover:brightness-110"
+              >
+                {hasSelection ? '✦ Explain selection' : '✦ Explain'}
+              </button>
+            </Tooltip>
           )}
           {activeIsMarkdown && (
-            <button
-              onClick={toggleMdPreview}
-              className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
-                showPreview ? 'border-(--cm-atlas) text-(--cm-atlas)' : 'border-(--cm-line) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
-              }`}
-              title={showPreview ? 'Showing rendered Markdown — switch to raw source to edit' : 'Show rendered Markdown (read-only)'}
-            >
-              Preview
-            </button>
+            <Tooltip content={showPreview ? 'Showing rendered Markdown — switch to raw source to edit' : 'Show rendered Markdown (read-only)'} placement="bottom">
+              <button
+                onClick={toggleMdPreview}
+                className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+                  showPreview ? 'border-(--cm-atlas) text-(--cm-atlas)' : 'border-(--cm-line) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
+                }`}
+              >
+                Preview
+              </button>
+            </Tooltip>
           )}
           <button
             onClick={toggleBlame}
@@ -511,29 +518,32 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
               ? 'This file changed on disk after you loaded it — saving would overwrite those changes.'
               : 'This file changed on disk while you have unsaved edits.'}
           </p>
-          <button
-            onClick={() => refreshFile(conflict.path, true)}
-            className="shrink-0 rounded border border-(--cm-stale) px-2 py-0.5 font-mono text-[10px] text-(--cm-stale) hover:brightness-110"
-            title="Replace your buffer with the disk version (discards your edits)"
-          >
-            Reload from disk
-          </button>
+          <Tooltip content="Replace your buffer with the disk version (discards your edits)" placement="bottom">
+            <button
+              onClick={() => refreshFile(conflict.path, true)}
+              className="shrink-0 rounded border border-(--cm-stale) px-2 py-0.5 font-mono text-[10px] text-(--cm-stale) hover:brightness-110"
+            >
+              Reload from disk
+            </button>
+          </Tooltip>
           {conflict.source === 'save' ? (
-            <button
-              onClick={() => save(conflict.path, { force: true })}
-              className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
-              title="Write your buffer over the disk version"
-            >
-              Overwrite
-            </button>
+            <Tooltip content="Write your buffer over the disk version" placement="bottom">
+              <button
+                onClick={() => save(conflict.path, { force: true })}
+                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+              >
+                Overwrite
+              </button>
+            </Tooltip>
           ) : (
-            <button
-              onClick={() => setConflict(null)}
-              className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
-              title="Keep editing your version — saving will ask again if disk still differs"
-            >
-              Keep my version
-            </button>
+            <Tooltip content="Keep editing your version — saving will ask again if disk still differs" placement="bottom">
+              <button
+                onClick={() => setConflict(null)}
+                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+              >
+                Keep my version
+              </button>
+            </Tooltip>
           )}
         </div>
       )}

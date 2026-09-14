@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DbAnnotations, DbIntrospection, DbSource, DbTable } from './types';
+import Tooltip from '../Tooltip';
 
 interface DbSchemaViewProps {
   projectId: string;
@@ -142,21 +143,24 @@ function TableCard({ table, annotation, onJump }: {
           const fk = table.fks.find(f => f.column === col.name);
           const note = annotation?.columns?.[col.name];
           return (
-            <div key={col.name} className="flex items-baseline gap-1.5 font-mono text-[10.5px]" title={note}>
+            <Tooltip key={col.name} content={note}>
+            <div className="flex items-baseline gap-1.5 font-mono text-[10.5px]">
               <span className={col.pk ? 'text-(--cm-atlas)' : 'text-(--cm-muted)'}>
                 {col.pk ? '●' : '·'} {col.name}
               </span>
               <span className="text-(--cm-faint)">{col.type}{col.nullable ? '?' : ''}</span>
               {fk && (
-                <button
-                  onClick={() => onJump(fk.refTable)}
-                  title={`references ${fk.refTable}${fk.refColumn ? '.' + fk.refColumn : ''}`}
-                  className="ml-auto rounded bg-(--cm-atlas-dim) px-1 py-px text-[9px] text-(--cm-atlas) transition-all hover:brightness-125"
-                >
-                  → {fk.refTable}
-                </button>
+                <Tooltip content={`references ${fk.refTable}${fk.refColumn ? '.' + fk.refColumn : ''}`}>
+                  <button
+                    onClick={() => onJump(fk.refTable)}
+                    className="ml-auto rounded bg-(--cm-atlas-dim) px-1 py-px text-[9px] text-(--cm-atlas) transition-all hover:brightness-125"
+                  >
+                    → {fk.refTable}
+                  </button>
+                </Tooltip>
               )}
             </div>
+            </Tooltip>
           );
         })}
       </div>

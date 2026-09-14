@@ -1,6 +1,7 @@
 import os from 'os';
 import { randomUUID } from 'crypto';
 import { broadcastSse } from './sse.js';
+import { bufferText } from './terminal-snapshot.js';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import { isCommandAllowed } from './provider-registry.js';
 import { getTransport } from './transport/index.js';
@@ -2233,15 +2234,14 @@ export class SessionManager {
         }
         try {
             const scrollback = lines || 20;
-            const raw = session.serializeAddon.serialize({ scrollback });
-            // Strip ANSI escape codes
-            const stripped = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                .replace(/\x1b\][^\x07]*\x07/g, '') // OSC sequences
-                .replace(/\x1b[()][A-Z0-9]/g, '') // Character set
-                .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ''); // Control chars (keep \n \r \t)
-            // Take last N lines
-            const allLines = stripped.split('\n');
-            const lastLines = allLines.slice(-scrollback).join('\n').trim();
+            // Row-accurate read of the active buffer (card #0351). SerializeAddon
+            // glues a row to the next whenever xterm flagged it `isWrapped`; Windows
+            // ConPTY paints every row full-width and auto-wraps instead of writing
+            // \r\n, so on Windows the addon joined the Claude separator row with the
+            // ❯ row ("────…────❯ ") and the submit classifier could never find the
+            // input box. bufferText() returns one string per physical row (already
+            // plain text — no ANSI to strip, no trailing mode residue).
+            const lastLines = bufferText(session.headlessTerminal, scrollback).trim();
             const lineCount = lastLines.split('\n').length;
             return {
                 content: lastLines,

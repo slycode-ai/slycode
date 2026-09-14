@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getProviderColor } from '@/lib/provider-colors';
 import type { DeployPlanFile, DeployTargetPlan, PendingChange } from '@/lib/types';
+import Tooltip from './Tooltip';
 
 interface Props {
   title: string;
@@ -316,9 +317,11 @@ function TargetRow({ target, excluded, onToggle }: {
             {provider}
           </span>
           {target.targetDir && (
-            <span className="hidden truncate font-mono text-[11px] text-void-400 dark:text-void-500 sm:inline" title={target.targetDir}>
-              {target.targetDir}
-            </span>
+            <Tooltip content={target.targetDir}>
+              <span className="hidden truncate font-mono text-[11px] text-void-400 dark:text-void-500 sm:inline">
+                {target.targetDir}
+              </span>
+            </Tooltip>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -339,11 +342,11 @@ function TargetRow({ target, excluded, onToggle }: {
               {excluded ? 'Include anyway (overwrite newer copy)' : 'Exclude'}
             </button>
           ) : (
+            <Tooltip content={excluded ? 'Restore this change' : 'Drop this change from the batch'} placement="left">
             <button
               onClick={onToggle}
               className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-700 dark:hover:bg-void-800 dark:hover:text-void-200"
               aria-label={excluded ? `Restore ${change.assetName} for ${target.projectName}` : `Exclude ${change.assetName} for ${target.projectName}`}
-              title={excluded ? 'Restore this change' : 'Drop this change from the batch'}
             >
               {excluded ? (
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -355,6 +358,7 @@ function TargetRow({ target, excluded, onToggle }: {
                 </svg>
               )}
             </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -399,15 +403,19 @@ function TargetRow({ target, excluded, onToggle }: {
                 const dim = f.fate === 'keep' || f.fate === 'unchanged' || f.fate === 'skipped';
                 return (
                   <div key={f.path} className="flex items-center justify-between gap-2 py-px">
-                    <span className={`truncate ${dim ? 'text-void-400 dark:text-void-500' : 'text-void-700 dark:text-void-300'}`} title={f.path}>
-                      {f.path !== 'SKILL.md' && (
-                        <span className="text-void-300 dark:text-void-600">{isLast ? '└── ' : '├── '}</span>
-                      )}
-                      {f.path}
-                    </span>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`} title={badge.title}>
-                      {badge.label}
-                    </span>
+                    <Tooltip content={f.path}>
+                      <span className={`truncate ${dim ? 'text-void-400 dark:text-void-500' : 'text-void-700 dark:text-void-300'}`}>
+                        {f.path !== 'SKILL.md' && (
+                          <span className="text-void-300 dark:text-void-600">{isLast ? '└── ' : '├── '}</span>
+                        )}
+                        {f.path}
+                      </span>
+                    </Tooltip>
+                    <Tooltip content={badge.title} placement="left">
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    </Tooltip>
                   </div>
                 );
               })}

@@ -8,6 +8,7 @@ import type {
   AnswerableItem,
 } from '@/lib/questionnaire';
 import { formatDateTime } from '@/lib/date-format';
+import Tooltip from './Tooltip';
 
 interface IndexItem {
   ref: string;
@@ -365,15 +366,17 @@ export function QuestionnaireTab({
               </div>
             </button>
             {onUnlink && (
-              <button
-                onClick={() => onUnlink(item.ref)}
-                className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                title="Unlink this questionnaire (removes the reference; file is not deleted)"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-              </button>
+              <Tooltip content="Unlink this questionnaire (removes the reference; file is not deleted)">
+                <button
+                  onClick={() => onUnlink(item.ref)}
+                  className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                  aria-label="Unlink this questionnaire"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                </button>
+              </Tooltip>
             )}
           </div>
         ))}
@@ -490,9 +493,11 @@ function SaveStatusBadge({ state, error }: { state: SaveState; error: string | n
     );
   }
   return (
-    <span className="text-xs text-red-600 dark:text-red-400" title={error || ''}>
-      Save failed
-    </span>
+    <Tooltip content={error || ''}>
+      <span className="text-xs text-red-600 dark:text-red-400">
+        Save failed
+      </span>
+    </Tooltip>
   );
 }
 
@@ -569,13 +574,15 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
             </button>
           ))}
           {item.answer !== null && (
-            <button
-              onClick={() => onChange(null)}
-              className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
-              title="Clear"
-            >
-              ✕
-            </button>
+            <Tooltip content="Clear">
+              <button
+                onClick={() => onChange(null)}
+                className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
+                aria-label="Clear"
+              >
+                ✕
+              </button>
+            </Tooltip>
           )}
         </div>
       );
@@ -643,13 +650,15 @@ function BooleanInput({
           </button>
         )}
         {item.answer !== null && (
-          <button
-            onClick={() => onChange(null)}
-            className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
-            title="Clear"
-          >
-            ✕
-          </button>
+          <Tooltip content="Clear">
+            <button
+              onClick={() => onChange(null)}
+              className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
+              aria-label="Clear"
+            >
+              ✕
+            </button>
+          </Tooltip>
         )}
       </div>
       {isOther && (
@@ -845,27 +854,29 @@ function ChoiceFooter({
     <div className="flex items-center justify-between pt-0.5">
       <div>
         {canClear && (
-          <button
-            onClick={onClear}
-            className="text-xs text-void-600 hover:text-void-800 dark:text-void-300 dark:hover:text-void-100"
-            title="Clear selection"
-          >
-            Clear
-          </button>
+          <Tooltip content="Clear selection">
+            <button
+              onClick={onClear}
+              className="text-xs text-void-600 hover:text-void-800 dark:text-void-300 dark:hover:text-void-100"
+            >
+              Clear
+            </button>
+          </Tooltip>
         )}
       </div>
       <div>
         {canAddOther && (
-          <button
-            onClick={onAddOther}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-500 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-400"
-            title="Add an 'Other' option for a free-text answer"
-          >
-            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            Other
-          </button>
+          <Tooltip content="Add an 'Other' option for a free-text answer">
+            <button
+              onClick={onAddOther}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-500 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-400"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              Other
+            </button>
+          </Tooltip>
         )}
       </div>
     </div>

@@ -422,8 +422,14 @@ export async function POST(request: NextRequest) {
                   delete mergedCard.status;
                 }
               } else {
-                // Edit/create: use frontend version fully
+                // Edit/create: use frontend version fully — except server-owned
+                // fields, which always come from disk. scheduled_prompts is
+                // written by the scheduler tick between client reads; a stale
+                // client edit must never resurrect a fired send (card #0352).
+                const diskCard = diskCardMap.get(card.id);
                 mergedCard = { ...card, last_modified_by: 'web' };
+                if (diskCard?.scheduled_prompts) mergedCard.scheduled_prompts = diskCard.scheduled_prompts;
+                else delete mergedCard.scheduled_prompts;
               }
 
               changedCardMap.set(card.id, { card: mergedCard, stage: stage as KanbanStage });

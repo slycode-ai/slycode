@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { BranchInfo, GitFileStatus, GitStatusResult, OpenTarget } from './types';
+import Tooltip from '../Tooltip';
 
 const STATUS_COLORS: Record<string, string> = {
   M: 'text-amber-500',
@@ -88,6 +89,7 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-(--cm-line) px-2.5 py-2">
+        <Tooltip content="Switch or create a branch" placement="bottom">
         <button
           onClick={() => {
             setBranchesOpen(o => !o);
@@ -95,11 +97,11 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
             if (!branchesOpen) loadBranches();
           }}
           className="flex min-w-0 items-center gap-1 truncate font-mono text-[11.5px] font-semibold text-(--cm-text) hover:text-(--cm-atlas)"
-          title="Switch or create a branch"
         >
           ⎇ {status.branch}
           <span className="text-[9px] text-(--cm-faint)">{branchesOpen ? '▴' : '▾'}</span>
         </button>
+        </Tooltip>
         <span className="ml-auto flex gap-1">
           <button onClick={() => onShowDiff(undefined)} className="rounded border border-(--cm-line) px-1.5 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)">
             diff all
@@ -117,18 +119,20 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
           ) : (
             <div className="max-h-44 overflow-y-auto">
               {branches.map(b => (
-                <button
-                  key={b.name}
-                  disabled={b.current || branchBusy}
-                  onClick={() => branchOp('checkout', b.name)}
-                  className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left font-mono text-[11px] ${
-                    b.current ? 'text-(--cm-atlas)' : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
-                  } disabled:cursor-default`}
-                  title={b.current ? 'Current branch' : `Switch to ${b.name}`}
-                >
-                  <span className="w-3 shrink-0">{b.current ? '●' : ''}</span>
-                  <span className="truncate">{b.name}</span>
-                </button>
+                <Tooltip key={b.name} content={b.current ? 'Current branch' : `Switch to ${b.name}`} placement="right">
+                  <span className="flex w-full">
+                    <button
+                      disabled={b.current || branchBusy}
+                      onClick={() => branchOp('checkout', b.name)}
+                      className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left font-mono text-[11px] ${
+                        b.current ? 'text-(--cm-atlas)' : 'text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)'
+                      } disabled:cursor-default`}
+                    >
+                      <span className="w-3 shrink-0">{b.current ? '●' : ''}</span>
+                      <span className="truncate">{b.name}</span>
+                    </button>
+                  </span>
+                </Tooltip>
               ))}
             </div>
           )}
@@ -172,20 +176,22 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
                   <span className={`w-3 shrink-0 text-center font-mono text-[11px] font-bold ${STATUS_COLORS[f.status] ?? 'text-(--cm-muted)'}`}>
                     {f.status}
                   </span>
-                  <button
-                    onClick={() => (f.category === 'untracked' ? onOpenFile({ path: f.path }) : onShowDiff(f.path))}
-                    className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-(--cm-muted) group-hover:text-(--cm-text)"
-                    title={f.category === 'untracked' ? 'Open file' : 'Show diff'}
-                  >
-                    {f.path}
-                  </button>
-                  <button
-                    onClick={() => onOpenFile({ path: f.path })}
-                    className="hidden shrink-0 rounded px-1 font-mono text-[10px] text-(--cm-faint) hover:text-(--cm-atlas) group-hover:inline"
-                    title="Open in editor"
-                  >
-                    edit
-                  </button>
+                  <Tooltip content={f.category === 'untracked' ? 'Open file' : 'Show diff'} placement="right">
+                    <button
+                      onClick={() => (f.category === 'untracked' ? onOpenFile({ path: f.path }) : onShowDiff(f.path))}
+                      className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-(--cm-muted) group-hover:text-(--cm-text)"
+                    >
+                      {f.path}
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Open in editor" placement="right">
+                    <button
+                      onClick={() => onOpenFile({ path: f.path })}
+                      className="hidden shrink-0 rounded px-1 font-mono text-[10px] text-(--cm-faint) hover:text-(--cm-atlas) group-hover:inline"
+                    >
+                      edit
+                    </button>
+                  </Tooltip>
                 </div>
               ))}
             </div>

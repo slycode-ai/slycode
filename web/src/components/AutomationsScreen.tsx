@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { KanbanCard } from '@/lib/types';
 import { cronToHumanReadable } from '@/lib/cron-utils';
 import { formatDateTimeShort } from '@/lib/date-format';
+import Tooltip from './Tooltip';
 
 interface AutomationsScreenProps {
   cards: KanbanCard[];
@@ -202,22 +203,24 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                                       {isEnabled ? 'Enabled' : 'Disabled'}
                                     </span>
                                     {card.automation?.lastResult && (
-                                      <span
-                                        // Native title tooltip on purpose — no positioning logic,
-                                        // works everywhere. Only failures carry error text.
-                                        title={
+                                      // Only failures carry error text; success renders the badge untouched.
+                                      <Tooltip
+                                        content={
                                           card.automation.lastResult === 'error' && card.automation.lastError
                                             ? card.automation.lastError
                                             : undefined
                                         }
-                                        className={`rounded px-1.5 py-0.5 text-[11px] ${
-                                          card.automation.lastResult === 'success'
-                                            ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
-                                            : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                                        } ${card.automation.lastResult === 'error' && card.automation.lastError ? 'cursor-help' : ''}`}
                                       >
-                                        {card.automation.lastResult === 'success' ? 'OK' : 'Err'}
-                                      </span>
+                                        <span
+                                          className={`rounded px-1.5 py-0.5 text-[11px] ${
+                                            card.automation.lastResult === 'success'
+                                              ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+                                              : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                                          } ${card.automation.lastResult === 'error' && card.automation.lastError ? 'cursor-help' : ''}`}
+                                        >
+                                          {card.automation.lastResult === 'success' ? 'OK' : 'Err'}
+                                        </span>
+                                      </Tooltip>
                                     )}
                                   </div>
                                 </div>

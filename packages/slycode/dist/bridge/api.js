@@ -114,6 +114,8 @@ export function createApiRouter(sessionManager, responseStore) {
             res.json({ stopped: true, session: sessionInfo });
         }
         else if (action === 'delete') {
+            // Dismissing the session also drops its remembered spoken clips.
+            getSpeakerAuthority().forgetClips(sessionManager.resolveSessionName(name));
             const deleted = await sessionManager.deleteSession(name);
             if (!deleted) {
                 return res.status(404).json({ error: 'Session not found' });
@@ -195,6 +197,20 @@ export function createApiRouter(sessionManager, responseStore) {
     });
     // POST /sessions/:name/speak — admission + render orchestration lives in
     // speak-route.ts (spec 086 Task 8); wired from index.ts alongside this router.
+    // Recent clips for a session's source (card / global / atlas), newest first,
+    // WITHOUT audio bytes — the card header's replay control lists these after a
+    // refresh and fetches one clip's bytes on click.
+    router.get('/sessions/:name/clips', (req, res) => {
+        const name = sessionManager.resolveSessionName(decodeURIComponent(req.params.name));
+        res.json({ clips: getSpeakerAuthority().listClips(name) });
+    });
+    router.get('/sessions/:name/clips/:clipId', (req, res) => {
+        const name = sessionManager.resolveSessionName(decodeURIComponent(req.params.name));
+        const clip = getSpeakerAuthority().getClip(name, req.params.clipId);
+        if (!clip)
+            return res.status(404).json({ error: 'clip_not_found', message: 'that reply is no longer kept' });
+        res.json(clip);
+    });
     // Terminal input — async to support chunked writes on Windows
     router.post('/sessions/:name/input', async (req, res) => {
         const name = decodeURIComponent(req.params.name);

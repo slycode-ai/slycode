@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { AssetRow, AssetCell, PendingChange, AssetType, AssetCellStatus } from '@/lib/types';
 import { compareVersions } from '@/lib/version-compare';
 import { AssetViewer } from './AssetViewer';
+import Tooltip from './Tooltip';
 
 interface ProjectInfo {
   id: string;
@@ -167,12 +168,11 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
 
                       {!row.masterAsset.isValid && isImported && (
                         <span className="flex items-center gap-1">
-                          <span
-                            className="cursor-help text-amber-500"
-                            title="Frontmatter missing required fields (name, version, updated, description)"
-                          >
-                            {'\u26A0'}
-                          </span>
+                          <Tooltip content="Frontmatter missing required fields (name, version, updated, description)">
+                            <span className="cursor-help text-amber-500">
+                              {'\u26A0'}
+                            </span>
+                          </Tooltip>
                           {onFix && (
                             <button
                               onClick={() => onFix(row.name, row.type)}
@@ -185,19 +185,20 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                       )}
 
                       {hasNewerProject && onImport && (
-                        <button
-                          onClick={() => {
-                            // Pick the project with the newest version
-                            const best = [...aheadCells].sort((a, b) =>
-                              compareVersions(b.projectVersion, a.projectVersion)
-                            )[0];
-                            onImport(row.name, row.type, best.projectId);
-                          }}
-                          className="rounded border border-blue-400/30 bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-400/20 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-400 dark:hover:bg-blue-400/20"
-                          title={`Project v${aheadCells[0].projectVersion} is newer than store v${aheadCells[0].masterVersion}`}
-                        >
-                          {'\u2191'} Update Store
-                        </button>
+                        <Tooltip content={`Project v${aheadCells[0].projectVersion} is newer than store v${aheadCells[0].masterVersion}`}>
+                          <button
+                            onClick={() => {
+                              // Pick the project with the newest version
+                              const best = [...aheadCells].sort((a, b) =>
+                                compareVersions(b.projectVersion, a.projectVersion)
+                              )[0];
+                              onImport(row.name, row.type, best.projectId);
+                            }}
+                            className="rounded border border-blue-400/30 bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-400/20 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-400 dark:hover:bg-blue-400/20"
+                          >
+                            {'\u2191'} Update Store
+                          </button>
+                        </Tooltip>
                       )}
 
                       <div className="flex-1" />
@@ -210,13 +211,14 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                             Unignore
                           </button>
                         ) : (
-                          <button
-                            onClick={() => onIgnore(row.name, row.type)}
-                            className="rounded-md border border-void-300 bg-void-50 px-3 py-1 text-xs font-medium text-void-400 hover:bg-void-100 dark:border-void-700 dark:bg-void-800/50 dark:text-void-500 dark:hover:bg-void-700"
-                            title="Hide from Not in Store"
-                          >
-                            Ignore
-                          </button>
+                          <Tooltip content="Hide from Not in Store">
+                            <button
+                              onClick={() => onIgnore(row.name, row.type)}
+                              className="rounded-md border border-void-300 bg-void-50 px-3 py-1 text-xs font-medium text-void-400 hover:bg-void-100 dark:border-void-700 dark:bg-void-800/50 dark:text-void-500 dark:hover:bg-void-700"
+                            >
+                              Ignore
+                            </button>
+                          </Tooltip>
                         )
                       )}
                       {!isImported && onImport && (
@@ -264,11 +266,12 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                       <td
                         key={cell.projectId}
                         className={`px-3 py-2 text-center ${bgClass}`}
-                        title={pending ? `Pending: ${pending.action}` : tooltip}
                       >
+                        <Tooltip content={pending ? `Pending: ${pending.action}` : tooltip}>
                         <button
                           onClick={() => handleCellClick(row, cell.projectId, cell.status, cell)}
                           onContextMenu={(e) => handleCellContext(e, row, cell.projectId, cell.status)}
+                          aria-label={pending ? `Pending: ${pending.action}` : tooltip}
                           className={`inline-flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-void-100 dark:hover:bg-void-800 ${
                             pending?.action === 'remove' ? 'line-through text-red-500' : color
                           }`}
@@ -281,6 +284,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                             icon
                           )}
                         </button>
+                        </Tooltip>
                       </td>
                     );
                   })}

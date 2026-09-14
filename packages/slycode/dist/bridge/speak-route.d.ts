@@ -28,7 +28,7 @@ interface LabelHints {
 /** Resolve card number/title and project display name for the bubble label. */
 export declare function resolveLabelHints(parsed: ParsedSessionName, now?: number): LabelHints;
 export interface SpeakDeps {
-    speaker: Pick<SpeakerAuthority, 'admit' | 'deliver' | 'isRevisionCurrent' | 'subscriberCount' | 'recordOutcome' | 'getOutcome'>;
+    speaker: Pick<SpeakerAuthority, 'admit' | 'deliver' | 'isRevisionCurrent' | 'subscriberCount' | 'recordOutcome' | 'getOutcome'> & Partial<Pick<SpeakerAuthority, 'rememberClip'>>;
     messaging: Pick<MessagingClient, 'render'>;
     /** Returns the registered (resolved) session name or null when unknown. */
     resolveSession: (name: string) => string | null;

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createTwoFilesPatch } from 'diff';
+import Tooltip from './Tooltip';
 
 interface ActionUpdateEntry {
   name: string;
@@ -496,9 +497,10 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                         {/* Actions */}
                         <div className="flex flex-shrink-0 items-center gap-1.5">
                           {/* Preview */}
+                          <Tooltip content="Preview changes">
                           <button
                             onClick={() => handlePreview(entry)}
-                            title="Preview changes"
+                            aria-label="Preview changes"
                             className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-700 dark:border-void-600 dark:bg-void-800 dark:hover:bg-void-700 dark:hover:text-void-200"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -506,12 +508,15 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                               <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                             </svg>
                           </button>
+                          </Tooltip>
 
-                          {/* Accept */}
+                          {/* Accept — span wrapper: disabled buttons emit no pointer events */}
+                          <Tooltip content={entry.status === 'update' ? `Update to v${entry.upstreamVersion}` : 'Install action'}>
+                          <span className="inline-flex">
                           <button
                             onClick={() => handleAccept(entry)}
                             disabled={isAccepting || acceptingAll}
-                            title={entry.status === 'update' ? `Update to v${entry.upstreamVersion}` : 'Install action'}
+                            aria-label={entry.status === 'update' ? `Update to v${entry.upstreamVersion}` : 'Install action'}
                             className="rounded-md border border-emerald-400/40 bg-emerald-400/15 p-1.5 text-emerald-500 transition-colors hover:bg-emerald-400/25 disabled:opacity-50 dark:text-emerald-400"
                           >
                             {isAccepting ? (
@@ -522,17 +527,21 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                               </svg>
                             )}
                           </button>
+                          </span>
+                          </Tooltip>
 
                           {/* Dismiss */}
+                          <Tooltip content="Dismiss this version">
                           <button
                             onClick={() => handleDismiss(entry)}
-                            title="Dismiss this version"
+                            aria-label="Dismiss this version"
                             className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:border-void-600 dark:bg-void-800 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
+                          </Tooltip>
                         </div>
                       </div>
                     </div>

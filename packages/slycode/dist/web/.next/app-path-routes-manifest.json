@@ -53,6 +53,7 @@
   "/api/questionnaire/[projectId]/[name]/submit/route": "/api/questionnaire/[projectId]/[name]/submit",
   "/api/questionnaire/[projectId]/route": "/api/questionnaire/[projectId]",
   "/api/scheduler/log/route": "/api/scheduler/log",
+  "/api/scheduler/prompts/route": "/api/scheduler/prompts",
   "/api/scheduler/route": "/api/scheduler",
   "/api/search/route": "/api/search",
   "/api/settings/route": "/api/settings",

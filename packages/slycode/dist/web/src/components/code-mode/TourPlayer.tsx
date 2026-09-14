@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect } from 'react';
 import type { AtlasTour, TourStep } from './types';
+import Tooltip from '../Tooltip';
 
 interface TourPlayerProps {
   tour: AtlasTour;
@@ -53,13 +54,14 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
         {/* Segmented progress — one cell per step */}
         <div className="flex gap-px bg-(--cm-panel3)" aria-hidden>
           {tour.steps.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => onStep(i)}
-              title={`Step ${i + 1}: ${tour.steps[i].title}`}
-              className="h-[3px] flex-1 transition-colors"
-              style={{ background: i <= stepIndex ? 'var(--cm-atlas)' : 'transparent' }}
-            />
+            <Tooltip key={i} content={`Step ${i + 1}: ${tour.steps[i].title}`} placement="bottom">
+              <button
+                onClick={() => onStep(i)}
+                aria-label={`Step ${i + 1}: ${tour.steps[i].title}`}
+                className="h-[3px] flex-1 transition-colors"
+                style={{ background: i <= stepIndex ? 'var(--cm-atlas)' : 'transparent' }}
+              />
+            </Tooltip>
           ))}
         </div>
 
@@ -67,13 +69,14 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
           <p className="flex items-center gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">
             <span className="min-w-0 flex-1">source files changed since this tour was written — anchors may have drifted</span>
             {onRefresh && (
-              <button
-                onClick={() => onRefresh(tour.id)}
-                title="Ask the Atlas to re-answer this tour against the current code"
-                className="shrink-0 rounded border border-amber-500/50 px-1.5 py-px transition-all hover:brightness-110"
-              >
-                ⟳ refresh
-              </button>
+              <Tooltip content="Ask the Atlas to re-answer this tour against the current code">
+                <button
+                  onClick={() => onRefresh(tour.id)}
+                  className="shrink-0 rounded border border-amber-500/50 px-1.5 py-px transition-all hover:brightness-110"
+                >
+                  ⟳ refresh
+                </button>
+              </Tooltip>
             )}
           </p>
         )}
@@ -113,13 +116,14 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
           >
             Next →
           </button>
-          <button
-            onClick={() => onAsk(step, stepIndex)}
-            title="Ask the Atlas terminal about this step"
-            className="ml-2 rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] tracking-[0.03em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-          >
-            ✦ Ask about this step
-          </button>
+          <Tooltip content="Ask the Atlas terminal about this step">
+            <button
+              onClick={() => onAsk(step, stepIndex)}
+              className="ml-2 rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] tracking-[0.03em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+            >
+              ✦ Ask about this step
+            </button>
+          </Tooltip>
           <button
             onClick={onExit}
             className="ml-auto rounded-md px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-faint) hover:text-(--cm-text)"

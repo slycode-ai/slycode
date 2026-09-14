@@ -1492,6 +1492,26 @@ Priority: ${card.priority}
       output += `  Last Run: ${auto.lastRun || 'never'}${auto.lastResult ? ` (${auto.lastResult})` : ''}\n`;
       if (auto.nextRun) output += `  Next Run: ${auto.nextRun}\n`;
     }
+    if (Array.isArray(card.scheduled_prompts) && card.scheduled_prompts.length > 0) {
+      // Scheduled sends (card #0352) — one-shot timed prompts into the card's
+      // session, written by the web server. Read-only here.
+      const pending = card.scheduled_prompts.filter(e => e.state === 'pending' || e.state === 'firing')
+        .sort((a, b) => Date.parse(a.fireAt) - Date.parse(b.fireAt));
+      const finished = card.scheduled_prompts.filter(e => !(e.state === 'pending' || e.state === 'firing'))
+        .sort((a, b) => Date.parse(b.finishedAt || b.fireAt) - Date.parse(a.finishedAt || a.fireAt)).slice(0, 5);
+      output += `\nScheduled sends: ${pending.length} pending\n`;
+      const oneLine = (m) => m.replace(/\s+/g, ' ').slice(0, 80) + (m.length > 80 ? '…' : '');
+      for (const e of pending) {
+        const wait = e.deferrals ? ` (waiting — session busy ×${e.deferrals})` : '';
+        output += `  [${e.state}] ${e.fireAt} → ${e.sessionName}: ${oneLine(e.message)}${wait} (${e.id})\n`;
+      }
+      for (const e of finished) {
+        const tail = e.state === 'delivered'
+          ? (e.deliveryNote === 'forced_busy' ? ' — delivered while busy (forced; check it landed)' : e.deliveryNote === 'after_wait' ? ` — delivered after waiting (${e.deferrals || 0} deferrals)` : '')
+          : e.error ? ` — ${e.error}` : '';
+        output += `  [${e.state}] ${e.finishedAt || e.fireAt}: ${oneLine(e.message)}${tail}\n`;
+      }
+    }
     if (card.checklist && card.checklist.length > 0) {
       output += `\nChecklist:\n`;
       for (const item of card.checklist) {
@@ -2883,6 +2903,30 @@ function projectFlagAllowed(command, args) {
   }
 }
 
+// ============================================================================
+// context-priming area-index.md parser — LOCKSTEP with web/src/lib/area-index.ts
+// ============================================================================
+// An area entry is exactly the template shape: a `### <name>` heading whose
+// next non-blank line starts with `- path:`. Nothing else counts — not the
+// `## Areas` grouping heading, other heading levels, bold labels, or a `###`
+// heading with no path line. The areas/ directory is NOT scanned: the index
+// is canonical. Parity test: web/src/lib/area-index.test.ts.
+function parseAreaIndex(content) {
+  const lines = String(content).split(/\r?\n/);
+  const areas = [];
+  for (let i = 0; i < lines.length; i++) {
+    const heading = /^###\s+(\S+)\s*$/.exec(lines[i]);
+    if (!heading) continue;
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === '') j++;
+    if (j < lines.length && /^-\s+path:/.test(lines[j])) {
+      const name = heading[1];
+      if (!areas.includes(name)) areas.push(name);
+    }
+  }
+  return areas.sort();
+}
+
 function cmdAreas(args) {
   const opts = parseArgs(args);
 
@@ -2894,32 +2938,7 @@ function cmdAreas(args) {
   try {
     const content = fs.readFileSync(AREA_INDEX_PATH, 'utf-8');
 
-    // Parse area names from the index file
-    // Looking for lines like: ## area-name or **area-name** or - area-name
-    const areaPattern = /^##\s+(\S+)|^\*\*(\S+)\*\*|^-\s+\*\*(\S+)\*\*/gm;
-    const areas = [];
-    let match;
-
-    while ((match = areaPattern.exec(content)) !== null) {
-      const area = match[1] || match[2] || match[3];
-      if (area && !area.includes('#') && !areas.includes(area)) {
-        areas.push(area);
-      }
-    }
-
-    // Also look for area files in the areas directory
-    const areasDir = path.join(path.dirname(AREA_INDEX_PATH), 'areas');
-    if (fs.existsSync(areasDir)) {
-      const files = fs.readdirSync(areasDir);
-      for (const file of files) {
-        if (file.endsWith('.md')) {
-          const areaName = file.replace('.md', '');
-          if (!areas.includes(areaName)) {
-            areas.push(areaName);
-          }
-        }
-      }
-    }
+    const areas = parseAreaIndex(content);
 
     if (areas.length === 0) {
       console.log('No areas found in area-index.md');
@@ -2927,7 +2946,7 @@ function cmdAreas(args) {
     }
 
     console.log('Available areas:\n');
-    for (const area of areas.sort()) {
+    for (const area of areas) {
       console.log(`  ${area}`);
     }
     console.log(`\nTotal: ${areas.length} areas`);

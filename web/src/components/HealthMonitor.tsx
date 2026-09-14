@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { SystemStats, BridgeStats } from '@/lib/types';
 import { usePolling } from '@/hooks/usePolling';
+import Tooltip from './Tooltip';
 
 // Threshold levels for color coding
 const THRESHOLDS = {
@@ -55,18 +56,19 @@ function MiniBar({ value, label }: MiniBarProps) {
   const shortLabel = label === 'Memory' ? 'MEM' : label === 'Swap' ? 'SWP' : label.toUpperCase();
 
   return (
-    <div
-      className="relative h-3.5 w-10 overflow-hidden rounded bg-void-200 dark:bg-void-700"
-      title={`${label}: ${value.toFixed(1)}%`}
-    >
+    <Tooltip content={`${label}: ${value.toFixed(1)}%`} placement="bottom">
       <div
-        className="h-full rounded transition-all duration-300"
-        style={{ width: `${percentage}%`, background: styles.background, boxShadow: styles.glow }}
-      />
-      <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white mix-blend-difference">
-        {shortLabel}
-      </span>
-    </div>
+        className="relative h-3.5 w-10 overflow-hidden rounded bg-void-200 dark:bg-void-700"
+      >
+        <div
+          className="h-full rounded transition-all duration-300"
+          style={{ width: `${percentage}%`, background: styles.background, boxShadow: styles.glow }}
+        />
+        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white mix-blend-difference">
+          {shortLabel}
+        </span>
+      </div>
+    </Tooltip>
   );
 }
 
@@ -263,11 +265,12 @@ export function HealthMonitor() {
         <div className="flex items-center gap-2 rounded-lg border border-void-200 bg-void-50 px-2 py-1 dark:border-void-700 dark:bg-void-800">
           {/* Mobile: compact status dot + terminal count */}
           <div className="flex items-center gap-1.5 sm:hidden">
-            <div
-              className="h-2.5 w-2.5 rounded-full"
-              style={{ background: worstStyles.background }}
-              title={`CPU: ${cpuPercent.toFixed(0)}% | Mem: ${memoryPercent.toFixed(0)}%${hasSwap ? ` | Swap: ${swapPercent.toFixed(0)}%` : ''}`}
-            />
+            <Tooltip content={`CPU: ${cpuPercent.toFixed(0)}% | Mem: ${memoryPercent.toFixed(0)}%${hasSwap ? ` | Swap: ${swapPercent.toFixed(0)}%` : ''}`} placement="bottom">
+              <div
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ background: worstStyles.background }}
+              />
+            </Tooltip>
             <span className="text-[10px] font-mono text-void-600 dark:text-void-400">
               {bridgeError ? '--' : bridgeTerminals}
             </span>
@@ -291,32 +294,34 @@ export function HealthMonitor() {
             {hasSwap && <MiniBar value={swapPercent} label="Swap" />}
 
             {/* Terminal count */}
-            <div
-              className="flex items-center gap-0.5 text-xs text-void-600 dark:text-void-400"
-              title={`${bridgeTerminals} terminal${bridgeTerminals !== 1 ? 's' : ''} running`}
-            >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span className="font-mono">
-                {bridgeError ? '--' : bridgeTerminals}
-              </span>
-            </div>
+            <Tooltip content={`${bridgeTerminals} terminal${bridgeTerminals !== 1 ? 's' : ''} running`} placement="bottom">
+              <div
+                className="flex items-center gap-0.5 text-xs text-void-600 dark:text-void-400"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span className="font-mono">
+                  {bridgeError ? '--' : bridgeTerminals}
+                </span>
+              </div>
+            </Tooltip>
 
             {/* Active indicator */}
             {activelyWorking > 0 && (
-              <div
-                className="flex items-center gap-0.5"
-                title={`${activelyWorking} actively working`}
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
-                </span>
-                <span className="text-xs font-mono text-green-600 dark:text-green-400">
-                  {activelyWorking}
-                </span>
-              </div>
+              <Tooltip content={`${activelyWorking} actively working`} placement="bottom">
+                <div
+                  className="flex items-center gap-0.5"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                  </span>
+                  <span className="text-xs font-mono text-green-600 dark:text-green-400">
+                    {activelyWorking}
+                  </span>
+                </div>
+              </Tooltip>
             )}
           </div>
         </div>

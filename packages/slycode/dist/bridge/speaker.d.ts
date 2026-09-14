@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import { ClipStore, type ClipSummary, type StoredClip } from './clip-store.js';
 import { type SpeechLimits } from './speech-limits.js';
 import type { SessionKind } from './session-name.js';
 export interface SpeakerPrefs {
@@ -103,6 +104,8 @@ export declare class SpeakerAuthority {
     private readonly subscribers;
     private readonly subscriberSet;
     private readonly outcomes;
+    /** Recent delivered clips per source so the card header can replay after a refresh. */
+    readonly clips: ClipStore;
     private readonly outcomeMaxEntries;
     private readonly outcomeTtlMs;
     private readonly heartbeatMs;
@@ -145,6 +148,10 @@ export declare class SpeakerAuthority {
      * (permission was revoked after admission — nothing is sent).
      */
     deliver(clip: ClipEvent): number;
+    rememberClip(sessionName: string, clip: ClipEvent): void;
+    listClips(sessionName: string): ClipSummary[];
+    getClip(sessionName: string, clipId: string): StoredClip | null;
+    forgetClips(sessionName: string): number;
     admit(input: AdmitInput): AdmitResult;
     recordOutcome(requestId: string, status: number, body: Record<string, unknown>): void;
     getOutcome(requestId: string): SpeakOutcome | null;

@@ -103,7 +103,7 @@ export function resolveLabelHints(parsed: ParsedSessionName, now = Date.now()): 
 // ---------------------------------------------------------------------------
 
 export interface SpeakDeps {
-  speaker: Pick<SpeakerAuthority, 'admit' | 'deliver' | 'isRevisionCurrent' | 'subscriberCount' | 'recordOutcome' | 'getOutcome'>;
+  speaker: Pick<SpeakerAuthority, 'admit' | 'deliver' | 'isRevisionCurrent' | 'subscriberCount' | 'recordOutcome' | 'getOutcome'> & Partial<Pick<SpeakerAuthority, 'rememberClip'>>;
   messaging: Pick<MessagingClient, 'render'>;
   /** Returns the registered (resolved) session name or null when unknown. */
   resolveSession: (name: string) => string | null;
@@ -236,6 +236,7 @@ async function runSpeak(deps: SpeakDeps, req: SpeakRequest, requestId: string | 
     expiresAt: new Date(now() + CLIP_TTL_MS).toISOString(),
   };
   const sent = deps.speaker.deliver(clip);
+  if (sent >= 0) deps.speaker.rememberClip?.(resolved, clip);
   if (sent < 0) {
     return record({ status: 409, body: { ok: false, code: 'revoked', message: 'sound was switched off while rendering; the clip was not played (credit already spent)' } });
   }

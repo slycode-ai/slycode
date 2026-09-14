@@ -50,6 +50,14 @@ export interface RelayState {
   queueLength: number;
   /** Optional so older relays stay valid; followers keep their own when absent. */
   availability?: RelayAvailability;
+  /** Why the last play attempt failed (shown in the bubble); null when none. */
+  playError?: string | null;
+  /** Clip id that finished and can be replayed from the bubble; null when none. */
+  replayableClipId?: string | null;
+  /** Counts clips seen on the bridge audio stream (and speaker-state events); followers refetch on change. */
+  clipSeq?: number;
+  /** Playback progress of the current clip for the bubble hairline. */
+  progress?: { fraction: number | null; indeterminate: boolean; complete?: boolean };
 }
 
 interface PeerInfo {

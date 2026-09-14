@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import type { AssetType, ProviderId } from '@/lib/types';
 import type { StoreImportManifest, StoreImportFile, StoreImportFileStatus } from '@/lib/asset-scanner';
 import { buildDiffLines, DiffLineRows } from './DiffLineView';
+import Tooltip from './Tooltip';
 
 interface ImportTarget {
   assetName: string;
@@ -172,9 +173,11 @@ export function StoreImportDiffViewer({
                   </p>
                   <ul className="mt-1 space-y-0.5">
                     {identicalRefs.map((f) => (
-                      <li key={f.path} className="truncate font-mono text-[11px] text-void-400 dark:text-void-500" title={f.path}>
-                        {f.path}
-                      </li>
+                      <Tooltip key={f.path} content={f.path}>
+                        <li className="truncate font-mono text-[11px] text-void-400 dark:text-void-500">
+                          {f.path}
+                        </li>
+                      </Tooltip>
                     ))}
                   </ul>
                 </div>
@@ -209,17 +212,18 @@ export function StoreImportDiffViewer({
               >
                 Import SKILL.md only
               </button>
-              <button
-                onClick={() => onConfirm(true)}
-                title={hasExtraChanges ? undefined : 'No reference files differ — this is equivalent to SKILL.md only'}
-                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  hasExtraChanges
-                    ? 'border-purple-300 bg-purple-600 text-white hover:bg-purple-700 dark:border-purple-700'
-                    : 'border-void-200 bg-void-50 text-void-500 hover:bg-void-100 dark:border-void-700 dark:bg-void-900 dark:text-void-400 dark:hover:bg-void-800'
-                }`}
-              >
-                Import full folder
-              </button>
+              <Tooltip content={hasExtraChanges ? undefined : 'No reference files differ — this is equivalent to SKILL.md only'}>
+                <button
+                  onClick={() => onConfirm(true)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                    hasExtraChanges
+                      ? 'border-purple-300 bg-purple-600 text-white hover:bg-purple-700 dark:border-purple-700'
+                      : 'border-void-200 bg-void-50 text-void-500 hover:bg-void-100 dark:border-void-700 dark:bg-void-900 dark:text-void-400 dark:hover:bg-void-800'
+                  }`}
+                >
+                  Import full folder
+                </button>
+              </Tooltip>
             </div>
           </div>
         )}
@@ -247,16 +251,17 @@ function FileRow({ file, selected, onSelect }: { file: StoreImportFile; selected
           : 'hover:bg-void-100 dark:hover:bg-void-800/60'
       }`}
     >
-      <span
-        className={`truncate font-mono text-xs ${
-          file.path === 'SKILL.md'
-            ? 'font-semibold text-void-800 dark:text-void-200'
-            : 'text-void-600 dark:text-void-400'
-        }`}
-        title={file.path}
-      >
-        {file.path}
-      </span>
+      <Tooltip content={file.path} placement="right">
+        <span
+          className={`truncate font-mono text-xs ${
+            file.path === 'SKILL.md'
+              ? 'font-semibold text-void-800 dark:text-void-200'
+              : 'text-void-600 dark:text-void-400'
+          }`}
+        >
+          {file.path}
+        </span>
+      </Tooltip>
       <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
         {badge.label}
       </span>

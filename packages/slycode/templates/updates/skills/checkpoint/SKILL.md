@@ -1,5 +1,6 @@
 ---
 name: checkpoint
+provider: claude
 version: 1.3.1
 updated: 2026-02-22
 allowed-tools: Bash, Read

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ProjectWithBacklog } from '@/lib/types';
 import { HealthDot } from './HealthDot';
 import { PlatformBadges } from './PlatformBadges';
+import Tooltip from './Tooltip';
 
 interface ProjectCardProps {
   project: ProjectWithBacklog;
@@ -90,12 +91,13 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
             card marker, so it stays a quiet count rather than a red badge.
           */}
           {unseenCount > 0 && (
-            <span
-              className="flex-shrink-0 rounded-full border border-neon-blue-400/30 bg-neon-blue-400/10 px-1.5 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-4 text-neon-blue-700 dark:border-neon-blue-400/25 dark:text-neon-blue-300"
-              title={`${unseenCount} card${unseenCount !== 1 ? 's' : ''} with activity you haven't looked at`}
-            >
-              {unseenCount}
-            </span>
+            <Tooltip content={`${unseenCount} card${unseenCount !== 1 ? 's' : ''} with activity you haven't looked at`}>
+              <span
+                className="flex-shrink-0 rounded-full border border-neon-blue-400/30 bg-neon-blue-400/10 px-1.5 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-4 text-neon-blue-700 dark:border-neon-blue-400/25 dark:text-neon-blue-300"
+              >
+                {unseenCount}
+              </span>
+            </Tooltip>
           )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
@@ -104,24 +106,28 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
               Compliant
             </span>
           )}
-          <button
-            onClick={(e) => handleActionClick(e, () => setShowEditModal(true))}
-            className="rounded p-1 text-void-400 hover:bg-void-200 hover:text-void-600 dark:hover:bg-void-700 dark:hover:text-void-200"
-            title="Edit project"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-            </svg>
-          </button>
-          <button
-            onClick={(e) => handleActionClick(e, () => setShowDeleteConfirm(true))}
-            className="rounded p-1 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400"
-            title="Remove project"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <Tooltip content="Edit project">
+            <button
+              onClick={(e) => handleActionClick(e, () => setShowEditModal(true))}
+              aria-label="Edit project"
+              className="rounded p-1 text-void-400 hover:bg-void-200 hover:text-void-600 dark:hover:bg-void-700 dark:hover:text-void-200"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip content="Remove project">
+            <button
+              onClick={(e) => handleActionClick(e, () => setShowDeleteConfirm(true))}
+              aria-label="Remove project"
+              className="rounded p-1 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
       </div>
       <p className="mb-2 text-sm text-void-500 dark:text-void-400">

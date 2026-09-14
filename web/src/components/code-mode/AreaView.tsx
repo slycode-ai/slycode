@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import type { AtlasSnapshot } from './types';
 import { relTime } from './AtlasMap';
+import Tooltip from '../Tooltip';
 
 interface AreaViewProps {
   projectId: string;
@@ -86,7 +87,8 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
                 }`}
                 style={{ ['--hue' as string]: area.color ?? 'var(--cm-atlas)' }}
               >
-                <h4 className="flex items-baseline gap-2 truncate font-mono text-[12.5px] font-bold text-(--cm-text)" title={m.path}>
+                <Tooltip content={m.path}>
+                <h4 className="flex items-baseline gap-2 truncate font-mono text-[12.5px] font-bold text-(--cm-text)">
                   <span className="min-w-0 truncate">{m.name}</span>
                   {isChanged(m.path) && (
                     <span className="ml-auto shrink-0 rounded bg-amber-500/15 px-1.5 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
@@ -94,6 +96,7 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
                     </span>
                   )}
                 </h4>
+                </Tooltip>
                 <p className="mt-1.5 text-[11.5px] leading-relaxed text-(--cm-muted)">{m.summary}</p>
                 <p className="mt-2 truncate font-mono text-[9.5px] text-(--cm-faint)">{m.path}</p>
               </button>
@@ -175,14 +178,18 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
           ) : (
             <>
               <span className="text-[13.5px] font-semibold text-(--cm-text)">{area.name}</span>
-              <button onClick={() => { setName(area.name); setRenaming(true); }} title="Rename (pins the area)" className="text-[10px] text-(--cm-faint) hover:text-(--cm-atlas)">✎</button>
-              <button
-                onClick={() => patchArea({ pinned: !area.pinned })}
-                title={area.pinned ? 'Unpin' : 'Pin — name survives refreshes'}
-                className={`text-[11px] ${area.pinned ? '' : 'opacity-35 hover:opacity-100'}`}
-              >
-                📌
-              </button>
+              <Tooltip content="Rename (pins the area)" placement="bottom">
+                <button onClick={() => { setName(area.name); setRenaming(true); }} aria-label="Rename (pins the area)" className="text-[10px] text-(--cm-faint) hover:text-(--cm-atlas)">✎</button>
+              </Tooltip>
+              <Tooltip content={area.pinned ? 'Unpin' : 'Pin — name survives refreshes'} placement="bottom">
+                <button
+                  onClick={() => patchArea({ pinned: !area.pinned })}
+                  aria-label={area.pinned ? 'Unpin' : 'Pin — name survives refreshes'}
+                  className={`text-[11px] ${area.pinned ? '' : 'opacity-35 hover:opacity-100'}`}
+                >
+                  📌
+                </button>
+              </Tooltip>
             </>
           )}
           <span className="font-mono text-[10px] text-(--cm-faint)">{area.paths.join(' · ')}</span>
@@ -193,13 +200,15 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
           >
             {!fresh || !fresh.hasNode ? 'no analysis' : fresh.stale ? 'stale' : `analyzed ${relTime(fresh.analyzedAt!)}`}
           </span>
-          <button
-            onClick={onToggleExpand}
-            title={expanded ? 'Close full view' : 'Expand info panel to full view'}
-            className="ml-auto rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-          >
-            {expanded ? '✕' : '⤢'}
-          </button>
+          <Tooltip content={expanded ? 'Close full view' : 'Expand info panel to full view'} placement="bottom">
+            <button
+              onClick={onToggleExpand}
+              aria-label={expanded ? 'Close full view' : 'Expand info panel to full view'}
+              className="ml-auto rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+            >
+              {expanded ? '✕' : '⤢'}
+            </button>
+          </Tooltip>
         </div>
 
         <div className="flex min-h-0 flex-1 gap-6">
@@ -217,11 +226,10 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
                 <div className="mb-2">
                   <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Guided tours</p>
                   {(snapshot.tours ?? []).filter(t => t.tour.area === areaId).map(({ tour, stale: tourStale }) => (
+                    <Tooltip key={tour.id} content={tour.description ?? tour.title}>
                     <button
-                      key={tour.id}
                       onClick={() => onStartTour(tour.id)}
                       className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
-                      title={tour.description ?? tour.title}
                     >
                       <span className="flex items-center gap-1.5 truncate text-[11.5px] font-medium text-(--cm-text)">
                         ▶ {tour.title}
@@ -233,22 +241,23 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
                       </span>
                       <span className="block font-mono text-[9.5px] text-(--cm-faint)">{tour.steps.length} steps</span>
                     </button>
+                    </Tooltip>
                   ))}
                 </div>
               )}
               <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key files</p>
               {node.key_files.map(k => (
-                <button
-                  key={k.path}
-                  onClick={() => onOpenFile(k.path)}
-                  className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
-                  title={k.path}
-                >
-                  <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
-                    {k.path.split('/').slice(-2).join('/')}
-                  </span>
-                  <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
-                </button>
+                <Tooltip key={k.path} content={k.path}>
+                  <button
+                    onClick={() => onOpenFile(k.path)}
+                    className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
+                  >
+                    <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
+                      {k.path.split('/').slice(-2).join('/')}
+                    </span>
+                    <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
+                  </button>
+                </Tooltip>
               ))}
             </div>
           )}

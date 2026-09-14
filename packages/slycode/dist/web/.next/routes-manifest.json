@@ -411,6 +411,12 @@
       "namedRegex": "^/api/scheduler/log(?:/)?$"
     },
     {
+      "page": "/api/scheduler/prompts",
+      "regex": "^/api/scheduler/prompts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/scheduler/prompts(?:/)?$"
+    },
+    {
       "page": "/api/search",
       "regex": "^/api/search(?:/)?$",
       "routeKeys": {},

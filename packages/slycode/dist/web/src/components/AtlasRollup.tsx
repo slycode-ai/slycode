@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import Tooltip from './Tooltip';
 
 interface RollupArea {
   id: string;
@@ -102,18 +103,21 @@ export function AtlasRollup() {
 
             <div className="mt-3 flex flex-wrap gap-1.5">
               {p.areas.map(a => (
-                <span
+                <Tooltip
                   key={a.id}
-                  title={`${a.name}${a.summary ? ` — ${a.summary}` : ''}${a.stale ? ' (stale)' : ''}`}
-                  className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-void-600 dark:text-void-300 ${
-                    a.stale
-                      ? 'border-amber-400/50 bg-amber-400/10'
-                      : 'border-void-200 dark:border-void-700'
-                  }`}
+                  content={`${a.name}${a.summary ? ` — ${a.summary}` : ''}${a.stale ? ' (stale)' : ''}`}
                 >
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.color ?? '#4cb8f0' }} />
-                  {a.name}
-                </span>
+                  <span
+                    className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-void-600 dark:text-void-300 ${
+                      a.stale
+                        ? 'border-amber-400/50 bg-amber-400/10'
+                        : 'border-void-200 dark:border-void-700'
+                    }`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.color ?? '#4cb8f0' }} />
+                    {a.name}
+                  </span>
+                </Tooltip>
               ))}
             </div>
 

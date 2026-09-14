@@ -10,6 +10,7 @@ import { DefaultProviderConfig } from './DefaultProviderConfig';
 import { HealthMonitor } from './HealthMonitor';
 import { SearchBar } from './SearchBar';
 import { ThemeToggle } from './ThemeToggle';
+import Tooltip from './Tooltip';
 
 interface ProjectHeaderProps {
   name: string;
@@ -122,49 +123,53 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
               {/* Board | Code Mode toggle (feature 076) */}
               {onToggleCodeMode && (
                 <div className="hidden overflow-hidden rounded-lg border border-void-200/40 font-mono text-[10px] uppercase tracking-[0.08em] dark:border-void-700/40 sm:flex">
-                  <button
-                    onClick={onToggleCodeMode}
-                    title={codeMode && boardActive ? 'Board sessions are busy — click to watch' : 'Kanban board'}
-                    className={`min-h-[44px] px-3 transition-all ${
-                      !codeMode
-                        ? 'bg-neon-blue-400/10 text-neon-blue-500 dark:text-neon-blue-400'
-                        : `text-void-500 hover:text-neon-blue-400 dark:text-void-400${
-                            boardActive ? ' active-glow-board-btn rounded-md text-neon-blue-500 dark:text-neon-blue-400' : ''
-                          }`
-                    }`}
-                  >
-                    Board
-                  </button>
-                  <button
-                    onClick={onToggleCodeMode}
-                    title="Code Mode — codebase atlas & explorer"
-                    className={`min-h-[44px] px-3 transition-all ${
-                      codeMode
-                        ? 'bg-teal-400/10 text-teal-600 shadow-[inset_0_0_12px_rgba(70,215,194,0.15)] dark:text-teal-300'
-                        : 'text-void-500 hover:text-teal-500 dark:text-void-400 dark:hover:text-teal-300'
-                    }`}
-                  >
-                    Code&nbsp;Mode
-                  </button>
+                  <Tooltip content={codeMode && boardActive ? 'Board sessions are busy — click to watch' : 'Kanban board'} placement="bottom">
+                    <button
+                      onClick={onToggleCodeMode}
+                      className={`min-h-[44px] px-3 transition-all ${
+                        !codeMode
+                          ? 'bg-neon-blue-400/10 text-neon-blue-500 dark:text-neon-blue-400'
+                          : `text-void-500 hover:text-neon-blue-400 dark:text-void-400${
+                              boardActive ? ' active-glow-board-btn rounded-md text-neon-blue-500 dark:text-neon-blue-400' : ''
+                            }`
+                      }`}
+                    >
+                      Board
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Code Mode — codebase atlas & explorer" placement="bottom">
+                    <button
+                      onClick={onToggleCodeMode}
+                      className={`min-h-[44px] px-3 transition-all ${
+                        codeMode
+                          ? 'bg-teal-400/10 text-teal-600 shadow-[inset_0_0_12px_rgba(70,215,194,0.15)] dark:text-teal-300'
+                          : 'text-void-500 hover:text-teal-500 dark:text-void-400 dark:hover:text-teal-300'
+                      }`}
+                    >
+                      Code&nbsp;Mode
+                    </button>
+                  </Tooltip>
                 </div>
               )}
 
               {/* Refresh board */}
               {onRefresh && (
-                <button
-                  onClick={handleRefresh}
-                  title="Refresh board from disk"
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
-                >
-                  <svg
-                    className={`h-4 w-4 transition-transform${isRefreshing ? ' animate-spin' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                <Tooltip content="Refresh board from disk" placement="bottom">
+                  <button
+                    onClick={handleRefresh}
+                    aria-label="Refresh board from disk"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
+                    <svg
+                      className={`h-4 w-4 transition-transform${isRefreshing ? ' animate-spin' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                </Tooltip>
               )}
 
               {/* Theme toggle */}
@@ -174,76 +179,84 @@ export function ProjectHeader({ name, description, tags: _tags, projectId, proje
               <HealthMonitor />
 
               {/* Actions button - ghost neon — hidden on mobile */}
-              <button
-                onClick={() => setShowCommandConfig(true)}
-                title="Sly Actions"
-                className="relative hidden sm:flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                </svg>
-                {actionUpdateCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-neon-blue-500 px-1 text-[10px] font-bold text-white">
-                    {actionUpdateCount}
-                  </span>
-                )}
-              </button>
+              <Tooltip content="Sly Actions" placement="bottom">
+                <button
+                  onClick={() => setShowCommandConfig(true)}
+                  aria-label="Sly Actions"
+                  className="relative hidden sm:flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  {actionUpdateCount > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-neon-blue-500 px-1 text-[10px] font-bold text-white">
+                      {actionUpdateCount}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
 
               {/* Shortcuts button — ghost neon, sibling to Actions */}
-              <button
-                onClick={() => setShowShortcutsConfig(true)}
-                title="Quick-launch shortcuts"
-                className="relative hidden sm:flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </button>
+              <Tooltip content="Quick-launch shortcuts" placement="bottom">
+                <button
+                  onClick={() => setShowShortcutsConfig(true)}
+                  aria-label="Quick-launch shortcuts"
+                  className="relative hidden sm:flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </button>
+              </Tooltip>
 
               {/* Per-project default provider/model — ghost neon, sibling to Shortcuts (feature 073) */}
               {projectId && <DefaultProviderConfig projectId={projectId} />}
 
               {/* Automations toggle button - ghost orange, pulses when automations are active */}
-              <button
-                onClick={onToggleAutomations}
-                title={showAutomations ? 'Show kanban board' : 'Show automations'}
-                className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
-                  showAutomations
-                    ? 'border-orange-400/50 bg-orange-400/10 text-orange-500 hover:bg-orange-400/20 dark:text-orange-400'
-                    : `border-void-200/40 bg-transparent text-void-500 hover:border-orange-400/40 hover:bg-orange-400/5 hover:text-orange-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-orange-400/40 dark:hover:bg-orange-400/5 dark:hover:text-orange-400${hasActiveAutomations ? ' active-glow-automation-btn text-orange-400 dark:text-orange-400' : ''}`
-                }`}
-              >
-                {showAutomations ? (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                  </svg>
-                ) : (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                )}
-              </button>
+              <Tooltip content={showAutomations ? 'Show kanban board' : 'Show automations'} placement="bottom">
+                <button
+                  onClick={onToggleAutomations}
+                  aria-label={showAutomations ? 'Show kanban board' : 'Show automations'}
+                  className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
+                    showAutomations
+                      ? 'border-orange-400/50 bg-orange-400/10 text-orange-500 hover:bg-orange-400/20 dark:text-orange-400'
+                      : `border-void-200/40 bg-transparent text-void-500 hover:border-orange-400/40 hover:bg-orange-400/5 hover:text-orange-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-orange-400/40 dark:hover:bg-orange-400/5 dark:hover:text-orange-400${hasActiveAutomations ? ' active-glow-automation-btn text-orange-400 dark:text-orange-400' : ''}`
+                  }`}
+                >
+                  {showAutomations ? (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </button>
+              </Tooltip>
 
               {/* Archive toggle button - ghost neon */}
-              <button
-                onClick={onToggleArchived}
-                title={showArchived ? 'Show active cards' : 'Show archived cards'}
-                className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
-                  showArchived
-                    ? 'border-neon-orange-400/50 bg-neon-orange-400/8 text-neon-orange-500 hover:bg-neon-orange-400/15 dark:text-neon-orange-400'
-                    : 'border-void-200/40 bg-transparent text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400'
-                }`}
-              >
-                {showArchived ? (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                  </svg>
-                ) : (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                  </svg>
-                )}
-              </button>
+              <Tooltip content={showArchived ? 'Show active cards' : 'Show archived cards'} placement="bottom">
+                <button
+                  onClick={onToggleArchived}
+                  aria-label={showArchived ? 'Show active cards' : 'Show archived cards'}
+                  className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
+                    showArchived
+                      ? 'border-neon-orange-400/50 bg-neon-orange-400/8 text-neon-orange-500 hover:bg-neon-orange-400/15 dark:text-neon-orange-400'
+                      : 'border-void-200/40 bg-transparent text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400'
+                  }`}
+                >
+                  {showArchived ? (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                  )}
+                </button>
+              </Tooltip>
             </div>
           </div>
         </div>

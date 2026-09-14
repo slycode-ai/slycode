@@ -6,6 +6,10 @@ import { buildPrompt, renderTemplate, withTimestamp, type SlyActionsConfig, type
 import { submitVerified, deliveryFailureMessage, type VerifiedDelivery } from '@/lib/submit-verified';
 import { usePolling } from '@/hooks/usePolling';
 import { useActionOverflow } from '@/hooks/useActionOverflow';
+import { ScheduledSendsControl } from './ScheduledSendsControl';
+import { LastReplyControl } from './LastReplyControl';
+import Tooltip from './Tooltip';
+import type { ScheduledPrompt } from '@/lib/types';
 
 interface ProviderConfig {
   id: string;
@@ -114,6 +118,9 @@ interface ClaudeTerminalPanelProps {
   // prompt (plain Start button). Lets specialized panels (Atlas) brief the
   // agent — action templates never fire on a bare start.
   defaultStartupPrompt?: string;
+  // Scheduled sends on this card (card #0352) — live from the board; the
+  // footer stopwatch button + popover render only when cardId/projectId exist.
+  scheduledPrompts?: ScheduledPrompt[];
   // Callbacks
   onSessionChange?: (info: SessionInfo | null) => void;
   onProviderChange?: (provider: string) => void;
@@ -123,6 +130,7 @@ interface ClaudeTerminalPanelProps {
 }
 
 const BRIDGE_API = '/api/bridge';
+const EMPTY_SCHEDULED: ScheduledPrompt[] = [];
 
 export function ClaudeTerminalPanel({
   sessionName: baseSessionName,
@@ -141,6 +149,7 @@ export function ClaudeTerminalPanel({
   tintColor,
   voiceTerminalId,
   defaultStartupPrompt,
+  scheduledPrompts,
   onSessionChange,
   onProviderChange,
   onTerminalReady,
@@ -732,6 +741,12 @@ export function ClaudeTerminalPanel({
   // Dynamic action overflow — measures button widths and available space
   const actionsKey = renderedActiveCommands.map(a => a.label).join('\0');
   const { visibleCount, footerRef, rightControlsRef, measurerRef } = useActionOverflow(actionsKey, isRunning);
+  // provider id → display name for the scheduled-sends popover chips (card #0352)
+  const providerDisplayNames = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [id, p] of Object.entries(providersData?.providers ?? {})) out[id] = p.displayName;
+    return out;
+  }, [providersData]);
   const actualVisible = Math.min(visibleCount, renderedActiveCommands.length);
 
   // Close overflow menu when visible/overflow split changes (e.g. on resize)
@@ -1039,16 +1054,19 @@ export function ClaudeTerminalPanel({
         <div ref={footerRef} className={`flex min-w-0 flex-shrink-0 items-center gap-2 px-3 py-2 ${footerClassName || 'border-t border-void-700 bg-void-800'}`}>
           {/* Active action buttons */}
           {renderedActiveCommands.slice(0, actualVisible).map((action) => (
-            <button
+            <Tooltip
               key={action.id}
-              onClick={(e) => sendCommand(action, !e.shiftKey)}
-              title={action.id === 'context' && cardAreas.length > 0
+              content={action.id === 'context' && cardAreas.length > 0
                 ? `${action.description} (${cardAreas.join(', ')}) [Shift+click to insert without submitting]`
                 : `${action.description} [Shift+click to insert without submitting]`}
-              className="flex-shrink-0 whitespace-nowrap rounded-md border border-neon-blue-400/25 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/20 hover:border-neon-blue-400/40 hover:shadow-[0_0_8px_rgba(0,191,255,0.15)]"
             >
-              {action.label}
-            </button>
+              <button
+                onClick={(e) => sendCommand(action, !e.shiftKey)}
+                className="flex-shrink-0 whitespace-nowrap rounded-md border border-neon-blue-400/25 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/20 hover:border-neon-blue-400/40 hover:shadow-[0_0_8px_rgba(0,191,255,0.15)]"
+              >
+                {action.label}
+              </button>
+            </Tooltip>
           ))}
           {/* Overflow menu for additional actions */}
           {actualVisible < renderedActiveCommands.length && (
@@ -1062,14 +1080,14 @@ export function ClaudeTerminalPanel({
               {showActionsMenu && (
                 <div className="absolute bottom-full right-0 z-10 mb-1 min-w-[120px] rounded-lg border border-void-600 bg-void-800 py-1 shadow-(--shadow-overlay)">
                   {renderedActiveCommands.slice(actualVisible).map((action) => (
-                    <button
-                      key={action.id}
-                      onClick={(e) => sendCommand(action, !e.shiftKey)}
-                      className="block w-full px-3 py-1.5 text-left text-xs text-void-300 hover:bg-void-700"
-                      title={`${action.description} [Shift+click to insert without submitting]`}
-                    >
-                      {action.label}
-                    </button>
+                    <Tooltip key={action.id} content={`${action.description} [Shift+click to insert without submitting]`} placement="left">
+                      <button
+                        onClick={(e) => sendCommand(action, !e.shiftKey)}
+                        className="block w-full px-3 py-1.5 text-left text-xs text-void-300 hover:bg-void-700"
+                      >
+                        {action.label}
+                      </button>
+                    </Tooltip>
                   ))}
                 </div>
               )}
@@ -1087,23 +1105,29 @@ export function ClaudeTerminalPanel({
             )}
             {/* Unlinked badge — no transcript id after the detection window */}
             {showUnlinkedBadge && (
-              <span
-                className="flex-shrink-0 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-400/90"
-                title="No conversation linked to this session — resume won't find it. Use Relink to bind the session file."
-              >
-                unlinked
-              </span>
+              <Tooltip content="No conversation linked to this session — resume won't find it. Use Relink to bind the session file.">
+                <span className="flex-shrink-0 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-400/90">
+                  unlinked
+                </span>
+              </Tooltip>
+            )}
+            {/* Replay the last spoken reply for this card (feature 086); renders only when the bridge kept one */}
+            <LastReplyControl bridgeUrl={bridgeUrl} sessionName={activeSessionName} />
+            {/* Scheduled sends (card #0352) — stopwatch button + popover */}
+            {cardId && projectId && (
+              <ScheduledSendsControl projectId={projectId} cardId={cardId} sessionName={activeSessionName} list={scheduledPrompts ?? EMPTY_SCHEDULED} providerNames={providerDisplayNames} />
             )}
             {/* Relink button + confirmation */}
             <div className="relative" ref={relinkRef}>
-              <button
-                onClick={() => setShowRelinkConfirm(true)}
-                disabled={isRelinking}
-                className="rounded-md border border-void-500/25 bg-void-700/50 px-2 py-1 text-xs font-medium text-void-400 transition-all hover:border-neon-blue-400/30 hover:text-neon-blue-400 hover:bg-neon-blue-400/10 disabled:opacity-50"
-                title="Re-detect and link the current session ID"
-              >
-                {isRelinking ? 'Relinking...' : 'Relink'}
-              </button>
+              <Tooltip content="Re-detect and link the current session ID">
+                <button
+                  onClick={() => setShowRelinkConfirm(true)}
+                  disabled={isRelinking}
+                  className="rounded-md border border-void-500/25 bg-void-700/50 px-2 py-1 text-xs font-medium text-void-400 transition-all hover:border-neon-blue-400/30 hover:text-neon-blue-400 hover:bg-neon-blue-400/10 disabled:opacity-50"
+                >
+                  {isRelinking ? 'Relinking...' : 'Relink'}
+                </button>
+              </Tooltip>
               {showRelinkConfirm && (
                 <div className="absolute bottom-full right-0 mb-2 w-72 rounded-lg border border-void-600 bg-void-800 p-3 shadow-(--shadow-overlay) z-50">
                   <div className="text-xs text-void-300 mb-2">
@@ -1131,6 +1155,7 @@ export function ClaudeTerminalPanel({
               )}
             </div>
             {/* Stop button */}
+            <Tooltip content="Stop this session (resume it later from the card)">
             <button
               onClick={stopSession}
               disabled={isStopping}
@@ -1144,6 +1169,7 @@ export function ClaudeTerminalPanel({
               )}
               {isStopping ? 'Stopping' : 'Stop'}
             </button>
+            </Tooltip>
           </div>
         </div>
       )}

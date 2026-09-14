@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import type { DbIntrospection } from './types';
+import Tooltip from '../Tooltip';
 
 interface DbRailProps {
   projectId: string;
@@ -50,20 +51,22 @@ export function DbRail({ projectId, onOpenTable }: DbRailProps) {
       </button>
       {data.sources.map(src => (
         <div key={src.path} className="mb-2.5">
-          <p className="truncate px-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-(--cm-faint)" title={src.path}>
-            {src.kind} · {src.path.split('/').pop()}
-          </p>
+          <Tooltip content={src.path} placement="right">
+            <p className="truncate px-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-(--cm-faint)">
+              {src.kind} · {src.path.split('/').pop()}
+            </p>
+          </Tooltip>
           {src.error && <p className="px-1 font-mono text-[10px] text-(--cm-stale)">{src.error}</p>}
           {src.tables.map(t => (
-            <button
-              key={t.name}
-              onClick={() => onOpenTable(t.name)}
-              className="block w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[11px] text-(--cm-muted) transition-colors hover:bg-(--cm-panel3) hover:text-(--cm-text)"
-              title={`${t.name} — ${t.columns.length} columns`}
-            >
-              {t.name}
-              <span className="ml-1.5 text-[9.5px] text-(--cm-faint)">{t.columns.length}</span>
-            </button>
+            <Tooltip key={t.name} content={`${t.name} — ${t.columns.length} columns`} placement="right">
+              <button
+                onClick={() => onOpenTable(t.name)}
+                className="block w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[11px] text-(--cm-muted) transition-colors hover:bg-(--cm-panel3) hover:text-(--cm-text)"
+              >
+                {t.name}
+                <span className="ml-1.5 text-[9.5px] text-(--cm-faint)">{t.columns.length}</span>
+              </button>
+            </Tooltip>
           ))}
         </div>
       ))}

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import type { StoreData, StoreAssetInfo, AssetType, ProviderId, Project } from '@/lib/types';
 import { AssetViewer } from './AssetViewer';
+import Tooltip from './Tooltip';
 
 interface StoreViewProps {
   data: StoreData;
@@ -117,38 +118,42 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
                       <td className="px-4 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {asset.type === 'mcp' && (
-                            <button
-                              onClick={() => setDeployTarget({ name: asset.name })}
-                              className="rounded border border-neon-blue-400/30 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 hover:bg-neon-blue-400/20"
-                              title="Deploy to project"
-                            >
-                              Deploy
-                            </button>
+                            <Tooltip content="Deploy to project">
+                              <button
+                                onClick={() => setDeployTarget({ name: asset.name })}
+                                className="rounded border border-neon-blue-400/30 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 hover:bg-neon-blue-400/20"
+                              >
+                                Deploy
+                              </button>
+                            </Tooltip>
                           )}
-                          <button
-                            onClick={() => setConfirmDelete({ name: asset.name, type: asset.type })}
-                            className="rounded border border-red-400/30 bg-red-400/10 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-400/20"
-                            title="Delete from store"
-                          >
-                            Del
-                          </button>
-                          {!asset.isValid && onFix && (
+                          <Tooltip content="Delete from store">
                             <button
-                              onClick={() => onFix(asset.name, asset.type)}
-                              className="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-500 hover:bg-amber-400/20"
-                              title="Fix missing frontmatter"
+                              onClick={() => setConfirmDelete({ name: asset.name, type: asset.type })}
+                              className="rounded border border-red-400/30 bg-red-400/10 px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-400/20"
                             >
-                              Fix
+                              Del
                             </button>
+                          </Tooltip>
+                          {!asset.isValid && onFix && (
+                            <Tooltip content="Fix missing frontmatter">
+                              <button
+                                onClick={() => onFix(asset.name, asset.type)}
+                                className="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-500 hover:bg-amber-400/20"
+                              >
+                                Fix
+                              </button>
+                            </Tooltip>
                           )}
                           {onAssistant && (
-                            <button
-                              onClick={() => onAssistant('modify', asset.name, asset.type)}
-                              className="rounded border border-void-600 bg-void-800 px-2 py-1 text-xs font-medium text-void-300 hover:bg-void-700 hover:text-void-200"
-                              title="Modify with LLM assistance"
-                            >
-                              Modify
-                            </button>
+                            <Tooltip content="Modify with LLM assistance">
+                              <button
+                                onClick={() => onAssistant('modify', asset.name, asset.type)}
+                                className="rounded border border-void-600 bg-void-800 px-2 py-1 text-xs font-medium text-void-300 hover:bg-void-700 hover:text-void-200"
+                              >
+                                Modify
+                              </button>
+                            </Tooltip>
                           )}
                         </div>
                       </td>

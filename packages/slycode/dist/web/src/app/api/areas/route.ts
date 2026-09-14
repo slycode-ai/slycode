@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { getSlycodeRoot } from '@/lib/paths';
+import { parseAreaIndex } from '@/lib/area-index';
 
 export async function GET() {
   const repoRoot = getSlycodeRoot();
   // context-priming may live under .claude/ or, in workspaces without one
   // (pure Codex/OpenCode projects), under .agents/ — first existing wins.
+  // Mirrors AREA_INDEX_CANDIDATES in scripts/kanban.js.
   const candidateRefDirs = ['.claude', '.agents', '.opencode'].map(dir =>
     path.join(repoRoot, dir, 'skills', 'context-priming', 'references'),
   );
@@ -15,41 +17,15 @@ export async function GET() {
     try { await fs.access(path.join(dir, 'area-index.md')); refDir = dir; break; } catch { /* next */ }
   }
   const areaIndexPath = path.join(refDir, 'area-index.md');
-  const areasDir = path.join(refDir, 'areas');
 
-  const areas: string[] = [];
-
+  // The index is canonical — LOCKSTEP with `sly-kanban areas` (#0355).
+  // No areas/ directory scan; a missing index means zero areas.
+  let areas: string[] = [];
   try {
-    // Parse area names from area-index.md
-    const content = await fs.readFile(areaIndexPath, 'utf-8');
-    const areaPattern = /^###\s+(\S+)/gm;
-    let match;
-    while ((match = areaPattern.exec(content)) !== null) {
-      const area = match[1];
-      if (area && !areas.includes(area)) {
-        areas.push(area);
-      }
-    }
+    areas = parseAreaIndex(await fs.readFile(areaIndexPath, 'utf-8'));
   } catch {
-    // area-index.md not found, continue to check areas directory
+    // area-index.md not found
   }
 
-  try {
-    // Also scan areas directory for .md files
-    const files = await fs.readdir(areasDir);
-    for (const file of files) {
-      if (file.endsWith('.md')) {
-        const areaName = file.replace('.md', '');
-        if (!areas.includes(areaName)) {
-          areas.push(areaName);
-        }
-      }
-    }
-  } catch {
-    // areas directory not found
-  }
-
-  return NextResponse.json({
-    areas: areas.sort(),
-  });
+  return NextResponse.json({ areas });
 }

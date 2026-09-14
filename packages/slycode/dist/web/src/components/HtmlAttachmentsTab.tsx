@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Tooltip from './Tooltip';
 
 /**
  * HTML attachments tab (feature 072) — multi-attachment index + sandboxed viewer.
@@ -147,21 +148,25 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
                 <div className="truncate font-medium text-void-900 dark:text-void-100">
                   {titles[ref] || fileName(ref)}
                 </div>
-                <div className="mt-0.5 truncate font-mono text-xs text-void-500 dark:text-void-400" title={ref}>
-                  {ref}
-                </div>
+                <Tooltip content={ref}>
+                  <div className="mt-0.5 truncate font-mono text-xs text-void-500 dark:text-void-400">
+                    {ref}
+                  </div>
+                </Tooltip>
               </div>
             </button>
             {onUnlink ? (
-              <button
-                onClick={() => onUnlink(ref)}
-                className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                title={`Unlink ${fileName(ref)} (removes the reference; file is not deleted)`}
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-              </button>
+              <Tooltip content={`Unlink ${fileName(ref)} (removes the reference; file is not deleted)`}>
+                <button
+                  onClick={() => onUnlink(ref)}
+                  className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                  aria-label={`Unlink ${fileName(ref)}`}
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                </button>
+              </Tooltip>
             ) : (
               <svg
                 className="h-4 w-4 shrink-0 text-void-300 dark:text-void-600"
@@ -184,70 +189,81 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
       <div className="flex items-center justify-between gap-2 border-b border-void-200 px-4 py-2 text-xs dark:border-void-700">
         <div className="flex min-w-0 items-center gap-2">
           {refs.length > 1 && (
-            <button
-              onClick={() => setSelectedRef(null)}
-              className="flex shrink-0 items-center gap-1 text-neon-blue-500 hover:text-neon-blue-400"
-              title="All attachments"
-            >
-              <span aria-hidden>←</span>
-              <span className="hidden sm:inline">All</span>
-            </button>
+            <Tooltip content="All attachments" placement="bottom">
+              <button
+                onClick={() => setSelectedRef(null)}
+                className="flex shrink-0 items-center gap-1 text-neon-blue-500 hover:text-neon-blue-400"
+                aria-label="All attachments"
+              >
+                <span aria-hidden>←</span>
+                <span className="hidden sm:inline">All</span>
+              </button>
+            </Tooltip>
           )}
-          <button
-            onClick={() => handleCopyPath(effectiveRef)}
-            className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
-            title={copiedPath ? 'Copied!' : `Copy path: ${effectiveRef}`}
-          >
-            {copiedPath ? (
-              <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            ) : (
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-              </svg>
-            )}
-          </button>
-          <span className="truncate font-mono text-void-700 dark:text-void-300" title={effectiveRef}>
-            {selectedLabel}
-          </span>
+          <Tooltip content={copiedPath ? 'Copied!' : `Copy path: ${effectiveRef}`} placement="bottom">
+            <button
+              onClick={() => handleCopyPath(effectiveRef)}
+              className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
+              aria-label="Copy path"
+            >
+              {copiedPath ? (
+                <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip content={effectiveRef} placement="bottom">
+            <span className="truncate font-mono text-void-700 dark:text-void-300">
+              {selectedLabel}
+            </span>
+          </Tooltip>
           <span className="hidden text-void-400 dark:text-void-500 sm:inline">·</span>
           <span className="hidden text-void-400 dark:text-void-500 sm:inline">sandboxed (no fetch, no remote images)</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            onClick={() => handlePrint(effectiveRef)}
-            className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
-            title="Print this attachment (opens a print tab — no app chrome)"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Print
-          </button>
-          <a
-            href={viewerHref(effectiveRef, projectId)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
-            title="Open in new tab"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-            <span className="hidden sm:inline">Open in new tab</span>
-          </a>
-          {onUnlink && (
+          <Tooltip content="Print this attachment (opens a print tab — no app chrome)" placement="bottom">
             <button
-              onClick={() => onUnlink(effectiveRef)}
-              className="flex items-center gap-1 rounded border border-red-300/40 px-2 py-1 text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-500/30 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-              title="Unlink this attachment (removes the reference; file is not deleted)"
+              onClick={() => handlePrint(effectiveRef)}
+              className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
               </svg>
-              <span className="hidden sm:inline">Unlink</span>
+              Print
             </button>
+          </Tooltip>
+          <Tooltip content="Open in new tab" placement="bottom">
+            <a
+              href={viewerHref(effectiveRef, projectId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
+              aria-label="Open in new tab"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              <span className="hidden sm:inline">Open in new tab</span>
+            </a>
+          </Tooltip>
+          {onUnlink && (
+            <Tooltip content="Unlink this attachment (removes the reference; file is not deleted)" placement="bottom">
+              <button
+                onClick={() => onUnlink(effectiveRef)}
+                className="flex items-center gap-1 rounded border border-red-300/40 px-2 py-1 text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-500/30 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                aria-label="Unlink this attachment"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <span className="hidden sm:inline">Unlink</span>
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>

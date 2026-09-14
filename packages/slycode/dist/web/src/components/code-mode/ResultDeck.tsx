@@ -8,6 +8,7 @@
  */
 
 import type { NavEvent } from './types';
+import Tooltip from '../Tooltip';
 
 interface ResultDeckProps {
   event: NavEvent; // type === 'deck'
@@ -21,8 +22,12 @@ export function ResultDeck({ event, onOpen, onDismiss }: ResultDeckProps) {
     <div className="flex h-full w-full flex-col overflow-hidden bg-(--cm-panel)">
       <div className="flex items-center gap-2 border-b border-(--cm-line) bg-(--cm-atlas-dim) px-3 py-2">
         <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-(--cm-atlas)">✦ Atlas deck</span>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-(--cm-text)" title={deck.title}>{deck.title}</span>
-        <button onClick={onDismiss} className="font-mono text-[12px] text-(--cm-faint) hover:text-(--cm-text)" title="Dismiss">✕</button>
+        <Tooltip content={deck.title} placement="bottom">
+          <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-(--cm-text)">{deck.title}</span>
+        </Tooltip>
+        <Tooltip content="Dismiss" placement="bottom">
+          <button onClick={onDismiss} aria-label="Dismiss" className="font-mono text-[12px] text-(--cm-faint) hover:text-(--cm-text)">✕</button>
+        </Tooltip>
       </div>
       {event.note && <p className="border-b border-(--cm-line) px-3 py-1.5 text-[11.5px] text-(--cm-muted)">{event.note}</p>}
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">

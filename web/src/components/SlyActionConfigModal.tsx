@@ -10,6 +10,7 @@ import {
 import { usePolling } from '@/hooks/usePolling';
 import { useVoice } from '@/contexts/VoiceContext';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
+import Tooltip from './Tooltip';
 
 // Navigation levels
 type NavLevel = 'list' | 'edit';
@@ -339,15 +340,17 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
           )}
 
           {/* Refresh button */}
-          <button
-            onClick={() => loadData(true)}
-            className="rounded p-1 hover:bg-void-100 dark:hover:bg-void-700"
-            title="Refresh commands"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
+          <Tooltip content="Refresh commands" placement="bottom">
+            <button
+              onClick={() => loadData(true)}
+              className="rounded p-1 hover:bg-void-100 dark:hover:bg-void-700"
+              aria-label="Refresh commands"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </Tooltip>
 
           <button
             onClick={onClose}
@@ -930,15 +933,17 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                           )}
 
                           {/* Remove button */}
-                          <button
-                            onClick={() => removeCommand(cls.id, cmdId)}
-                            className="rounded p-0.5 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
-                            title="Remove from this class"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
+                          <Tooltip content="Remove from this class">
+                            <button
+                              onClick={() => removeCommand(cls.id, cmdId)}
+                              className="rounded p-0.5 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                              aria-label="Remove from this class"
+                            >
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </Tooltip>
                         </li>
                       );
                     })}

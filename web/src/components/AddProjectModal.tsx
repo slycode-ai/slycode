@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useProviders, shortProviderLabel } from '@/lib/use-providers';
+import Tooltip from './Tooltip';
 
 // ============================================================================
 // Types
@@ -614,20 +615,18 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                               <div className="flex items-center justify-between">
                                 <div className="flex min-w-0 items-center gap-2">
                                   {isMissing && (
-                                    <span
-                                      className="flex-shrink-0 text-blue-400"
-                                      title="Will be created"
-                                    >
-                                      +
-                                    </span>
+                                    <Tooltip content="Will be created">
+                                      <span className="flex-shrink-0 text-blue-400">
+                                        +
+                                      </span>
+                                    </Tooltip>
                                   )}
                                   {isPresent && (
-                                    <span
-                                      className="flex-shrink-0 text-green-400"
-                                      title={hasDifferentVersion ? `Local: ${item.localVersion}, Store: ${item.masterVersion}` : 'Up to date'}
-                                    >
-                                      &#x2713;
-                                    </span>
+                                    <Tooltip content={hasDifferentVersion ? `Local: ${item.localVersion}, Store: ${item.masterVersion}` : 'Up to date'}>
+                                      <span className="flex-shrink-0 text-green-400">
+                                        &#x2713;
+                                      </span>
+                                    </Tooltip>
                                   )}
                                   <span className="truncate font-mono text-xs text-void-300">
                                     {item.path}

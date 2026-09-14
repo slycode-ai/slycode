@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import type { KanbanCard, KanbanStage } from '@/lib/types';
 import { KanbanCardItem } from './KanbanCardItem';
+import Tooltip from './Tooltip';
 
 interface StageConfig {
   id: KanbanStage;
@@ -258,19 +259,20 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
         </h3>
         <div className="flex items-center gap-1.5">
           {isDone && (
-            <button
-              type="button"
-              onClick={toggleDoneTags}
-              aria-pressed={showDoneTags}
-              title={showDoneTags ? 'Hide tags on Done cards' : 'Show tags on Done cards'}
-              className={`rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-none transition-colors ${
-                showDoneTags
-                  ? 'border-green-500/60 bg-green-500/15 text-green-700 dark:border-green-400/50 dark:bg-green-400/15 dark:text-green-300'
-                  : 'border-void-400/40 bg-transparent text-void-500 hover:border-green-500/50 hover:text-green-700 dark:border-void-500/40 dark:text-void-400 dark:hover:border-green-400/40 dark:hover:text-green-300'
-              }`}
-            >
-              tags
-            </button>
+            <Tooltip content={showDoneTags ? 'Hide tags on Done cards' : 'Show tags on Done cards'} placement="bottom">
+              <button
+                type="button"
+                onClick={toggleDoneTags}
+                aria-pressed={showDoneTags}
+                className={`rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-none transition-colors ${
+                  showDoneTags
+                    ? 'border-green-500/60 bg-green-500/15 text-green-700 dark:border-green-400/50 dark:bg-green-400/15 dark:text-green-300'
+                    : 'border-void-400/40 bg-transparent text-void-500 hover:border-green-500/50 hover:text-green-700 dark:border-void-500/40 dark:text-void-400 dark:hover:border-green-400/40 dark:hover:text-green-300'
+                }`}
+              >
+                tags
+              </button>
+            </Tooltip>
           )}
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${colors.count}`}>
             {cards.length}

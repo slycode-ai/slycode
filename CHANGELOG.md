@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-09-14
+
+### Added
+- Speech bubble polish — a new Replay button in the header replays your last voice reply from a bridge-side clip store (the last 3 clips per card, kept for 24 hours). If the browser blocks autoplay, a Play button gets the clip playing manually and hands over correctly across tabs. The progress bar is now driven by the audio element's own clock (not a fixed animation), so it tracks real playback, hits 100% on end, and resets on Replay. It fades out after completion and comes back on Replay, and auto-hide pauses while you hover or focus the bubble.
+- Scheduled card prompts — a new stopwatch button on the card lets you schedule a prompt to fire on that card's session at a future time. Pending sends persist across bridge restarts and show up in a per-card popover with Edit and Cancel controls per row, the provider named in the header, and provider chips per row. If the target session is busy when the send is due, delivery defers up to 10 minutes and then force-sends flagged; busy/after-wait state surfaces in the popover, status line, log and CLI.
+
+### Changed
+- Tooltips are now consistent site-wide — a shared Tooltip component replaces browser-default title popups so hover hints have matching styling everywhere in the dashboard.
+- Area index files can now use `### AreaName` headings followed by a path line, alongside the existing `## Areas` list style. The CLI and dashboard read area indexes identically now, with a parity test to keep them in lockstep.
+
+### Fixed
+- Windows: cross-card prompt verification now sees Claude's input box on ConPTY. The old bridge snapshot ran everything through a terminal serializer that glued Claude's wrapped rows into a single line and hid the box; the snapshot now reads the active buffer row-by-row. Real Windows/Claude fixtures replaced the synthetic ones so this stays regression-tested.
+
 ## [0.4.8] - 2026-09-11
 
 ### Added

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getProviderColor } from '@/lib/provider-colors';
+import Tooltip from './Tooltip';
 
 interface ModelEntry { id: string; label: string; description?: string }
 
@@ -218,28 +219,30 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
 
   return (
     <div className="relative hidden sm:block">
-      <button
-        ref={buttonRef}
-        onClick={() => setOpen(o => !o)}
-        title="Default provider & model"
-        className={`relative flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
-          open
-            ? 'border-neon-blue-400/50 bg-neon-blue-400/10 text-neon-blue-400'
-            : 'border-void-200/40 bg-transparent text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400'
-        }`}
-      >
-        {/* CPU/chip icon — the session engine */}
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 5h10a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2zm3 5h4v4h-4v-4z" />
-        </svg>
-        {/* Current default provider, at a glance */}
-        {dotColor && (
-          <span
-            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: dotColor, boxShadow: `0 0 4px ${dotColor}` }}
-          />
-        )}
-      </button>
+      <Tooltip content="Default provider & model" placement="bottom">
+        <button
+          ref={buttonRef}
+          onClick={() => setOpen(o => !o)}
+          aria-label="Default provider & model"
+          className={`relative flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
+            open
+              ? 'border-neon-blue-400/50 bg-neon-blue-400/10 text-neon-blue-400'
+              : 'border-void-200/40 bg-transparent text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400'
+          }`}
+        >
+          {/* CPU/chip icon — the session engine */}
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 5h10a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2zm3 5h4v4h-4v-4z" />
+          </svg>
+          {/* Current default provider, at a glance */}
+          {dotColor && (
+            <span
+              className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: dotColor, boxShadow: `0 0 4px ${dotColor}` }}
+            />
+          )}
+        </button>
+      </Tooltip>
 
       {open && def && (
         <div
@@ -293,18 +296,21 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
             <div className="mb-1 flex items-baseline justify-between">
               <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">Model</span>
               {canRefresh && (
-                <button
-                  type="button"
-                  onClick={refreshModels}
-                  disabled={refreshing}
-                  title={currentProvider?.model?.refreshedAt ? `Last refreshed ${relativeTime(currentProvider.model.refreshedAt)}` : `Ask ${shortName} which models are available here`}
-                  className="flex items-center gap-1 text-[10px] font-medium text-void-500 transition-colors hover:text-neon-blue-400 disabled:cursor-progress disabled:text-void-500"
-                >
-                  <svg className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15.4A7 7 0 0018.4 12M18.4 8.6A7 7 0 005.6 12" />
-                  </svg>
-                  {refreshing ? 'Asking…' : 'Refresh'}
-                </button>
+                <Tooltip content={currentProvider?.model?.refreshedAt ? `Last refreshed ${relativeTime(currentProvider.model.refreshedAt)}` : `Ask ${shortName} which models are available here`}>
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      onClick={refreshModels}
+                      disabled={refreshing}
+                      className="flex items-center gap-1 text-[10px] font-medium text-void-500 transition-colors hover:text-neon-blue-400 disabled:cursor-progress disabled:text-void-500"
+                    >
+                      <svg className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15.4A7 7 0 0018.4 12M18.4 8.6A7 7 0 005.6 12" />
+                      </svg>
+                      {refreshing ? 'Asking…' : 'Refresh'}
+                    </button>
+                  </span>
+                </Tooltip>
               )}
             </div>
             {customMode ? (

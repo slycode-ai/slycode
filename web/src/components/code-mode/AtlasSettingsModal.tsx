@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { cronToHumanReadable } from '@/lib/cron-utils';
 import { relTime } from './AtlasMap';
+import Tooltip from '../Tooltip';
 
 interface ModelOption { id: string; label?: string }
 interface ProviderOption { id: string; name?: string; models: ModelOption[] }
@@ -178,13 +179,15 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
                       spellCheck={false}
                       className="w-full min-w-0 rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[12.5px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
                     />
-                    <button
-                      onClick={() => { setCustomModel(false); setModel(''); }}
-                      title="Back to the configured list"
-                      className="shrink-0 font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)"
-                    >
-                      ✕
-                    </button>
+                    <Tooltip content="Back to the configured list">
+                      <button
+                        onClick={() => { setCustomModel(false); setModel(''); }}
+                        aria-label="Back to the configured list"
+                        className="shrink-0 font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)"
+                      >
+                        ✕
+                      </button>
+                    </Tooltip>
                   </span>
                 ) : (
                   <select

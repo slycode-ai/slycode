@@ -34,6 +34,7 @@ import { ResultDeck } from './ResultDeck';
 import { TourPlayer } from './TourPlayer';
 import { DbSchemaView } from './DbSchemaView';
 import { computeSessionKey } from '@/lib/session-keys';
+import Tooltip from '../Tooltip';
 
 /** Files with at least this many symbols get the L3 file atlas before code. */
 const FILE_ATLAS_MIN_SYMBOLS = 6;
@@ -495,13 +496,15 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
               </div>
             </>
           )}
-          <button
-            onClick={() => setRailCollapsed(c => !c)}
-            className="border-t border-(--cm-line) px-2 py-1.5 text-left font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)"
-            title={railCollapsed ? 'Expand rail' : 'Collapse rail'}
-          >
-            {railCollapsed ? '⟩' : '⟨ collapse'}
-          </button>
+          <Tooltip content={railCollapsed ? 'Expand rail' : 'Collapse rail'} placement="right">
+            <button
+              onClick={() => setRailCollapsed(c => !c)}
+              aria-label={railCollapsed ? 'Expand rail' : 'Collapse rail'}
+              className="border-t border-(--cm-line) px-2 py-1.5 text-left font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)"
+            >
+              {railCollapsed ? '⟩' : '⟨ collapse'}
+            </button>
+          </Tooltip>
         </aside>
 
         {/* ---------- Canvas ---------- */}
@@ -509,9 +512,11 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
           {/* Breadcrumbs */}
           <div className="flex items-center gap-1.5 border-b border-(--cm-line) bg-(--cm-topbar) px-3 py-1.5 font-mono text-[12px] text-(--cm-muted)">
             {canGoBack && (
-              <button onClick={goBack} className="mr-1 rounded px-1.5 py-0.5 text-(--cm-atlas) hover:bg-(--cm-atlas-dim)" title="Back">
-                ←
-              </button>
+              <Tooltip content="Back" placement="bottom">
+                <button onClick={goBack} aria-label="Back" className="mr-1 rounded px-1.5 py-0.5 text-(--cm-atlas) hover:bg-(--cm-atlas-dim)">
+                  ←
+                </button>
+              </Tooltip>
             )}
             {crumbs.map((c, i) => (
               <span key={i} className="flex min-w-0 items-center gap-1.5">
@@ -524,25 +529,28 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
               </span>
             ))}
             {/* Atlas settings modal trigger */}
-            <button
-              onClick={() => setShowSettings(true)}
-              title="Atlas settings — nightly refresh schedule & provider"
-              className="ml-auto flex shrink-0 items-center rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-            >
-              ⚙
-            </button>
+            <Tooltip content="Atlas settings — nightly refresh schedule & provider" placement="bottom">
+              <button
+                onClick={() => setShowSettings(true)}
+                aria-label="Atlas settings — nightly refresh schedule & provider"
+                className="ml-auto flex shrink-0 items-center rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+              >
+                ⚙
+              </button>
+            </Tooltip>
             {/* Atlas terminal toggle — primary affordance (footer has a twin) */}
-            <button
-              onClick={() => setTermOpen(o => !o)}
-              title={termOpen ? 'Close the Atlas terminal' : 'Open the Atlas terminal — ask the codebase'}
-              className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] transition-all ${
-                termOpen
-                  ? 'border-(--cm-atlas) bg-(--cm-atlas-dim) text-(--cm-atlas)'
-                  : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
-              }`}
-            >
-              ✦ Atlas&nbsp;Terminal
-            </button>
+            <Tooltip content={termOpen ? 'Close the Atlas terminal' : 'Open the Atlas terminal — ask the codebase'} placement="bottom">
+              <button
+                onClick={() => setTermOpen(o => !o)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] transition-all ${
+                  termOpen
+                    ? 'border-(--cm-atlas) bg-(--cm-atlas-dim) text-(--cm-atlas)'
+                    : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
+                }`}
+              >
+                ✦ Atlas&nbsp;Terminal
+              </button>
+            </Tooltip>
           </div>
 
           <div className="flex min-h-0 flex-1">
@@ -656,18 +664,19 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
             return (
               <div className="flex min-w-0 items-center gap-2.5 border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[10.5px]">
                 {area && (
-                  <button
-                    onClick={() => goArea(area.id)}
-                    className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--cm-line2) px-2 py-px text-(--cm-muted) transition-all hover:text-(--cm-text)"
-                    style={{ borderColor: area.color }}
-                    title={`Back to ${area.name}`}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: area.color }} />
-                    {area.name}
-                  </button>
+                  <Tooltip content={`Back to ${area.name}`}>
+                    <button
+                      onClick={() => goArea(area.id)}
+                      className="flex shrink-0 items-center gap-1.5 rounded-full border border-(--cm-line2) px-2 py-px text-(--cm-muted) transition-all hover:text-(--cm-text)"
+                      style={{ borderColor: area.color }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: area.color }} />
+                      {area.name}
+                    </button>
+                  </Tooltip>
                 )}
                 <span className="shrink-0 text-(--cm-faint)">{selection.path}</span>
-                {summary && <span className="min-w-0 truncate text-(--cm-muted)" title={summary}>— {summary}</span>}
+                {summary && <Tooltip content={summary}><span className="min-w-0 truncate text-(--cm-muted)">— {summary}</span></Tooltip>}
               </div>
             );
           })()}
@@ -678,6 +687,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
           <div style={{ width: termWidth }} className="relative flex-none border-l border-(--cm-line2)">
             {/* Left-edge resize handle — pointer capture keeps the drag alive
                 over the xterm canvas; refit follows via Terminal's ResizeObserver. */}
+            <Tooltip content="Drag to resize · double-click to reset" placement="left">
             <div
               onPointerDown={e => {
                 e.preventDefault();
@@ -704,8 +714,8 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                 try { localStorage.removeItem(TERM_WIDTH_KEY); } catch { /* ignore */ }
               }}
               className="absolute inset-y-0 -left-[3px] z-20 w-[7px] cursor-col-resize touch-none transition-colors hover:bg-(--cm-atlas)/35 active:bg-(--cm-atlas)/50"
-              title="Drag to resize · double-click to reset"
             />
+            </Tooltip>
             <AtlasTerminal
               projectId={projectId}
               projectName={projectName}
@@ -741,14 +751,17 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
         </span>
         {atlasStats && atlasStats.stale > 0 && <span className="text-(--cm-stale)">{atlasStats.stale} stale</span>}
         {atlasStats && <span>updated {relTime(atlasStats.updated)}</span>}
-        <button
-          onClick={runRefresh}
-          disabled={refreshBusy}
-          title="Start an atlas refresh (re-analyzes stale areas, enriches thin ones)"
-          className="tracking-[0.05em] text-(--cm-muted) hover:text-(--cm-atlas) disabled:opacity-50"
-        >
-          {refreshBusy ? '⟳ starting…' : '⟳ REFRESH'}
-        </button>
+        <Tooltip content="Start an atlas refresh (re-analyzes stale areas, enriches thin ones)">
+          <span className="inline-flex">
+            <button
+              onClick={runRefresh}
+              disabled={refreshBusy}
+              className="tracking-[0.05em] text-(--cm-muted) hover:text-(--cm-atlas) disabled:opacity-50"
+            >
+              {refreshBusy ? '⟳ starting…' : '⟳ REFRESH'}
+            </button>
+          </span>
+        </Tooltip>
         <span>{openFiles.length > 0 ? `${openFiles.length} open` : ''}</span>
         <button
           onClick={() => setTermOpen(o => !o)}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PlaybackGate, unlockAutoplay } from './speaker-playback-gate';
+import { PlaybackGate, unlockAutoplay, planManualPlay, describePlayError, describeMediaError, computeProgress, progressFillStyle, clipListRefreshKey, trackPhase, TRACK_HOLD_MS, TRACK_FADE_MS } from './speaker-playback-gate';
 
 test('gate waits until a fresh snapshot arrives after invalidate (handover)', () => {
   const g = new PlaybackGate();
@@ -78,4 +78,132 @@ test('unlockAutoplay survives a throwing context and a blocked throwaway play', 
   });
   assert.equal(result.touchedContext, false);
   assert.equal(result.touchedAudio, true);
+});
+
+test('manual Play on a delivered clip plays even when the gate would block autoplay', () => {
+  const g = new PlaybackGate();
+  g.invalidate(); // handover: no fresh snapshot
+  g.setRecording(false);
+  const clip = { clipId: 'c1', revision: 7 };
+  assert.equal(g.decide(clip), 'wait', 'autoplay must wait');
+  const plan = planManualPlay({ isHolder: true, current: clip, queue: [], captionClipId: 'c1' });
+  assert.deepEqual(plan, { action: 'play-current' }, 'a deliberate click bypasses the gate');
+  g.applySnapshot({ enabled: false, revision: 7 });
+  assert.equal(g.decide(clip), 'wait', 'even permission-off blocks autoplay');
+  assert.deepEqual(planManualPlay({ isHolder: true, current: clip, queue: [], captionClipId: 'c1' }), { action: 'play-current' });
+});
+
+test('manual Play finds the clip the user is looking at in the queue, or claims holdership from a follower', () => {
+  assert.deepEqual(
+    planManualPlay({ isHolder: true, current: null, queue: [{ clipId: 'a' }, { clipId: 'b' }], captionClipId: 'b' }),
+    { action: 'play-queued', index: 1 },
+  );
+  assert.deepEqual(
+    planManualPlay({ isHolder: true, current: { clipId: 'x' }, queue: [{ clipId: 'b' }], captionClipId: 'b' }),
+    { action: 'play-queued', index: 0 },
+    'caption clip wins over an unrelated current clip',
+  );
+  assert.deepEqual(planManualPlay({ isHolder: false, current: null, queue: [], captionClipId: 'b' }), { action: 'claim-and-wait' });
+  const none = planManualPlay({ isHolder: true, current: null, queue: [], captionClipId: 'gone' });
+  assert.equal(none.action, 'nothing');
+  assert.match((none as { reason: string }).reason, /Nothing left to play/);
+});
+
+test('play() failures are described honestly: only NotAllowedError is an autoplay block', () => {
+  assert.deepEqual(describePlayError({ name: 'NotAllowedError' }), { autoplayBlocked: true, text: 'Browser blocked audio. Click Play reply.' });
+  assert.equal(describePlayError({ name: 'NotSupportedError' }).autoplayBlocked, false);
+  assert.match(describePlayError({ name: 'NotSupportedError' }).text, /format/);
+  assert.equal(describePlayError({ name: 'AbortError' }).autoplayBlocked, false);
+  assert.match(describePlayError(new Error('boom')).text, /Playback failed.*boom/);
+  assert.match(describeMediaError(4), /not supported/);
+  assert.match(describeMediaError(3), /decoded/);
+  assert.match(describeMediaError(undefined, 'x'), /x/);
+});
+
+test('Replay: a click on a clip that already finished replays it, bypassing the gate', () => {
+  const g = new PlaybackGate();
+  g.invalidate();
+  assert.equal(g.decide({ revision: 2 }), 'wait');
+  assert.deepEqual(
+    planManualPlay({ isHolder: true, current: null, queue: [], captionClipId: 'done', lastPlayed: { clipId: 'done' } }),
+    { action: 'replay-last' },
+  );
+  // A newer queued clip the user is looking at still wins over the finished one.
+  assert.deepEqual(
+    planManualPlay({ isHolder: true, current: null, queue: [{ clipId: 'next' }], captionClipId: 'next', lastPlayed: { clipId: 'done' } }),
+    { action: 'play-queued', index: 0 },
+  );
+  // A finished clip that is not the one on screen is not replayed by accident.
+  assert.equal(
+    planManualPlay({ isHolder: true, current: null, queue: [], captionClipId: 'other', lastPlayed: { clipId: 'done' } }).action,
+    'nothing',
+  );
+});
+
+test('progress follows the element clock, is indeterminate without a finite duration, and completes on ended', () => {
+  assert.deepEqual(computeProgress({ currentTime: 0, duration: NaN, ended: false }), { fraction: null, indeterminate: true, complete: false }, 'before loadedmetadata');
+  assert.deepEqual(computeProgress({ currentTime: 3, duration: Infinity, ended: false }), { fraction: null, indeterminate: true, complete: false }, 'streaming-style duration');
+  assert.deepEqual(computeProgress({ currentTime: 1.2, duration: 4.8, ended: false }), { fraction: 0.25, indeterminate: false, complete: false });
+  assert.deepEqual(computeProgress({ currentTime: 9, duration: 4.8, ended: false }), { fraction: 1, indeterminate: false, complete: false }, 'clamped');
+  assert.deepEqual(computeProgress({ currentTime: NaN, duration: 4.8, ended: false }), { fraction: 0, indeterminate: false, complete: false });
+  assert.deepEqual(computeProgress({ currentTime: 4.1, duration: 4.8, ended: true }), { fraction: 1, indeterminate: false, complete: true }, 'ended always finishes the bar');
+  assert.equal(computeProgress({ currentTime: 5, duration: 5, ended: false }).fraction, 1);
+});
+
+test('decoded duration is authoritative when the element over-estimates a header-less MP3', () => {
+  // Element thinks 12.5 s (bitrate estimate); the decoded clip is really 5 s.
+  assert.deepEqual(
+    computeProgress({ currentTime: 2, duration: 12.5, ended: false, decodedDuration: 5 }),
+    { fraction: 0.4, indeterminate: false, complete: false },
+    'fraction uses the decoded length, not the element estimate',
+  );
+  // Without decoding the same instant would read as 16% — the bug Greg saw.
+  assert.equal(computeProgress({ currentTime: 2, duration: 12.5, ended: false }).fraction, 0.16);
+  // Reaching the decoded end completes the bar even though the element has not fired ended.
+  assert.deepEqual(
+    computeProgress({ currentTime: 4.97, duration: 12.5, ended: false, decodedDuration: 5 }),
+    { fraction: 1, indeterminate: false, complete: true },
+  );
+  // Element under-estimating (decoded longer) never completes early.
+  assert.equal(computeProgress({ currentTime: 3, duration: 3, ended: false, decodedDuration: 6 }).complete, false);
+  assert.equal(computeProgress({ currentTime: 3, duration: 3, ended: false, decodedDuration: 6 }).fraction, 0.5);
+  // A decoded duration removes the indeterminate state even before metadata.
+  assert.deepEqual(computeProgress({ currentTime: 0, duration: NaN, ended: false, decodedDuration: 5 }), { fraction: 0, indeterminate: false, complete: false });
+  // Garbage decoded value falls back to the element.
+  assert.equal(computeProgress({ currentTime: 1, duration: 4, ended: false, decodedDuration: NaN }).fraction, 0.25);
+});
+
+test('fill style is derived from fraction only (scaleX from the left), never from a stylesheet animation', () => {
+  assert.deepEqual(progressFillStyle({ fraction: 0, indeterminate: false, complete: false }), { transform: 'scaleX(0)', transformOrigin: 'left' });
+  assert.deepEqual(progressFillStyle({ fraction: 0.552, indeterminate: false, complete: false }), { transform: 'scaleX(0.552)', transformOrigin: 'left' });
+  assert.deepEqual(progressFillStyle({ fraction: 1, indeterminate: false, complete: true }), { transform: 'scaleX(1)', transformOrigin: 'left' });
+  assert.deepEqual(progressFillStyle({ fraction: 7, indeterminate: false, complete: false }), { transform: 'scaleX(1)', transformOrigin: 'left' }, 'clamped');
+  assert.equal(progressFillStyle({ fraction: null, indeterminate: true, complete: false }), undefined, 'indeterminate leaves the CSS sweep in charge');
+  // Greg's captured sequence maps 1:1 onto the fill.
+  for (const f of [0.175, 0.361, 0.552, 0.739, 0.927, 1]) {
+    assert.equal(progressFillStyle({ fraction: f, indeterminate: false, complete: f === 1 })?.transform, `scaleX(${f})`);
+  }
+});
+
+test('the footer Replay refetch key changes on every delivered clip, not only on mount', () => {
+  const base = { clipSeq: 0, revision: 1, enabled: true as boolean | null, replayableClipId: null as string | null, captionClipId: null as string | null };
+  const k0 = clipListRefreshKey(base);
+  assert.equal(clipListRefreshKey({ ...base }), k0, 'stable when nothing changed');
+  assert.notEqual(clipListRefreshKey({ ...base, clipSeq: 1 }), k0, 'a delivery (stream clip event) triggers a refetch');
+  assert.notEqual(clipListRefreshKey({ ...base, revision: 2 }), k0, 'a speaker-state change triggers a refetch');
+  assert.notEqual(clipListRefreshKey({ ...base, replayableClipId: 'c1' }), k0, 'a finished clip triggers a refetch');
+  assert.notEqual(clipListRefreshKey({ ...base, captionClipId: 'c1' }), k0, 'a relayed caption triggers a refetch in follower tabs');
+});
+
+test('after a clip ends the bar holds at 100%, fades, then hides; Replay brings it back', () => {
+  const done = { fraction: 1, indeterminate: false, complete: true };
+  assert.deepEqual(progressFillStyle(done), { transform: 'scaleX(1)', transformOrigin: 'left' }, 'still full during the hold');
+  assert.equal(trackPhase({ playing: true, complete: false, msSinceComplete: null }), 'live');
+  assert.equal(trackPhase({ playing: false, complete: true, msSinceComplete: 0 }), 'live', 'hold at 100% right after ended');
+  assert.equal(trackPhase({ playing: false, complete: true, msSinceComplete: TRACK_HOLD_MS }), 'fading');
+  assert.equal(trackPhase({ playing: false, complete: true, msSinceComplete: TRACK_HOLD_MS + TRACK_FADE_MS }), 'hidden', 'ended → hidden after the fade');
+  assert.equal(trackPhase({ playing: false, complete: false, msSinceComplete: null }), 'hidden', 'idle: no bar');
+  // Replay: the clip restarts (fraction 0, complete false) → the bar is back.
+  assert.equal(trackPhase({ playing: true, complete: false, msSinceComplete: 5000 }), 'live');
+  assert.deepEqual(progressFillStyle({ fraction: 0, indeterminate: false, complete: false }), { transform: 'scaleX(0)', transformOrigin: 'left' });
 });

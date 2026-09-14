@@ -110,6 +110,36 @@ export interface AutomationConfig {
   nextRun?: string;                        // ISO timestamp of next scheduled run
 }
 
+/**
+ * A one-shot timed send into a card's terminal session (card #0352).
+ *
+ * Lives on the card (`card.scheduled_prompts`) so the scheduler's per-tick
+ * board scan, the card face, and the terminal-footer popover all read one
+ * record. Written ONLY by the web server (API route + scheduler tick) under
+ * the board lock; web board saves always take this field from disk.
+ */
+export type ScheduledPromptState = 'pending' | 'firing' | 'delivered' | 'failed' | 'cancelled' | 'missed';
+
+export interface ScheduledPrompt {
+  id: string;             // 'sp-<ms>-<rand>'
+  message: string;        // ≤ 2000 chars, control chars stripped
+  fireAt: string;         // UTC ISO instant
+  createdAt: string;      // UTC ISO
+  sessionName: string;    // bridge session the send targets (fixed at schedule time)
+  provider: string;       // provider segment of that session
+  host: string;           // os.hostname() at schedule time — never fires on another machine
+  state: ScheduledPromptState;
+  firedAt?: string;       // set on claim (state → firing)
+  finishedAt?: string;    // set when the entry reaches a terminal state
+  outcome?: DeliveryInfo['outcome'];
+  error?: string;
+  /** Times the tick found the session busy and pushed the send to the next tick. */
+  deferrals?: number;
+  lastDeferredAt?: string;
+  /** How a delivered send actually landed — 'after_wait' (idle after ≥1 deferral) or 'forced_busy' (pasted into a busy agent past the wait bound; operator should check). */
+  deliveryNote?: 'after_wait' | 'forced_busy';
+}
+
 /** Mirror of the bridge's DeliveryResult (feature 070) — kept loose so an older/newer bridge can't break logging. */
 export interface DeliveryInfo {
   outcome: 'delivered' | 'failed' | 'ambiguous' | 'blocked';
@@ -135,7 +165,7 @@ export interface AutomationLogEntry {
   cardId: string;
   cardTitle: string;
   projectId: string;
-  trigger: 'scheduled' | 'manual';
+  trigger: 'scheduled' | 'manual' | 'scheduled_prompt';
   provider: string;
   sessionName: string;
   fresh: boolean;
@@ -178,6 +208,7 @@ export interface KanbanCard {
     tier?: 'high' | 'medium' | 'low';
   };  // Short AI-set progress status; auto-cleared on stage move
   automation?: AutomationConfig;  // Present when card is in automation mode
+  scheduled_prompts?: ScheduledPrompt[];  // One-shot timed sends into the card's session (card #0352); server-owned, see lib/scheduled-prompts.ts
   archived?: boolean;   // Soft delete - hidden from normal views
   created_at: string;
   updated_at: string;

@@ -998,18 +998,38 @@ body {
 
 /* ========== Spoken replies: speech bubble (feature 086) ========== */
 
-/* One hairline that fills while a clip plays — the bubble's only motion. */
-@keyframes speech-bubble-fill {
-  from { width: 0; }
-  to { width: 100%; }
+/* One hairline that fills while a clip plays — the bubble's only motion.
+   The fill is a scaleX TRANSFORM set inline from the audio clock's fraction
+   (see progressFillStyle); no stylesheet width, animation or transition may
+   touch it, so the bar can never disagree with the number. The only rule
+   here is the indeterminate sweep used while the clip length is unknown. */
+@keyframes speech-bubble-sweep {
+  from { transform: translateX(-100%) scaleX(0.33); }
+  to { transform: translateX(300%) scaleX(0.33); }
 }
-.speech-bubble-progress {
-  width: 0;
-  animation: speech-bubble-fill 24s linear forwards;
+.speech-bubble-indeterminate {
+  transform-origin: left;
+  animation: speech-bubble-sweep 1.4s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .speech-bubble-progress {
+  .speech-bubble-indeterminate { animation: none; transform: scaleX(0.5); }
+}
+
+/* ========== Shared Tooltip (#0354) ========== */
+/* Same bubble as the kanban card hover; a short settle from the anchor's side. */
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translate(var(--tt-dx, 0), var(--tt-dy, 0)); }
+  to { opacity: 1; transform: translate(0, 0); }
+}
+.tooltip-bubble-in {
+  animation: tooltip-in 140ms ease-out;
+}
+.tooltip-bubble[data-side="top"] { --tt-dy: 4px; }
+.tooltip-bubble[data-side="bottom"] { --tt-dy: -4px; }
+.tooltip-bubble[data-side="left"] { --tt-dx: 4px; }
+.tooltip-bubble[data-side="right"] { --tt-dx: -4px; }
+@media (prefers-reduced-motion: reduce) {
+  .tooltip-bubble-in {
     animation: none;
-    width: 100%;
   }
 }

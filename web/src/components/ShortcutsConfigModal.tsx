@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Shortcut, ShortcutsFile, KanbanCard, KanbanStages, ProviderId } from '@/lib/types';
 import { useProviders, shortProviderLabel } from '@/lib/use-providers';
+import Tooltip from './Tooltip';
 
 /**
  * Suggest a project tag from the project's display name.
@@ -337,14 +338,15 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                     }`}
                   />
                   {showSuggestion && (
-                    <button
-                      type="button"
-                      onClick={applySuggestion}
-                      className="rounded-md border border-amber-400/50 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-400/20 dark:text-amber-300"
-                      title="Use the suggested tag (you still need to click Save)"
-                    >
-                      Suggest: <span className="font-mono">{inferredTag}</span>
-                    </button>
+                    <Tooltip content="Use the suggested tag (you still need to click Save)">
+                      <button
+                        type="button"
+                        onClick={applySuggestion}
+                        className="rounded-md border border-amber-400/50 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-400/20 dark:text-amber-300"
+                      >
+                        Suggest: <span className="font-mono">{inferredTag}</span>
+                      </button>
+                    </Tooltip>
                   )}
                 </div>
                 {(liveTagError || tagError) && (
@@ -436,11 +438,11 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                           {/* Collapsed-row header — always rendered, doubles as the
                               toggle when collapsed and the title bar when expanded. */}
                           <div className="flex items-center gap-2 px-3 py-2">
+                            <Tooltip content={isCollapsed ? 'Expand' : 'Collapse'}>
                             <button
                               type="button"
                               onClick={toggleCollapse}
                               className="flex flex-1 items-center gap-2 text-left text-sm text-void-700 hover:text-neon-blue-500 dark:text-void-200"
-                              title={isCollapsed ? 'Expand' : 'Collapse'}
                             >
                               <svg
                                 className={`h-3 w-3 flex-shrink-0 transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
@@ -455,9 +457,11 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                               </span>
                               <span className="truncate text-void-500 dark:text-void-400">→ {cardLabel}</span>
                               {d.prompt && (
-                                <span className="hidden text-[11px] text-void-400 sm:inline" title={d.prompt}>
-                                  · prompt set
-                                </span>
+                                <Tooltip content={d.prompt}>
+                                  <span className="hidden text-[11px] text-void-400 sm:inline">
+                                    · prompt set
+                                  </span>
+                                </Tooltip>
                               )}
                               {d.provider && (
                                 <span className="hidden rounded-sm bg-void-200 px-1 text-[10px] uppercase text-void-700 sm:inline dark:bg-void-700 dark:text-void-300">
@@ -465,6 +469,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                                 </span>
                               )}
                             </button>
+                            </Tooltip>
 
                             {/* Copy buttons in the header so they're visible
                                 whether the row is collapsed or expanded. */}
@@ -476,26 +481,30 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                             )}
                             {/* Run + delete buttons. Run is visible whenever the
                                 shortcut is fully addressable (label + card). */}
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); runShortcut(); }}
-                              disabled={!webRelPath || !!labelErr || !d.cardId}
-                              className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-400"
-                              title="Run shortcut now"
-                            >
-                              ▶ Run
-                            </button>
+                            <Tooltip content="Run shortcut now">
+                              <span className="inline-flex">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); runShortcut(); }}
+                                  disabled={!webRelPath || !!labelErr || !d.cardId}
+                                  className="rounded-md border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-400"
+                                >
+                                  ▶ Run
+                                </button>
+                              </span>
+                            </Tooltip>
+                            <Tooltip content="Delete">
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); removeDraft(d._key); }}
                               className="rounded-md p-1 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
                               aria-label="Delete shortcut"
-                              title="Delete"
                             >
                               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             </button>
+                            </Tooltip>
                           </div>
 
                           {/* Expanded body */}
@@ -628,11 +637,12 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
 /**
  * Compact copy button used in both the collapsed row header and the expanded
  * body. Shows a small label like "Web" or "TG" plus a clipboard icon; the
- * full URL lives in the title (tooltip) and goes to the clipboard on click.
+ * full URL lives in the tooltip and goes to the clipboard on click.
  */
 function CopyChip({ label, value, title }: { label: string; value: string; title?: string }) {
   const [copied, setCopied] = useState(false);
   return (
+    <Tooltip content={title || `Copy: ${value}`}>
     <button
       type="button"
       onClick={(e) => {
@@ -652,7 +662,6 @@ function CopyChip({ label, value, title }: { label: string; value: string; title
           ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-600 dark:text-emerald-400'
           : 'border-void-300 bg-white text-void-600 hover:border-neon-blue-400 hover:bg-neon-blue-400/10 hover:text-neon-blue-500 dark:border-void-700 dark:bg-void-900 dark:text-void-300'
       }`}
-      title={title || `Copy: ${value}`}
     >
       {/* Icon flips between clipboard and check; label stays fixed so the
           button width doesn't change on click (avoids layout shift in the
@@ -668,5 +677,6 @@ function CopyChip({ label, value, title }: { label: string; value: string; title
       )}
       <span>{label}</span>
     </button>
+    </Tooltip>
   );
 }

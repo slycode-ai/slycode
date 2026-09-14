@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { parseDiffLines, diffStats, DiffLineRows, type DiffLine } from '../DiffLineView';
 import type { OpenTarget } from './types';
+import Tooltip from '../Tooltip';
 
 interface DiffViewProps {
   projectId: string;
@@ -137,14 +138,15 @@ export function DiffView({ projectId, path, commit, onOpenFile }: DiffViewProps)
               {/* Per-file header (skip the extra chrome in single-file mode) */}
               {!path && (
                 <div className="flex items-center gap-2 border-b border-(--cm-line) bg-(--cm-panel) px-2.5 py-1.5 font-mono text-[11px]">
-                  <button
-                    onClick={() => toggle(f.path)}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-(--cm-text) hover:text-(--cm-atlas)"
-                    title={isCollapsed ? 'Expand' : 'Collapse'}
-                  >
-                    <span className="text-(--cm-faint)">{isCollapsed ? '▸' : '▾'}</span>
-                    <span className="truncate">{f.path}</span>
-                  </button>
+                  <Tooltip content={isCollapsed ? 'Expand' : 'Collapse'}>
+                    <button
+                      onClick={() => toggle(f.path)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-(--cm-text) hover:text-(--cm-atlas)"
+                    >
+                      <span className="text-(--cm-faint)">{isCollapsed ? '▸' : '▾'}</span>
+                      <span className="truncate">{f.path}</span>
+                    </button>
+                  </Tooltip>
                   <span className="shrink-0 text-emerald-500">+{f.additions}</span>
                   <span className="shrink-0 text-red-500">−{f.deletions}</span>
                   <button

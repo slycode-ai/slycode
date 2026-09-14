@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import type { OpenTarget, SearchMatch } from './types';
+import Tooltip from '../Tooltip';
 
 interface SearchRailProps {
   projectId: string;
@@ -62,9 +63,11 @@ export function SearchRail({ projectId, onOpenFile }: SearchRailProps) {
         )}
         {[...groups.entries()].map(([file, fileMatches]) => (
           <div key={file} className="mb-1.5">
-            <p className="truncate px-2 pt-1 font-mono text-[10.5px] font-semibold text-(--cm-text)" title={file}>
-              {file} <span className="font-normal text-(--cm-faint)">({fileMatches.length})</span>
-            </p>
+            <Tooltip content={file} placement="right">
+              <p className="truncate px-2 pt-1 font-mono text-[10.5px] font-semibold text-(--cm-text)">
+                {file} <span className="font-normal text-(--cm-faint)">({fileMatches.length})</span>
+              </p>
+            </Tooltip>
             {fileMatches.map((m, i) => (
               <button
                 key={`${m.line}-${i}`}

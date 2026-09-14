@@ -22,6 +22,7 @@ import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
 import { useVoice } from '@/contexts/VoiceContext';
 import { formatDateTime } from '@/lib/date-format';
+import Tooltip from './Tooltip';
 
 interface DashboardProps {
   data: DashboardData;
@@ -335,17 +336,18 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
       <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-        <button
-          onClick={() => setShowProviderConfig(true)}
-          title="Provider config"
-          aria-label="Provider config"
-          className="rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
-        >
-          {/* Sliders icon — ordering + toggles */}
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m2 0h1M13 4v4M7 10v4M17 16v4" />
-          </svg>
-        </button>
+        <Tooltip content="Provider config" placement="bottom">
+          <button
+            onClick={() => setShowProviderConfig(true)}
+            aria-label="Provider config"
+            className="rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
+          >
+            {/* Sliders icon — ordering + toggles */}
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m2 0h1M13 4v4M7 10v4M17 16v4" />
+            </svg>
+          </button>
+        </Tooltip>
         <ThemeToggle />
         <LogoutButton />
       </div>

@@ -5,6 +5,9 @@ import { createPortal } from 'react-dom';
 import type { KanbanCard, KanbanStage } from '@/lib/types';
 import { readStatus, type CardStatus } from '@/lib/status';
 import { formatCardNumber } from '@/lib/kanban-numbering';
+import { formatFireTime, formatCountdown, nextPendingFireAt, pendingEntries } from '@/lib/scheduled-prompts';
+import { StopwatchGlyph } from './StopwatchGlyph';
+import Tooltip from './Tooltip';
 
 // Status panel: single static text with ellipsis at rest.
 // On hover, IF the text overflows the container, fade in a marquee overlay
@@ -41,31 +44,32 @@ function CardStatusPanel({ status, stage }: { status: CardStatus; stage: KanbanS
 
   const gap = '\u00A0'.repeat(6);
   return (
-    <div
-      className={`card-status stage-${stage}`}
-      data-overflows={overflows ? 'true' : 'false'}
-      title={status.text}
-      aria-label={`Card status: ${status.text}`}
-      style={{ '--card-status-marquee-duration': `${marqueeSeconds}s` } as React.CSSProperties}
-    >
-      {/* Rest layer: always present. Block-level; long text clips at panel edge
-          (no ellipsis — chosen for the LED-marquee aesthetic). The full text is
-          available via the title attribute (pointer hover) and aria-label
-          (screen readers). */}
-      <div ref={restRef} className="card-status-rest">
-        <span className="card-status-text">{status.text}</span>
-      </div>
-      {/* Marquee layer: only rendered when text overflows. Absolute overlay; fades
-          in on group hover, animates the track for a seamless scroll. */}
-      {overflows && (
-        <div className="card-status-marquee" aria-hidden="true">
-          <div className="card-status-track">
-            <span className="card-status-text">{status.text}{gap}</span>
-            <span className="card-status-text">{status.text}{gap}</span>
-          </div>
+    <Tooltip content={status.text}>
+      <div
+        className={`card-status stage-${stage}`}
+        data-overflows={overflows ? 'true' : 'false'}
+        aria-label={`Card status: ${status.text}`}
+        style={{ '--card-status-marquee-duration': `${marqueeSeconds}s` } as React.CSSProperties}
+      >
+        {/* Rest layer: always present. Block-level; long text clips at panel edge
+            (no ellipsis — chosen for the LED-marquee aesthetic). The full text is
+            available via the title attribute (pointer hover) and aria-label
+            (screen readers). */}
+        <div ref={restRef} className="card-status-rest">
+          <span className="card-status-text">{status.text}</span>
         </div>
-      )}
-    </div>
+        {/* Marquee layer: only rendered when text overflows. Absolute overlay; fades
+            in on group hover, animates the track for a seamless scroll. */}
+        {overflows && (
+          <div className="card-status-marquee" aria-hidden="true">
+            <div className="card-status-track">
+              <span className="card-status-text">{status.text}{gap}</span>
+              <span className="card-status-text">{status.text}{gap}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </Tooltip>
   );
 }
 
@@ -133,19 +137,21 @@ function ChecklistProgress({ completed, total }: { completed: number; total: num
   if (isComplete) {
     // Green circle with checkmark when complete
     return (
-      <div className="flex items-center" title="Checklist complete">
-        <svg width={size} height={size} viewBox="0 0 16 16" className="text-void-400 dark:text-void-500">
-          <circle cx="8" cy="8" r="7" fill="currentColor" />
-          <path
-            d="M5 8l2 2 4-4"
-            stroke="white"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </svg>
-      </div>
+      <Tooltip content="Checklist complete">
+        <div className="flex items-center">
+          <svg width={size} height={size} viewBox="0 0 16 16" className="text-void-400 dark:text-void-500">
+            <circle cx="8" cy="8" r="7" fill="currentColor" />
+            <path
+              d="M5 8l2 2 4-4"
+              stroke="white"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </svg>
+        </div>
+      </Tooltip>
     );
   }
 
@@ -157,34 +163,36 @@ function ChecklistProgress({ completed, total }: { completed: number; total: num
     : 'text-void-200 dark:text-void-600';
 
   return (
-    <div className="flex items-center gap-1" title={`${completed}/${total} items complete`}>
-      <svg width={size} height={size} className="-rotate-90">
-        {/* Background circle - bright red when 0%, gray otherwise */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          className={bgColor}
-        />
-        {/* Progress circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          className={progressColor}
-        />
-      </svg>
-      <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500 dark:text-void-400">{completed}/{total}</span>
-    </div>
+    <Tooltip content={`${completed}/${total} items complete`}>
+      <div className="flex items-center gap-1">
+        <svg width={size} height={size} className="-rotate-90">
+          {/* Background circle - bright red when 0%, gray otherwise */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            className={bgColor}
+          />
+          {/* Progress circle */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            className={progressColor}
+          />
+        </svg>
+        <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500 dark:text-void-400">{completed}/{total}</span>
+      </div>
+    </Tooltip>
   );
 }
 
@@ -260,6 +268,9 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
   };
 
   const status = !isCompact ? readStatus(card.status) : null;
+  // Scheduled sends chip (card #0352): only while something is pending.
+  const nextScheduled = !isCompact ? nextPendingFireAt(card.scheduled_prompts) : null;
+  const pendingSends = nextScheduled ? pendingEntries(card.scheduled_prompts) : [];
   const hasTags = !isCompact && !status && (card.areas.length > 0 || card.tags.length > 0);
   // Done-lane tag toggle: in compact (Done) mode, show ALL tags (no areas, no
   // truncation) when the column's toggle is on.
@@ -310,16 +321,18 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
             )}
             {/* Session status dot */}
             {(isActivelyWorking || sessionStatus === 'running') && (
-              <span className="relative flex h-2.5 w-2.5 -translate-y-px" title="Session running">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00e676] opacity-75"></span>
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00e676] dark:drop-shadow-[0_0_4px_rgba(0,230,118,0.6)]" style={{ boxShadow: '0 0 6px rgba(0,230,118,0.6)' }}></span>
-              </span>
+              <Tooltip content="Session running">
+                <span className="relative flex h-2.5 w-2.5 -translate-y-px">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00e676] opacity-75"></span>
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00e676] dark:drop-shadow-[0_0_4px_rgba(0,230,118,0.6)]" style={{ boxShadow: '0 0 6px rgba(0,230,118,0.6)' }}></span>
+                </span>
+              </Tooltip>
             )}
             {!isActivelyWorking && (sessionStatus === 'detached' || sessionStatus === 'resumable') && (
-              <span className="flex h-2.5 w-2.5 -translate-y-px rounded-full bg-neon-orange-400 dark:drop-shadow-[0_0_4px_rgba(255,140,0,0.5)]" title="Session paused" style={{ boxShadow: '0 0 4px rgba(255,140,0,0.4)' }} />
+              <Tooltip content="Session paused"><span className="flex h-2.5 w-2.5 -translate-y-px rounded-full bg-neon-orange-400 dark:drop-shadow-[0_0_4px_rgba(255,140,0,0.5)]"  style={{ boxShadow: '0 0 4px rgba(255,140,0,0.4)' }} /></Tooltip>
             )}
             {!isActivelyWorking && sessionStatus === 'none' && (
-              <span className="flex h-2 w-2 -translate-y-px rounded-full bg-void-300 dark:bg-void-600" title="No session" />
+              <Tooltip content="No session"><span className="flex h-2 w-2 -translate-y-px rounded-full bg-void-300 dark:bg-void-600" /></Tooltip>
             )}
           </div>
         </div>
@@ -382,6 +395,18 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
             </div>
           )}
           <div className="flex shrink-0 items-center gap-1.5">
+            {nextScheduled && (
+              <Tooltip content={pendingSends.map(e => `${formatFireTime(e.fireAt)} (${formatCountdown(e.fireAt)}): ${e.message}`).join('\n')}>
+                <span
+                  className="flex items-center gap-0.5 rounded border border-neon-orange-400/35 bg-neon-orange-400/10 px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-neon-orange-700 dark:text-neon-orange-300/90"
+                  aria-label={`Scheduled send at ${formatFireTime(nextScheduled)}`}
+                >
+                  <StopwatchGlyph pointAt={nextScheduled} className="h-2.5 w-2.5" />
+                  {formatFireTime(nextScheduled)}
+                  {pendingSends.length > 1 && <span className="opacity-70">+{pendingSends.length - 1}</span>}
+                </span>
+              </Tooltip>
+            )}
             {checklistTotal > 0 && (
               <ChecklistProgress completed={checklistCompleted} total={checklistTotal} />
             )}

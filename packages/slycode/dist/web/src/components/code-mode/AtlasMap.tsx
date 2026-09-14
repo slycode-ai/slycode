@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import type { AtlasSnapshot, ContextSelection, TourWithFreshness } from './types';
 import { DigestTab } from './DigestPanel';
+import Tooltip from '../Tooltip';
 
 interface AtlasMapProps {
   /** null = first fetch still in flight — show loading, never the empty state */
@@ -61,14 +62,17 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
           <span className="ml-3 font-mono text-[11px] font-normal text-(--cm-muted)">
             {root.areas.length} areas · updated {relTime(root.updated_at)}
           </span>
-          <button
-            onClick={onRunFirstScan}
-            disabled={firstScanBusy}
-            title="Start an atlas refresh in the Atlas terminal — re-analyzes stale areas and enriches thin ones"
-            className="ml-auto rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] font-normal uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
-          >
-            {firstScanBusy ? 'starting…' : '⟳ Refresh atlas'}
-          </button>
+          <Tooltip content="Start an atlas refresh in the Atlas terminal — re-analyzes stale areas and enriches thin ones" placement="bottom">
+            <span className="ml-auto inline-flex">
+              <button
+                onClick={onRunFirstScan}
+                disabled={firstScanBusy}
+                className="rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] font-normal uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
+              >
+                {firstScanBusy ? 'starting…' : '⟳ Refresh atlas'}
+              </button>
+            </span>
+          </Tooltip>
         </h1>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
@@ -99,16 +103,18 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
                 <h3 className="flex items-center gap-2 text-[14px] font-semibold text-(--cm-text)">
                   <span className="h-2 w-2 rounded-full" style={{ background: 'var(--hue)', boxShadow: '0 0 8px var(--hue)' }} />
                   {area.name}
-                  {area.pinned && <span title="Pinned — name survives refreshes" className="text-[10px] text-(--cm-faint)">📌</span>}
+                  {area.pinned && <Tooltip content="Pinned — name survives refreshes"><span className="text-[10px] text-(--cm-faint)">📌</span></Tooltip>}
                 </h3>
                 <p className="mt-0.5 font-mono text-[10px] text-(--cm-faint)">{area.paths.join(' · ')}</p>
                 {area.summary && <p className="mt-2 text-[11.5px] leading-relaxed text-(--cm-muted)">{area.summary}</p>}
                 <div className="mt-2.5 flex items-center gap-2.5 font-mono text-[10px] text-(--cm-faint)">
-                  <span className="flex items-center gap-[3px]" title={`${fresh?.churn ?? 0} commits touched this area (14 days)`}>
-                    {[1, 2, 3, 4, 5].map(i => (
-                      <i key={i} className="h-[5px] w-[5px] rounded-[1px]" style={{ background: i <= churnLevel ? 'var(--hue)' : 'var(--cm-panel3)' }} />
-                    ))}
-                  </span>
+                  <Tooltip content={`${fresh?.churn ?? 0} commits touched this area (14 days)`}>
+                    <span className="flex items-center gap-[3px]">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <i key={i} className="h-[5px] w-[5px] rounded-[1px]" style={{ background: i <= churnLevel ? 'var(--hue)' : 'var(--cm-panel3)' }} />
+                      ))}
+                    </span>
+                  </Tooltip>
                   <FreshTag fresh={fresh} />
                 </div>
               </button>
@@ -198,13 +204,14 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 {!fresh || !fresh.hasNode ? 'no analysis' : fresh.stale ? 'stale' : `analyzed ${relTime(fresh.analyzedAt!)}`}
               </span>
               <span className="ml-auto flex items-center gap-1.5">
-                <button
-                  onClick={onDeselect}
-                  title="Back to project overview & key flows"
-                  className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-                >
-                  ‹ overview
-                </button>
+                <Tooltip content="Back to project overview & key flows" placement="bottom">
+                  <button
+                    onClick={onDeselect}
+                    className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+                  >
+                    ‹ overview
+                  </button>
+                </Tooltip>
                 <button
                   onClick={() => onEnterArea(area.id)}
                   className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--hue,var(--cm-atlas))"
@@ -212,13 +219,15 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 >
                   Zoom in ⤵
                 </button>
-                <button
-                  onClick={onToggleExpand}
-                  title={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'}
-                  className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-                >
-                  {expanded ? '✕' : '⤢'}
-                </button>
+                <Tooltip content={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'} placement="bottom">
+                  <button
+                    onClick={onToggleExpand}
+                    aria-label={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'}
+                    className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+                  >
+                    {expanded ? '✕' : '⤢'}
+                  </button>
+                </Tooltip>
               </span>
             </div>
             <div className="flex min-h-0 flex-1 gap-6">
@@ -233,17 +242,17 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 <div className="w-[320px] min-w-0 flex-none overflow-y-auto">
                   <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key files</p>
                   {node.key_files.slice(0, 8).map(k => (
-                    <button
-                      key={k.path}
-                      onClick={() => onOpenFile(k.path)}
-                      className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
-                      title={k.path}
-                    >
-                      <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
-                        {k.path.split('/').slice(-2).join('/')}
-                      </span>
-                      <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
-                    </button>
+                    <Tooltip key={k.path} content={k.path}>
+                      <button
+                        onClick={() => onOpenFile(k.path)}
+                        className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
+                      >
+                        <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
+                          {k.path.split('/').slice(-2).join('/')}
+                        </span>
+                        <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
+                      </button>
+                    </Tooltip>
                   ))}
                 </div>
               )}
@@ -279,24 +288,27 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
               <span className="ml-auto flex items-center gap-1.5 pb-1">
                 {tab === 'catchup' && digest && (
                   unseen ? (
-                    <button
-                      onClick={markRead}
-                      title="Mark read — the next digest starts from here"
-                      className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110"
-                    >
-                      ✓ Mark read
-                    </button>
+                    <Tooltip content="Mark read — the next digest starts from here" placement="bottom">
+                      <button
+                        onClick={markRead}
+                        className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110"
+                      >
+                        ✓ Mark read
+                      </button>
+                    </Tooltip>
                   ) : (
                     <span className="font-mono text-[9.5px] text-(--cm-faint)">read · anchor advanced</span>
                   )
                 )}
-                <button
-                  onClick={onToggleExpand}
-                  title={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'}
-                  className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
-                >
-                  {expanded ? '✕' : '⤢'}
-                </button>
+                <Tooltip content={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'} placement="bottom">
+                  <button
+                    onClick={onToggleExpand}
+                    aria-label={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'}
+                    className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] leading-none text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+                  >
+                    {expanded ? '✕' : '⤢'}
+                  </button>
+                </Tooltip>
               </span>
             </div>
 
@@ -398,19 +410,22 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
                 ▶ Start
               </button>
               {onRefreshTour && (
-                <button
-                  onClick={() => onRefreshTour(tour.id)}
-                  title={stale
+                <Tooltip
+                  content={stale
                     ? 'Source files changed — ask the Atlas to re-answer this tour against the current code'
                     : 'Ask the Atlas to rewrite this tour against the current code'}
-                  className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-all ${
-                    stale
-                      ? 'border-amber-500/50 text-amber-600 hover:brightness-110 dark:text-amber-400'
-                      : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
-                  }`}
                 >
-                  ⟳ Refresh
-                </button>
+                  <button
+                    onClick={() => onRefreshTour(tour.id)}
+                    className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-all ${
+                      stale
+                        ? 'border-amber-500/50 text-amber-600 hover:brightness-110 dark:text-amber-400'
+                        : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
+                    }`}
+                  >
+                    ⟳ Refresh
+                  </button>
+                </Tooltip>
               )}
               <span className="ml-auto font-mono text-[9.5px] text-(--cm-faint)">
                 {tour.steps.length} steps · {relTime(tour.updated_at)}

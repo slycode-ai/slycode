@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SkillStatusResponse, SkillUpdateStatus, WatchedSkillName } from '@/lib/types';
+import Tooltip from './Tooltip';
 
 interface Props {
   projectId: string;
@@ -148,16 +149,17 @@ export function SkillUpdateToast({ projectId }: Props) {
             </button>
           )}
         </div>
-        <button
-          onClick={handleDismiss}
-          className="ml-1 mt-0.5 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"
-          aria-label="Dismiss for 1 hour"
-          title="Dismiss for 1 hour"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <Tooltip content="Dismiss for 1 hour">
+          <button
+            onClick={handleDismiss}
+            className="ml-1 mt-0.5 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"
+            aria-label="Dismiss for 1 hour"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
