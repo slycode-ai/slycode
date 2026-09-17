@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, JetBrains_Mono, Press_Start_2P } from 'next/font/goo
 import './globals.css';
 import { VoiceProvider } from '@/contexts/VoiceContext';
 import CleartextWarningBanner from '@/components/CleartextWarningBanner';
+import ConnectionStarvationBanner from '@/components/ConnectionStarvationBanner';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -51,6 +52,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${pressStart2P.variable} font-sans antialiased`}
       >
         <CleartextWarningBanner />
+        <ConnectionStarvationBanner />
         <VoiceProvider>{children}</VoiceProvider>
       </body>
     </html>

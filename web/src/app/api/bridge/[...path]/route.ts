@@ -4,6 +4,13 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 import { getBridgeUrl } from '@/lib/paths';
+import { bridgeUnavailablePayload, describeBridgeFetchError } from '@/lib/bridge-proxy-errors';
+
+/** 503 + Retry-After: the bridge is not listening (starting/restarting). Card #0363. */
+function bridgeUnavailable(err: unknown): NextResponse {
+  const p = bridgeUnavailablePayload(err);
+  return NextResponse.json(p.body, { status: p.status, headers: p.headers });
+}
 
 const BRIDGE_URL = getBridgeUrl();
 
@@ -18,7 +25,6 @@ export async function GET(
   // Check if this is an SSE stream request
   if (targetPath.endsWith('/stream')) {
     const streamId = `stream-${Date.now().toString(36)}`;
-    console.log(`[SSE-PROXY] ${streamId} OPEN → ${targetPath}`);
 
     // Use a per-request AbortController so each SSE stream is fully independent.
     // Propagate client disconnect from request.signal to our local controller.
@@ -35,10 +41,13 @@ export async function GET(
       });
 
       if (!response.ok) {
-        console.log(`[SSE-PROXY] ${streamId} BRIDGE_ERROR status=${response.status}`);
-        const data = await response.json();
+        console.log(`[SSE-PROXY] ${streamId} BRIDGE_ERROR status=${response.status} → ${targetPath}`);
+        const data = await response.json().catch(() => ({ error: `Bridge responded ${response.status}` }));
         return NextResponse.json(data, { status: response.status });
       }
+      // Logged only once the bridge has accepted the stream, so a bridge outage
+      // costs one warning line per attempt instead of OPEN + a stack dump.
+      console.log(`[SSE-PROXY] ${streamId} OPEN → ${targetPath}`);
 
       // Stream the SSE response — each proxy connection is fully independent
       const stream = new ReadableStream({
@@ -87,8 +96,10 @@ export async function GET(
       if (err instanceof Error && err.name === 'AbortError') {
         return new Response(null, { status: 499 });
       }
-      console.log(`[SSE-PROXY] ${streamId} FETCH_ERROR → ${targetPath}:`, err);
-      return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+      // One line, no stack (card #0363): the browser's connection manager
+      // retries with backoff, so this repeats until the bridge is listening.
+      console.warn(`[SSE-PROXY] ${streamId} bridge unavailable (${describeBridgeFetchError(err)}) → ${targetPath} — client will retry`);
+      return bridgeUnavailable(err);
     }
   }
 
@@ -97,8 +108,8 @@ export async function GET(
     const res = await fetch(url);
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
-  } catch (_err) {
-    return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+  } catch (err) {
+    return bridgeUnavailable(err);
   }
 }
 
@@ -139,8 +150,8 @@ export async function POST(
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
-  } catch (_err) {
-    return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+  } catch (err) {
+    return bridgeUnavailable(err);
   }
 }
 
@@ -156,8 +167,8 @@ export async function DELETE(
     const res = await fetch(url, { method: 'DELETE' });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
-  } catch (_err) {
-    return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+  } catch (err) {
+    return bridgeUnavailable(err);
   }
 }
 
@@ -180,7 +191,7 @@ export async function PUT(
     let data: unknown;
     try { data = JSON.parse(text); } catch { data = { error: text || `Bridge responded ${res.status}` }; }
     return NextResponse.json(data, { status: res.status });
-  } catch (_err) {
-    return NextResponse.json({ error: 'Bridge unavailable' }, { status: 502 });
+  } catch (err) {
+    return bridgeUnavailable(err);
   }
 }

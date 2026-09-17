@@ -89,12 +89,59 @@ async function main() {
     next();
   });
 
+  // Bind the port BEFORE init (card #0363). Until `ready` flips, /health
+  // answers 503 {status:'starting'} and every other route 503 BRIDGE_STARTING,
+  // so callers see "starting, retry" instead of ECONNREFUSED and nothing can
+  // touch session state before bridge-sessions.json is loaded. If init fails,
+  // main() rejects and the process exits non-zero (see bottom of file) — the
+  // port is never left bound in a permanently not-ready state.
+  let ready = false;
+  const startTime = Date.now();
+  let sessionManagerRef: SessionManager | null = null;
+
+  // Health check - enhanced for reconnection support
+  app.get('/health', (req, res) => {
+    if (!ready || !sessionManagerRef) {
+      res.setHeader('Retry-After', '1');
+      return res.status(503).json({ status: 'starting', timestamp: new Date().toISOString() });
+    }
+    const sessions = sessionManagerRef.getAllSessions();
+    const runningCount = sessions.filter((s) => s.status === 'running').length;
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      sessions: {
+        total: sessions.length,
+        running: runningCount,
+      },
+    });
+  });
+
+  app.use((req, res, next) => {
+    if (ready) return next();
+    res.setHeader('Retry-After', '1');
+    res.status(503).json({ error: 'Bridge starting', code: 'BRIDGE_STARTING' });
+  });
+
+  // Create HTTP server for both Express and WebSocket
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, HOST, () => {
+      server.off('error', reject);
+      console.log(`PTY Bridge Server listening on http://${HOST}:${PORT} (initialising…)`);
+      resolve();
+    });
+  });
+
   // Initialize session manager with runtime config
   const sessionManager = new SessionManager({
     port: PORT,
     host: HOST,
   }, runtimeConfig);
   await sessionManager.init();
+  sessionManagerRef = sessionManager;
 
   // Speaker authority (feature 086): global spoken-reply permission, audio
   // stream subscribers, rate buckets. Loads data/speaker-prefs.json (default off).
@@ -134,34 +181,12 @@ async function main() {
   app.use('/', createApiRouter(sessionManager, responseStore));
   app.use('/', createSpeakRouter(sessionManager));
 
-  // Track server start time for uptime calculation
-  const startTime = Date.now();
-
-  // Health check - enhanced for reconnection support
-  app.get('/health', (req, res) => {
-    const sessions = sessionManager.getAllSessions();
-    const runningCount = sessions.filter((s) => s.status === 'running').length;
-    res.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      uptime: Math.floor((Date.now() - startTime) / 1000),
-      sessions: {
-        total: sessions.length,
-        running: runningCount,
-      },
-    });
-  });
-
-  // Create HTTP server for both Express and WebSocket
-  const server = createServer(app);
-
-  // Setup WebSocket
+  // Setup WebSocket (after init — upgrades before this point are refused)
   setupWebSocket(server, sessionManager);
 
-  server.listen(PORT, HOST, () => {
-    console.log(`PTY Bridge Server running on http://${HOST}:${PORT}`);
-    console.log(`WebSocket endpoint: ws://${HOST}:${PORT}/sessions/:name/terminal`);
-  });
+  ready = true;
+  console.log(`PTY Bridge Server running on http://${HOST}:${PORT} (ready in ${Date.now() - startTime}ms after bind)`);
+  console.log(`WebSocket endpoint: ws://${HOST}:${PORT}/sessions/:name/terminal`);
 
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {
@@ -182,4 +207,10 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  // Exit non-zero so the service manager restarts us. Required now that the
+  // port is bound before init: a failed init must not leave a listener that
+  // answers 'starting' forever.
+  console.error(err);
+  process.exit(1);
+});

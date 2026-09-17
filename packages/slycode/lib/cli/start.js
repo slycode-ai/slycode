@@ -54,6 +54,21 @@ function isPortInUse(port, host = '127.0.0.1') {
         server.listen(port, host);
     });
 }
+// Card #0363: how long to hold web back while the bridge comes up. Bounded —
+// on expiry web starts anyway and its own scheduler gate takes over.
+const BRIDGE_READY_WAIT_MS = 60_000;
+/** Bridge-first ordering for launchers without unit dependencies (card #0363). */
+function orderBridgeFirst(items) {
+    return [...items].sort((a, b) => {
+        const rank = (x) => x.name.toLowerCase() === 'bridge' ? 0 : 1;
+        return rank(a) - rank(b);
+    });
+}
+async function waitForBridgeBeforeWeb(port) {
+    process.stdout.write(`  … waiting for Bridge on port ${port} before starting Web`);
+    const ready = await waitForPort(port, '127.0.0.1', BRIDGE_READY_WAIT_MS);
+    console.log(ready ? ' — ready' : ` — not ready after ${BRIDGE_READY_WAIT_MS / 1000}s, starting Web anyway`);
+}
 async function waitForPort(port, host = '127.0.0.1', timeoutMs = 15000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -200,11 +215,14 @@ async function start(_args) {
         console.log('  Starting via launchd...');
         const uid = process.getuid?.() ?? 501;
         const startedPorts = [];
-        for (const svc of service_detect_1.SERVICES) {
+        for (const svc of orderBridgeFirst(service_detect_1.SERVICES.map(name => ({ name }))).map(s => s.name)) {
             const plistFile = path.join(os.homedir(), 'Library', 'LaunchAgents', `com.slycode.${svc}.plist`);
             if (!fs.existsSync(plistFile))
                 continue;
             const port = config.ports[svc];
+            if (svc === 'web' && startedPorts.some(s => s.name === 'bridge')) {
+                await waitForBridgeBeforeWeb(config.ports.bridge);
+            }
             // Check if already loaded
             let isLoaded = false;
             try {
@@ -368,10 +386,13 @@ async function start(_args) {
             extraEnv: { ...envVars, HOST: '127.0.0.1' },
         },
     ];
-    for (const svc of serviceConfigs) {
+    for (const svc of orderBridgeFirst(serviceConfigs)) {
         if (!svc.enabled) {
             console.log(`  ⊘ ${svc.name}: disabled in config`);
             continue;
+        }
+        if (svc.name === 'Web' && services.some(s => s.name === 'Bridge')) {
+            await waitForBridgeBeforeWeb(config.ports.bridge);
         }
         // Skip messaging only when it has nothing to do: no chat channel AND no TTS
         if (svc.name === 'Messaging' && !hasMessagingChannel && !hasTts) {

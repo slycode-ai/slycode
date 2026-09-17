@@ -76,8 +76,23 @@ export function hasDialogMarkers(snapshot: string): boolean {
   return DIALOG_MARKERS.some(rx => rx.test(snapshot));
 }
 
-/** A line consisting only of box-drawing horizontal bars (Claude's input separators). */
+/**
+ * Claude's input-box separators. The BOTTOM one is always a bare row of
+ * box-drawing horizontal bars. Since Claude Code 2.1.274 (live captures
+ * 2026-09-17, card #0362) the TOP one carries the session title (and the
+ * fast-mode tag) right-aligned inside the rule, closed by a single bar:
+ *   "──────────── Review Fable codebase comprehensively ─"   (104 cols)
+ *   " Verified submit false positive investigation with a deli… ─"  (60 cols)
+ * Claude Code fits the title to the terminal width with a "…" — it never
+ * wraps onto a second row — but a long title / narrow terminal consumes ALL
+ * the leading bars, so the titled form cannot require any. A bare-bars-only
+ * anchor missed every titled screen → `unrecognized`, and (with no input
+ * region found) a "new version" phrase in the transcript promoted the passive
+ * "✔ Update installed · Restart to apply" notice into a blocked dialog.
+ */
 const CLAUDE_SEPARATOR = /^\s*─{10,}\s*$/;
+/** Titled top rule: optional leading bars, a label, then a closing bar run at end of row. */
+const CLAUDE_TITLED_SEPARATOR = /^\s*(?:─+\s+)?\S.*\s─+\s*$/;
 /**
  * Codex footer: "gpt-5.5 medium · ~/path", "tab to queue message100% context left", etc.
  * The cwd after the `·` is a Unix path on Linux/macOS (`~/…` or `/…`); on
@@ -119,15 +134,21 @@ export function extractInputRegion(provider: SubmitProvider, snapshot: string): 
   const lines = splitLines(snapshot);
 
   if (provider === 'claude') {
-    // Input box = content between the LAST TWO bare `────` separator rows,
-    // first content line starting with ❯.
-    const sepIdx: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      if (CLAUDE_SEPARATOR.test(lines[i])) sepIdx.push(i);
+    // Input box = content between the LAST bare `────` row (bottom) and the
+    // nearest separator above it — bare, or the titled form (top only). First
+    // content line must start with ❯: a dialog's choice list between two rules
+    // still reads as not-found. The passive "✔ Update installed · Restart to
+    // apply" notice sits ABOVE the top separator and never enters the region.
+    let bottom = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (CLAUDE_SEPARATOR.test(lines[i])) { bottom = i; break; }
     }
-    if (sepIdx.length < 2) return { found: false, text: '' };
-    const top = sepIdx[sepIdx.length - 2];
-    const bottom = sepIdx[sepIdx.length - 1];
+    if (bottom === -1) return { found: false, text: '' };
+    let top = -1;
+    for (let i = bottom - 1; i >= 0; i--) {
+      if (CLAUDE_SEPARATOR.test(lines[i]) || CLAUDE_TITLED_SEPARATOR.test(lines[i])) { top = i; break; }
+    }
+    if (top === -1) return { found: false, text: '' };
     if (bottom - top < 2) return { found: false, text: '' };
     const region = lines.slice(top + 1, bottom);
     const first = region[0]?.trimStart() ?? '';

@@ -8,8 +8,14 @@
  * through callbacks. It never touches the DOM, EventSource or <audio>.
  *
  * Rules (design doc "Codex round 3 additions", browser-holder lifecycle):
- *  - Every tab claims on start and heartbeats every 3 s; a peer unseen for
- *    10 s is dead and dropped, then the election re-runs.
+ *  - Every tab claims on start and heartbeats every 3 s. A peer is dropped
+ *    on its explicit release (pagehide / beforeunload) or after a MULTI-MINUTE
+ *    silence — never on a few missed beats: Chrome throttles a hidden tab's
+ *    timers to one a minute after ~5 min in the background, and a 10 s
+ *    expiry declared exactly those tabs dead (all-hidden → every tab elected
+ *    itself and replies played 2-3×; a hidden priority holder flapped against
+ *    the visible tab once a minute). A tab re-announces with a claim when it
+ *    becomes visible / focused / restored so siblings answer at once.
  *  - Winner: highest explicit priority (a user pressing "Play reply" in a
  *    tab), then visible over hidden, then lowest tabId (stable, no flapping).
  *  - A visible tab does NOT pre-empt a hidden holder that is mid-clip unless
@@ -112,7 +118,13 @@ export interface AudioHolderOptions {
 
 export const HOLDER_CHANNEL_NAME = 'slycode-audio';
 export const DEFAULT_HEARTBEAT_MS = 3000;
-export const DEFAULT_TIMEOUT_MS = 10000;
+/**
+ * Silence after which a peer is presumed dead. Must sit well above Chrome's
+ * intensive-throttling interval (timers once per minute in tabs hidden 5+ min)
+ * so a live background holder is never dropped; 5 minutes tolerates four missed
+ * throttled beats. A tab killed without a release lingers at most this long.
+ */
+export const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class AudioHolder {
   private readonly tabId: string;
@@ -183,16 +195,43 @@ export class AudioHolder {
     this.afterPeersChanged();
   }
 
-  /** Visibility changed — re-announce so the election can prefer visible tabs. */
+  /**
+   * Visibility changed — re-announce so the election can prefer visible tabs.
+   * Becoming visible posts a CLAIM (peers answer immediately and the holder
+   * republishes its state), because this tab's timers may have been throttled
+   * for minutes; going hidden just heartbeats.
+   */
   visibilityChanged(): void {
     if (!this.started) return;
-    this.channel.post({ type: 'heartbeat', ...this.self() });
+    if (this.isVisible()) this.announce();
+    else {
+      this.channel.post({ type: 'heartbeat', ...this.self() });
+      this.evaluate();
+    }
+  }
+
+  /** Re-announce with a claim (focus / pageshow / becoming visible): every live peer answers at once. */
+  announce(): void {
+    if (!this.started) return;
+    this.channel.post({ type: 'claim', ...this.self() });
     this.evaluate();
   }
 
-  /** Report whether this holder is mid-clip (protects it from visibility pre-emption). */
+  /**
+   * Report whether this holder is mid-clip (protects it from visibility
+   * pre-emption). Broadcast the change at once: a visible sibling decides from
+   * its RECORD of us, and a throttled hidden holder's next beat may be a minute
+   * away — stale `playing:false` would let the sibling cut the clip.
+   */
   setPlaying(playing: boolean): void {
+    if (this.playing === playing) return;
     this.playing = playing;
+    if (!this.started) return;
+    this.channel.post({ type: 'heartbeat', ...this.self() });
+    // Re-run our own election too: when the clip ends a visible sibling may now
+    // win, and we must step down NOW rather than on our next (possibly
+    // throttled) beat — otherwise two tabs hold the audio stream meanwhile.
+    this.evaluate();
   }
 
   /**

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { buildPrompt, renderTemplate, withTimestamp, type SlyActionsConfig, type SlyActionItem } from '@/lib/sly-actions';
 import { submitVerified, deliveryFailureMessage, type VerifiedDelivery } from '@/lib/submit-verified';
+import { isBridgeUnavailableStatus } from '@/lib/bridge-proxy-errors';
 import { usePolling } from '@/hooks/usePolling';
 import { useActionOverflow } from '@/hooks/useActionOverflow';
 import { ScheduledSendsControl } from './ScheduledSendsControl';
@@ -121,6 +122,12 @@ interface ClaudeTerminalPanelProps {
   // Scheduled sends on this card (card #0352) — live from the board; the
   // footer stopwatch button + popover render only when cardId/projectId exist.
   scheduledPrompts?: ScheduledPrompt[];
+  // Awaited before every session start / action dispatch (card #0357). The
+  // card modal flushes pending edits to disk here so the agent's own
+  // `sly-kanban show` matches the injected context. Resolves false when the
+  // write failed — the dispatch is then aborted with a visible error rather
+  // than run against stale disk.
+  onBeforeDispatch?: () => Promise<boolean>;
   // Callbacks
   onSessionChange?: (info: SessionInfo | null) => void;
   onProviderChange?: (provider: string) => void;
@@ -138,6 +145,7 @@ export function ClaudeTerminalPanel({
   cwd,
   actions,
   context,
+  onBeforeDispatch,
   bridgeUrl = BRIDGE_API,
   className = '',
   cardId,
@@ -161,6 +169,10 @@ export function ClaudeTerminalPanel({
 
   // Terminal state
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
+  // Bridge not reachable through the proxy (starting/restarting) — card #0363.
+  // Distinct from "no session": we keep the last known sessionInfo and show a
+  // reconnecting banner; the 5s poll below clears it once the bridge answers.
+  const [bridgeUnavailable, setBridgeUnavailable] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalKey, setTerminalKey] = useState(0);
@@ -326,6 +338,14 @@ export function ClaudeTerminalPanel({
     for (const candidate of sessionNameCandidates) {
       try {
         const res = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(candidate)}`, { signal });
+        if (isBridgeUnavailableStatus(res.status)) {
+          // The proxy could not reach the bridge. That says nothing about
+          // whether the session exists — don't clear it (clearing made every
+          // terminal look unstarted while the bridge was still coming up).
+          setBridgeUnavailable(true);
+          return;
+        }
+        setBridgeUnavailable(false);
         if (res.ok) {
           const data = await res.json();
           if (data) {
@@ -494,15 +514,25 @@ export function ClaudeTerminalPanel({
   const startupActions = actions.filter(a => a.placement === 'startup' || a.placement === 'both');
   const toolbarActions = actions.filter(a => a.placement === 'toolbar' || a.placement === 'both');
 
+  // Always-current context for use after an await (the flush below re-renders
+  // the parent with the committed edits; the closure value would be stale).
+  const contextRef = useRef(context);
+  contextRef.current = context;
+
   const startSession = async (command?: SlyActionItem | { prompt: string } | null, customPromptText?: string) => {
     setIsStarting(true);
     setShowCustomPrompt(false);
     setExitToast(null);
     setSpawnError(null);
     try {
+      // Flush pending card edits to disk before anything is injected (card #0357).
+      if (onBeforeDispatch && !(await onBeforeDispatch())) {
+        setSpawnError('Card edits could not be saved — fix the board save error, then start again');
+        return;
+      }
       // Build prompt if action provided — context is opt-in via {{cardContext}} etc.
       let prompt: string | undefined;
-      const contextObj = context as Record<string, unknown>;
+      const contextObj = contextRef.current as Record<string, unknown>;
       if (customPromptText) {
         // Free-typed prompt — left unstamped, same as plain Telegram text.
         prompt = buildPrompt(customPromptText, contextObj);
@@ -695,7 +725,16 @@ export function ClaudeTerminalPanel({
   // Send command to active terminal
   const sendCommand = async (action: { id: string; label: string; command: string; description?: string }, submit: boolean = true) => {
     try {
-      let command = action.command;
+      // Flush pending card edits to disk first (card #0357), then re-render the
+      // template against the post-flush context so the injected card is current.
+      if (onBeforeDispatch && !(await onBeforeDispatch())) {
+        setDeliveryToast('Card edits could not be saved — action not sent');
+        return;
+      }
+      const liveAction = toolbarActions.find((a) => a.id === action.id);
+      let command = liveAction
+        ? renderTemplate(liveAction.prompt, contextRef.current as unknown as Record<string, unknown>)
+        : action.command;
       // For context-priming, append card areas if available
       if (action.id === 'context' && cardAreas.length > 0) {
         command = `${action.command} ${cardAreas.join(' ')}`;
@@ -756,6 +795,19 @@ export function ClaudeTerminalPanel({
 
   return (
     <div className={`relative flex h-full flex-col overflow-hidden ${className}`}>
+      {bridgeUnavailable && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded bg-amber-900/80 px-2 py-1 text-xs text-amber-200"
+        >
+          <svg className="h-3 w-3 animate-spin motion-reduce:animate-none" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>Bridge is starting — reconnecting…</span>
+        </div>
+      )}
       {/* Terminal area */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#222228] dark:bg-[#1a1a1a]">
         {showTerminal && isRunning ? (

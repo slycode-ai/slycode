@@ -36,6 +36,7 @@
   "/api/file/route": "/api/file",
   "/api/git-status/route": "/api/git-status",
   "/api/html-attachment/route": "/api/html-attachment",
+  "/api/https-url/route": "/api/https-url",
   "/api/kanban/cards/route": "/api/kanban/cards",
   "/api/kanban/route": "/api/kanban",
   "/api/kanban/settings/route": "/api/kanban/settings",

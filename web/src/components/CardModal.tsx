@@ -77,10 +77,18 @@ interface CardModalProps {
   projectPath?: string;
   onClose: () => void;
   onUpdate: (card: KanbanCard) => void;
+  /**
+   * Flush the parent's debounced board save to disk NOW (card #0357), optionally
+   * committing one card edit in the same write. Resolves true once the write has
+   * settled successfully. Awaited before any Sly Action / session start so the
+   * agent's own `sly-kanban show` reads what the modal shows.
+   */
+  onFlushSave?: (cardOverride?: KanbanCard) => Promise<boolean>;
   onMove: (cardId: string, stage: KanbanStage) => void;
   onDelete?: (cardId: string) => void;
   isCreateMode?: boolean;
-  onCreate?: (card: NewCardData) => void;
+  /** Eager create. `stayOpen` keeps the modal open on the persisted card (card #0357). Resolves true on success. */
+  onCreate?: (card: NewCardData, opts?: { stayOpen?: boolean }) => Promise<boolean>;
   /**
    * Pending/error state for the eager-create round-trip. While `pending`, the
    * modal disables Submit and suppresses Escape-to-close. On `error`, an
@@ -234,7 +242,7 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
   return <div style={style}>{children}</div>;
 }
 
-export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
+export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onFlushSave, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
 
   // Questionnaire delivery warning — lives at modal level so it survives the
@@ -829,6 +837,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const [newSessionDropdown, setNewSessionDropdown] = useState(false);
   const [newSessionProvider, setNewSessionProvider] = useState<string | null>(null);
   const [newSessionSkipPerms, setNewSessionSkipPerms] = useState(true);
+  const [newSessionError, setNewSessionError] = useState<string | null>(null);
   const newSessionRef = useRef<HTMLDivElement>(null);
   const newSessionPortalRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1113,6 +1122,67 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     onUpdate({ ...card, description: value, updated_at: new Date().toISOString() });
   };
 
+  // Commit anything still local to the modal (a focused title edit — the
+  // description already reaches the parent on every keystroke) and push the
+  // parent's debounced save to disk (card #0357). Awaited by the terminal
+  // panel before every action dispatch / session start; fired on tab switches.
+  const flushPendingEdits = useCallback(async (): Promise<boolean> => {
+    if (isCreateMode) return true; // nothing on disk yet — the terminal is gated
+    const trimmed = editedTitle.trim();
+    let override: KanbanCard | undefined;
+    if (trimmed && trimmed !== card.title) {
+      lastKnownTitleRef.current = trimmed;
+      override = { ...card, title: trimmed, updated_at: new Date().toISOString() };
+    }
+    setIsEditingTitle(false);
+    if (!onFlushSave) {
+      if (override) onUpdate(override);
+      return true;
+    }
+    return onFlushSave(override);
+  }, [isCreateMode, editedTitle, card, onFlushSave, onUpdate]);
+
+  // Payload for the eager create — shared by Submit/Ctrl+Enter and the
+  // create-mode tab switch so both persist exactly what is typed.
+  const buildCreatePayload = useCallback((): NewCardData => ({
+    title: editedTitle.trim(),
+    description: editedDescription,
+    type: card.type,
+    priority: card.priority,
+    areas: card.areas,
+    tags: card.tags,
+    problems: card.problems,
+    checklist: checklistRef.current,
+    ...(card.automation ? { automation: card.automation } : {}),
+  }), [editedTitle, editedDescription, card]);
+
+  // Tab switches go through here so pending edits are flushed on the way out
+  // of Details (and everywhere else — a clean board makes it a no-op).
+  // Create mode (card #0357): the placeholder has no id on disk, so a tab
+  // click is one motion — accept the title as typed, run the eager create,
+  // await it, then switch on the persisted card (the parent re-renders this
+  // modal in edit mode with the real id). A failed create stays on Details
+  // with the existing error/retry banner; an empty title just refocuses the
+  // title input (nothing to create — same outcome as Submit, minus the close).
+  const selectTab = useCallback((tab: TabId) => {
+    if (!isCreateMode) {
+      void flushPendingEdits();
+      setActiveTab(tab);
+      return;
+    }
+    if (tab === 'details') { setActiveTab(tab); return; }
+    if (!onCreate || creatingState?.status === 'pending') return;
+    if (!editedTitle.trim()) {
+      setIsEditingTitle(true);
+      titleInputRef.current?.focus();
+      return;
+    }
+    setIsEditingTitle(false);
+    void onCreate(buildCreatePayload(), { stayOpen: true }).then((ok) => {
+      if (ok) setActiveTab(tab);
+    });
+  }, [isCreateMode, flushPendingEdits, onCreate, creatingState, editedTitle, buildCreatePayload]);
+
   const handleAddProblem = () => {
     if (!newProblem.trim()) return;
 
@@ -1246,17 +1316,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         onClose(); // Just close if no title
         return;
       }
-      onCreate({
-        title: editedTitle.trim(),
-        description: editedDescription,
-        type: card.type,
-        priority: card.priority,
-        areas: card.areas,
-        tags: card.tags,
-        problems: card.problems,
-        checklist: checklistRef.current,
-        ...(card.automation ? { automation: card.automation } : {}),
-      });
+      void onCreate(buildCreatePayload());
       // Do NOT call onClose() here — the parent decides when to close based
       // on the eager-create response. On success, the parent unmounts this
       // modal by clearing selectedCardId; on error, the modal stays open
@@ -1269,7 +1329,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       onUpdate({ ...card, title: editedTitle.trim(), updated_at: new Date().toISOString() });
     }
     onClose();
-  }, [isCreateMode, onCreate, creatingState, editedTitle, editedDescription, card, onClose, onUpdate, voice.voiceState]);
+  }, [isCreateMode, onCreate, creatingState, editedTitle, buildCreatePayload, card, onClose, onUpdate, voice.voiceState]);
 
   // Escape key handler — registered in capture phase with stopImmediatePropagation
   // so it fires before and blocks bubble-phase handlers (e.g. useKeyboardShortcuts)
@@ -1341,12 +1401,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         : (currentIndex - 1 + visibleTabs.length) % visibleTabs.length;
 
       e.preventDefault();
-      setActiveTab(visibleTabs[nextIndex]);
+      selectTab(visibleTabs[nextIndex]);
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasQuestionnaires, hasChecklist]);
+  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasQuestionnaires, hasChecklist, selectTab]);
 
   return (
     <div
@@ -1651,7 +1711,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         <div className={`relative grain grain-soft ${modalStyles.tabsBorder} ${modalStyles.tabs}`}>
         <div ref={tabBarRef} onWheel={handleTabBarWheel} onMouseDown={handleTabBarMouseDown} className={`flex overflow-x-auto scrollbar-hide ${tabBarCanScrollLeft || tabBarCanScrollRight ? 'cursor-grab' : ''}`}>
           <button
-            onClick={() => setActiveTab('details')}
+            onClick={() => selectTab('details')}
             className={`shrink-0 px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === 'details'
                 ? isAutomation
@@ -1664,7 +1724,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           </button>
           {hasDesign && (
             <button
-              onClick={() => setActiveTab('design')}
+              onClick={() => selectTab('design')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'design'
                   ? 'border-b-2 border-neon-blue-300 text-neon-blue-400 dark:text-neon-blue-300'
@@ -1682,7 +1742,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           )}
           {hasFeature && (
             <button
-              onClick={() => setActiveTab('feature')}
+              onClick={() => selectTab('feature')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'feature'
                   ? 'border-b-2 border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
@@ -1700,7 +1760,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           )}
           {hasHtml && (
             <button
-              onClick={() => setActiveTab('html')}
+              onClick={() => selectTab('html')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'html'
                   ? 'border-b-2 border-[#ff6a33] text-[#ff6a33]/90 dark:text-[#ff6a33]/90'
@@ -1715,7 +1775,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           )}
           {hasTest && (
             <button
-              onClick={() => setActiveTab('test')}
+              onClick={() => selectTab('test')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'test'
                   ? 'border-b-2 border-[#00e676] text-[#00e676]/80 dark:text-[#00e676]/80'
@@ -1733,7 +1793,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           )}
           {hasQuestionnaires && (
             <button
-              onClick={() => setActiveTab('questionnaires')}
+              onClick={() => selectTab('questionnaires')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'questionnaires'
                   ? 'border-b-2 border-cyan-400 text-cyan-500 dark:text-cyan-400'
@@ -1752,7 +1812,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             </button>
           )}
           <button
-            onClick={() => setActiveTab('notes')}
+            onClick={() => selectTab('notes')}
             className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === 'notes'
                 ? 'border-b-2 border-purple-400 text-purple-500 dark:text-purple-400'
@@ -1771,7 +1831,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           </button>
           {hasChecklist && (
             <button
-              onClick={() => setActiveTab('checklist')}
+              onClick={() => selectTab('checklist')}
               className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === 'checklist'
                   ? 'border-b-2 border-[#ffd600] text-[#ffd600]/80 dark:text-[#ffd600]/80'
@@ -1788,7 +1848,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             </button>
           )}
           <button
-            onClick={() => setActiveTab('terminal')}
+            onClick={() => selectTab('terminal')}
             className={`flex shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === 'terminal'
                 ? 'border-b-2 border-neon-orange-400 text-neon-orange-500 dark:text-neon-orange-400'
@@ -2040,7 +2100,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                       {hasDesign && (
                         <Tooltip content={designRefs.join('\n')}>
                           <button
-                            onClick={() => setActiveTab('design')}
+                            onClick={() => selectTab('design')}
                             className="relative rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
                           >
                             {/* Clipboard/pencil icon for design */}
@@ -2058,7 +2118,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                       {hasFeature && (
                         <Tooltip content={featureRefs.join('\n')}>
                           <button
-                            onClick={() => setActiveTab('feature')}
+                            onClick={() => selectTab('feature')}
                             className="relative rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
                           >
                             {/* Checklist icon for feature */}
@@ -2076,7 +2136,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                       {hasHtml && (
                         <Tooltip content={htmlRefs.join('\n')}>
                           <button
-                            onClick={() => setActiveTab('html')}
+                            onClick={() => selectTab('html')}
                             className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
                           >
                             {/* Code-brackets icon for HTML */}
@@ -2094,7 +2154,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                       {hasTest && (
                         <Tooltip content={testRefs.join('\n')}>
                           <button
-                            onClick={() => setActiveTab('test')}
+                            onClick={() => selectTab('test')}
                             className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
                           >
                             {/* Checkmark box icon for test */}
@@ -2481,6 +2541,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 actionsConfig={actionsConfig}
                 actions={actions}
                 context={terminalContext}
+                onBeforeDispatch={flushPendingEdits}
                 cardId={card.id}
                 cardAreas={card.areas}
                 projectId={projectId}
@@ -2630,6 +2691,14 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                         </label>
                         <button
                           onClick={async () => {
+                            // Same flush-then-act path as every other session start
+                            // (card #0357): the new agent's first `sly-kanban show`
+                            // must read the card the modal shows.
+                            setNewSessionError(null);
+                            if (!(await flushPendingEdits())) {
+                              setNewSessionError('Card edits could not be saved — fix the board save error, then start again');
+                              return;
+                            }
                             const name = `${sessionKey}:${newSessionProvider}:card:${card.id}`;
                             try {
                               await fetch('/api/bridge/sessions', {
@@ -2652,6 +2721,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                         >
                           Start
                         </button>
+                        {newSessionError && (
+                          <div role="alert" className="max-w-[220px] text-[11px] leading-snug text-red-400">{newSessionError}</div>
+                        )}
                       </>
                     );
                   })()}

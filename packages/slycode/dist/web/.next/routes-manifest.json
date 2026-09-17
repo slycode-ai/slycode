@@ -339,6 +339,12 @@
       "namedRegex": "^/api/html\\-attachment(?:/)?$"
     },
     {
+      "page": "/api/https-url",
+      "regex": "^/api/https\\-url(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/https\\-url(?:/)?$"
+    },
+    {
       "page": "/api/kanban",
       "regex": "^/api/kanban(?:/)?$",
       "routeKeys": {},

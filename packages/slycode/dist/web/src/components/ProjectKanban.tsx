@@ -7,6 +7,7 @@ import type { NewCardData, CardCreatingState } from './CardModal';
 import { connectionManager } from '@/lib/connection-manager';
 import { formatCardNumber } from '@/lib/kanban-numbering';
 import { tabSync } from '@/lib/tab-sync';
+import { createPendingSave, type PendingSave } from '@/lib/pending-save';
 import { usePolling } from '@/hooks/usePolling';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { KanbanColumn } from './KanbanColumn';
@@ -87,7 +88,10 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'saving' | 'error'>('idle');
   const [isLoaded, setIsLoaded] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState(false);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Flushable 2 s save debounce (card #0357) — see web/src/lib/pending-save.ts.
+  // Created lazily so it can close over the latest saveStages via a ref.
+  const pendingSaveRef = useRef<PendingSave<KanbanStages> | null>(null);
+  const saveStagesRef = useRef<(stagesToSave: KanbanStages) => Promise<boolean>>(async () => false);
   const saveStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectionIdRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
@@ -657,9 +661,10 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   usePolling(pollKanbanFallback, 10000);
 
   // Save stages with debounce
-  const saveStages = useCallback(async (stagesToSave: KanbanStages) => {
+  const saveStages = useCallback(async (stagesToSave: KanbanStages): Promise<boolean> => {
     setSaveStatus('saving');
     isSavingRef.current = true;
+    let ok = false;
     try {
       // Compute which cards actually changed vs the clean baseline, with typed changeset
       const changedCards: ChangedCard[] = [];
@@ -730,6 +735,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
         saveStatusTimeoutRef.current = setTimeout(() => {
           setSaveStatus('idle');
         }, 800);
+        ok = true;
       } else {
         setSaveStatus('error');
       }
@@ -739,7 +745,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     } finally {
       isSavingRef.current = false;
     }
+    return ok;
   }, [project.id, showArchived]);
+  saveStagesRef.current = saveStages;
+  if (!pendingSaveRef.current) {
+    pendingSaveRef.current = createPendingSave<KanbanStages>((v) => saveStagesRef.current(v), 2000);
+  }
+  const pendingSave = pendingSaveRef.current;
 
   // Debounced save when stages change — only if dirty (user-originated changes)
   useEffect(() => {
@@ -748,32 +760,50 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     // Skip save if stages match the clean baseline (no user changes)
     if (stagesEqual(stages, cleanBaselineRef.current)) {
       isDirtyRef.current = false;
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
+      pendingSave.cancel();
       return;
     }
 
     isDirtyRef.current = true;
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = setTimeout(() => {
-      saveStages(stages);
-    }, 2000);
+    // Re-arms the 2 s timer; a no-op when this exact state is already being
+    // written by a flush (so flush + effect re-arm never double-saves).
+    pendingSave.schedule(stages);
 
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
       if (saveStatusTimeoutRef.current) {
         clearTimeout(saveStatusTimeoutRef.current);
       }
     };
-  }, [stages, isLoaded, saveStages]);
+  }, [stages, isLoaded, pendingSave]);
+
+  // Drop any armed timer on unmount (the old cleanup cleared it on every
+  // stages change too; the controller re-arms itself, so only unmount matters).
+  useEffect(() => () => pendingSave.cancel(), [pendingSave]);
+
+  // Flush pending edits to disk NOW (card #0357). Called before any Sly
+  // Action / session start from the card modal, and when the modal closes,
+  // so an agent's own `sly-kanban show` reads the same card the modal shows.
+  // `cardOverride` lets the modal commit a still-focused title edit in the
+  // same write: it is applied to stagesRef synchronously (setStages alone
+  // would not be visible until the next render) and marked as an edit.
+  const flushPendingSave = useCallback(async (cardOverride?: KanbanCard): Promise<boolean> => {
+    let next = stagesRef.current;
+    if (cardOverride) {
+      const stage = STAGE_ORDER.find((st) => (next[st] || []).some((c) => c.id === cardOverride.id));
+      if (stage) {
+        editedCardIdsRef.current.add(cardOverride.id);
+        next = { ...next, [stage]: next[stage].map((c) => (c.id === cardOverride.id ? cardOverride : c)) };
+        stagesRef.current = next;
+        setStages(next);
+      }
+    }
+    if (stagesEqual(next, cleanBaselineRef.current)) {
+      // Nothing to write; still wait out an in-flight write so disk is settled.
+      return pendingSave.flush();
+    }
+    pendingSave.schedule(next);
+    return pendingSave.flush();
+  }, [pendingSave]);
 
   const handleCardClick = (card: KanbanCard, stage: KanbanStage, suppress = false) => {
     setSuppressAutoTerminal(suppress);
@@ -787,13 +817,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     // seen — otherwise reading a card re-flags it seconds after you close it.
     if (selectedCardId) markCardSeen(selectedCardId);
     // Flush any pending dirty save immediately on close
-    if (!stagesEqual(stages, cleanBaselineRef.current)) {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-      saveStages(stages);
-    }
+    void flushPendingSave();
     setSelectedCardId(null);
     setSelectedStage(null);
     setIsCreatingCard(false);
@@ -834,8 +858,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   // success, and surfaces an inline error with Retry/Cancel on failure.
   // The card never appears on the board in an unpersisted state, which
   // means a follow-up drag can never be the silent-drop bug.
-  const performCreate = useCallback(async (cardData: NewCardData): Promise<void> => {
+  // `stayOpen` (card #0357): a tab click in create mode creates the card and
+  // keeps the modal open on the PERSISTED card (real id, on disk) instead of
+  // closing, so the terminal/actions that follow use the saved card.
+  const lastCreateStayOpenRef = useRef(false);
+  const performCreate = useCallback(async (cardData: NewCardData, stayOpen = false): Promise<boolean> => {
     setCreatingState({ status: 'pending' });
+    lastCreateStayOpenRef.current = stayOpen;
     // Snapshot the request token (the payload ref) so a late response from a
     // cancelled-in-flight request can't muck with state after Cancel.
     const requestPayload = cardData;
@@ -852,7 +881,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       const cancelled = lastCreatePayloadRef.current !== requestPayload;
 
       if (!res.ok) {
-        if (cancelled) return;
+        if (cancelled) return false;
         let message = `Create failed (${res.status})`;
         try {
           const errBody = await res.json();
@@ -861,7 +890,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           // Fall back to status-line message
         }
         setCreatingState({ status: 'error', message });
-        return;
+        return false;
       }
       const data = (await res.json()) as { card: KanbanCard };
       const persisted = data.card;
@@ -876,29 +905,38 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       lastSaveTimestampRef.current = new Date().toISOString();
       setStages(next);
 
-      if (cancelled) return;
+      if (cancelled) return false;
       lastCreatePayloadRef.current = null;
       setCreatingState({ status: 'idle' });
-      setSelectedCardId(null);
-      setSelectedStage(null);
       setIsCreatingCard(false);
       setPlaceholderCard(null);
+      if (stayOpen) {
+        // Same modal instance re-renders on the persisted card in edit mode.
+        setSelectedCardId(persisted.id);
+        setSelectedStage('backlog');
+        markCardSeen(persisted.id);
+      } else {
+        setSelectedCardId(null);
+        setSelectedStage(null);
+      }
+      return true;
     } catch (err) {
-      if (lastCreatePayloadRef.current !== requestPayload) return;
+      if (lastCreatePayloadRef.current !== requestPayload) return false;
       const message = err instanceof Error ? err.message : 'Network error';
       setCreatingState({ status: 'error', message });
+      return false;
     }
-  }, [project.id]);
+  }, [project.id, markCardSeen]);
 
-  const handleCreateCard = useCallback((cardData: NewCardData) => {
+  const handleCreateCard = useCallback((cardData: NewCardData, opts?: { stayOpen?: boolean }): Promise<boolean> => {
     lastCreatePayloadRef.current = cardData;
-    void performCreate(cardData);
+    return performCreate(cardData, opts?.stayOpen ?? false);
   }, [performCreate]);
 
   const handleRetryCreate = useCallback(() => {
     const payload = lastCreatePayloadRef.current;
     if (!payload) return;
-    void performCreate(payload);
+    void performCreate(payload, lastCreateStayOpenRef.current);
   }, [performCreate]);
 
   const handleCancelCreate = useCallback(() => {
@@ -1427,6 +1465,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             projectPath={projectPath}
             onClose={handleCloseModal}
             onUpdate={handleUpdateCard}
+            onFlushSave={isCreatingCard ? undefined : flushPendingSave}
             onMove={handleMoveCard}
             onDelete={handleDeleteCard}
             isCreateMode={isCreatingCard}

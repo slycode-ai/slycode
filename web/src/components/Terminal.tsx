@@ -458,8 +458,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       onOpen: () => {
         const isReconnect = hasConnectedRef.current;
         // Connection opened - if we were reconnecting, show success
+        setIsReconnecting(false);
         if (isReconnect) {
-          setIsReconnecting(false);
           terminal.write('\r\n\x1b[32mReconnected\x1b[0m\r\n');
         }
         hasConnectedRef.current = true;
@@ -475,9 +475,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       },
 
       onError: () => {
-        // ConnectionManager handles reconnection - show reconnecting state
+        // ConnectionManager handles reconnection - show reconnecting state.
+        // The chip shows even when the FIRST connect fails (bridge still
+        // starting, card #0363) — previously that case was a silent blank pane.
+        setIsReconnecting(true);
         if (hasConnectedRef.current) {
-          setIsReconnecting(true);
           onConnectionChangeRef.current?.(false);
           terminal.write('\r\n\x1b[33mConnection lost - reconnecting...\x1b[0m\r\n');
         }

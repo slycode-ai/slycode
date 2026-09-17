@@ -18,6 +18,7 @@ import type { KanbanCard, KanbanBoard, AutomationConfig, DeliveryInfo, Automatio
 import { loadRegistry } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
+import { probeBridge, waitForBridgeReady } from './bridge-readiness';
 import { computeSessionKey } from './session-keys';
 import { readStatus, formatStatusForPrompt } from './status';
 import { fetchSpeakerState, formatSpeakerLine, type SpeakerSnapshot } from './speaker-line';
@@ -269,6 +270,10 @@ interface SchedulerState {
   running: boolean;
   lastCheck: string | null;
   activeKickoffs: Set<string>;
+  /** Bridge failed its /health probe on the most recent tick (card #0363). */
+  bridgeDown: boolean;
+  /** Ticks skipped because the bridge was down — nothing was stamped or claimed. */
+  ticksSkippedBridgeDown: number;
 }
 
 // Use globalThis to survive HMR reloads — prevents duplicate scheduler intervals.
@@ -291,8 +296,14 @@ if (!g[GLOBAL_KEY]) {
     running: false,
     lastCheck: null,
     activeKickoffs: new Set(),
+    bridgeDown: false,
+    ticksSkippedBridgeDown: 0,
   };
 }
+// HMR: a state object created by an older module version may predate the
+// bridge-gate fields.
+if (g[GLOBAL_KEY]!.bridgeDown === undefined) g[GLOBAL_KEY]!.bridgeDown = false;
+if (g[GLOBAL_KEY]!.ticksSkippedBridgeDown === undefined) g[GLOBAL_KEY]!.ticksSkippedBridgeDown = 0;
 if (g[TIMER_KEY] === undefined) {
   g[TIMER_KEY] = null;
 }
@@ -1324,8 +1335,8 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
             await mutateCardScheduledPrompts(project.path, card.id, (live, liveCard) => {
               for (const e of live) {
                 if (missedIds.has(e.id) && e.state === 'pending') {
-                  Object.assign(e, { state: 'missed', finishedAt, error: 'Fire time passed while the web server was not running' });
-                  tryAutoStatus(liveCard, { text: 'Scheduled prompt missed — web was down at fire time', tier: 'high' });
+                  Object.assign(e, { state: 'missed', finishedAt, error: 'Fire time passed while the web server or bridge was not running' });
+                  tryAutoStatus(liveCard, { text: 'Scheduled prompt missed — web or bridge was down at fire time', tier: 'high' });
                 } else if (interruptedIds.has(e.id) && e.state === 'firing') {
                   Object.assign(e, { state: 'failed', finishedAt, error: 'Interrupted — the web server restarted mid-fire' });
                   tryAutoStatus(liveCard, { text: 'Scheduled prompt failed — see terminal footer', tier: 'high' });
@@ -1338,8 +1349,8 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
           }
           for (const e of missed) {
             swarn(`[scheduled-prompts] missed ${e.id} on ${card.id} (fireAt ${e.fireAt})`);
-            logScheduledPromptEvent(project.id, card.id, `Scheduled prompt missed (was due ${hhmm(new Date(e.fireAt))}): web was down`);
-            await sendErrorNotification(card.title, `Fire time ${e.fireAt} passed while the web server was not running`, e.sessionName, 'Scheduled prompt missed');
+            logScheduledPromptEvent(project.id, card.id, `Scheduled prompt missed (was due ${hhmm(new Date(e.fireAt))}): web or bridge was down`);
+            await sendErrorNotification(card.title, `Fire time ${e.fireAt} passed while the web server or bridge was not running`, e.sessionName, 'Scheduled prompt missed');
           }
           for (const e of interrupted) {
             swarn(`[scheduled-prompts] interrupted ${e.id} on ${card.id} (firedAt ${e.firedAt})`);
@@ -1450,10 +1461,38 @@ async function checkAtlasRefreshes(): Promise<void> {
 }
 
 /**
- * One tick: automations first, then scheduled card prompts with whatever
- * kickoff budget the automations left, then the atlas scan.
+ * One tick: bridge liveness first, then automations, then scheduled card
+ * prompts with whatever kickoff budget the automations left, then the atlas
+ * scan.
+ *
+ * Bridge gate (card #0363): a due automation or scheduled prompt is only
+ * consumed (lastRun stamped / entry claimed) inside a tick whose /health probe
+ * succeeded. While the bridge is down the tick skips entirely, the entries
+ * stay due, and they fire on the first tick after the bridge answers. Without
+ * this, a fire due at boot was stamped and then lost to ECONNREFUSED because
+ * web comes up before the bridge on every platform.
+ *
+ * Exported for tests; production callers go through startScheduler.
  */
-async function runTick(): Promise<void> {
+export async function runSchedulerTick(): Promise<{ ran: boolean }> {
+  const alive = await probeBridge(BRIDGE_URL);
+  if (!alive) {
+    state.ticksSkippedBridgeDown++;
+    if (!state.bridgeDown) {
+      state.bridgeDown = true;
+      swarn(`Bridge at ${BRIDGE_URL} is not answering /health — skipping ticks until it does (due automations and scheduled prompts are held, not consumed)`);
+    }
+    return { ran: false };
+  }
+  if (state.bridgeDown) {
+    state.bridgeDown = false;
+    slog(`Bridge at ${BRIDGE_URL} is back — resuming ticks (${state.ticksSkippedBridgeDown} skipped)`);
+  }
+  await runTickBody();
+  return { ran: true };
+}
+
+async function runTickBody(): Promise<void> {
   let used = 0;
   try {
     used = await checkAutomations();
@@ -1486,12 +1525,38 @@ export function startScheduler(): void {
   // in the logs around the same time, that's the cause of duplicate fires.
   slog(`Started — pid=${process.pid}, port=${process.env.PORT || 'unknown'}, bridge=${BRIDGE_URL}, slycodeRoot=${getSlycodeRoot()}, tz=${CONFIGURED_TIMEZONE}, checkEvery=${CHECK_INTERVAL_MS / 1000}s`);
 
-  // Initial check
-  runTick();
+  // Initial check — gated on bridge readiness (card #0363). Web starts before
+  // the bridge on every platform; poll /health for up to a minute so the first
+  // tick lands on a live bridge instead of ECONNREFUSED. On timeout we warn
+  // and proceed; the per-tick gate inside runSchedulerTick keeps holding due
+  // fires until the bridge answers.
+  void (async () => {
+    try {
+      const wait = await waitForBridgeReady(BRIDGE_URL, { warn: swarn });
+      if (wait.ready && wait.attempts > 1) {
+        slog(`Bridge ready after ${Math.round(wait.waitedMs / 1000)}s (${wait.attempts} probes) — running first tick`);
+      }
+      await runSchedulerTick();
+    } catch (err) {
+      serr('Startup tick error:', err);
+    }
+  })();
 
   // Periodic check (scheduled prompts + atlas scans ride the same tick, each
   // isolated by its own try/catch)
-  setCheckTimer(setInterval(() => { runTick(); }, CHECK_INTERVAL_MS));
+  setCheckTimer(setInterval(() => { void runSchedulerTick().catch(err => serr('Tick error:', err)); }, CHECK_INTERVAL_MS));
+}
+
+/**
+ * Tick bookkeeping for tests and diagnostics. Unlike getSchedulerStatus this
+ * never auto-starts the scheduler.
+ */
+export function getSchedulerTickInfo(): { lastCheck: string | null; bridgeDown: boolean; ticksSkippedBridgeDown: number } {
+  return {
+    lastCheck: state.lastCheck,
+    bridgeDown: state.bridgeDown,
+    ticksSkippedBridgeDown: state.ticksSkippedBridgeDown,
+  };
 }
 
 /**

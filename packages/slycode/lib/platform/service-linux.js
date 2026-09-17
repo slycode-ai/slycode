@@ -71,6 +71,14 @@ function generateUnit(service, workspace, config) {
     const host = config.host || '127.0.0.1';
     let description;
     const envLines = [];
+    // Card #0363: web's scheduler fires due automations into the bridge on its
+    // first tick, and the bridge only listens after its session reconcile.
+    // Order web after the bridge (Wants=, not Requires=, so web still runs when
+    // the bridge is disabled or crashes). The web-side readiness gate covers the
+    // platforms with no unit ordering.
+    const unitDeps = service === 'web'
+        ? ['network-online.target', 'slycode-bridge.service']
+        : ['network-online.target'];
     switch (service) {
         case 'web':
             description = 'SlyCode Web (Command Center)';
@@ -98,8 +106,8 @@ function generateUnit(service, workspace, config) {
     }
     return `[Unit]
 Description=${description}
-After=network-online.target
-Wants=network-online.target
+After=${unitDeps.join(' ')}
+Wants=${unitDeps.join(' ')}
 
 [Service]
 Type=simple

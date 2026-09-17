@@ -645,14 +645,25 @@ export function useSpeakerController(): SpeakerController {
     holderRef.current = holder;
     holder.start();
     const beat = setInterval(() => holder.tick(), holder.heartbeatMs);
+    // Presence survives Chrome's background-tab timer throttling: peers expire
+    // only on an explicit release or a multi-minute silence (see AudioHolder),
+    // so release on pagehide and re-announce on every wake path. NOT on
+    // beforeunload: a cancelled navigation fires it with no pageshow after, and
+    // the election would stay stopped for good (a lone tab loses spoken replies).
     const onVis = () => holder.visibilityChanged();
     const onUnload = () => holder.stop();
+    const onFocus = () => { if (document.visibilityState === 'visible') holder.announce(); };
+    const onShow = () => { holder.start(); holder.announce(); }; // bfcache restore: start() is idempotent
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', onUnload);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onShow);
     return () => {
       clearInterval(beat);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onShow);
       holder.stop();
       holderRef.current = null;
       closeStream();

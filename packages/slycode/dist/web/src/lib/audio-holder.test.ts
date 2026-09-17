@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioHolder, type HolderChannel, type HolderMessage, type RelayState } from './audio-holder';
+import { AudioHolder, DEFAULT_TIMEOUT_MS, type HolderChannel, type HolderMessage, type RelayState } from './audio-holder';
 
 /** In-memory bus shared by fake tabs. Delivers synchronously to every other subscriber. */
 function makeBus() {
@@ -67,7 +67,7 @@ test('lowest tabId wins among live visible tabs; loser hands over seen ids', () 
   assert.equal(a.holder.hasSeen('clip-1'), true, 'seen ids relayed on handover');
 });
 
-test('dead peer (no heartbeat for 10 s) triggers re-election', () => {
+test('dead peer (silent past the multi-minute timeout) triggers re-election', () => {
   const bus = makeBus();
   const clock = { t: 1000 };
   const a = makeTab(bus, 'a', clock);
@@ -76,9 +76,101 @@ test('dead peer (no heartbeat for 10 s) triggers re-election', () => {
   b.holder.start();
   assert.equal(a.holder.isHolder, true);
   // a silently disappears (no release); b keeps ticking
-  clock.t += 11000;
+  clock.t += DEFAULT_TIMEOUT_MS - 1000;
+  b.holder.tick();
+  assert.equal(b.holder.isHolder, false, 'still inside the timeout — a is presumed alive');
+  clock.t += 2000;
   b.holder.tick();
   assert.equal(b.holder.isHolder, true, 'b takes over after a times out');
+});
+
+test('throttled hidden holder beating once a minute is never declared dead — no self-election (all tabs hidden)', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  const a = makeTab(bus, 'a', clock, () => false);
+  const b = makeTab(bus, 'b', clock, () => false);
+  a.holder.start();
+  b.holder.start();
+  assert.equal(a.holder.isHolder, true);
+  // Ten minutes hidden: a's timers are throttled to one beat a minute, b beats every 3 s.
+  for (let step = 0; step < 200; step++) {
+    clock.t += 3000;
+    b.holder.tick();
+    if (step % 20 === 19) a.holder.tick();
+    assert.equal(b.holder.isHolder, false, `b elected itself at step ${step}`);
+    assert.equal(a.holder.isHolder, true, `a lost holdership at step ${step}`);
+  }
+  assert.deepEqual(b.events, [], 'b never became holder');
+  assert.deepEqual(b.holder.livePeerIds(), ['a']);
+});
+
+test('a hidden priority holder throttled to 1/min does not flap against the visible tab', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  let visA = true;
+  const a = makeTab(bus, 'a', clock, () => visA);
+  const b = makeTab(bus, 'b', clock, () => true);
+  a.holder.start();
+  b.holder.start();
+  b.holder.claimNow(); // user pressed Play in b → priority; b is holder
+  assert.equal(b.holder.isHolder, true);
+  // b goes to the background and its timers get throttled to one beat a minute; a stays visible
+  // and beats every 3 s. With a 10 s expiry a would prune b, elect itself, then lose again on
+  // b's next beat — a flap once a minute.
+  visA = true;
+  for (let step = 0; step < 200; step++) {
+    clock.t += 3000;
+    a.holder.tick();
+    if (step % 20 === 19) b.holder.tick();
+    assert.equal(a.holder.isHolder, false, `a pre-empted the priority holder at step ${step}`);
+    assert.equal(b.holder.isHolder, true, `b lost holdership at step ${step}`);
+  }
+  assert.equal(a.events.filter((e) => e === 'become').length, 1, 'a held only at the very start, before b claimed');
+});
+
+test('a closed tab is dropped on its release immediately — the survivor takes over without waiting', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  const a = makeTab(bus, 'a', clock);
+  const b = makeTab(bus, 'b', clock);
+  a.holder.start();
+  b.holder.start();
+  assert.equal(a.holder.isHolder, true);
+  assert.deepEqual(b.holder.livePeerIds(), ['a']);
+  a.holder.stop(); // pagehide / beforeunload
+  assert.deepEqual(b.holder.livePeerIds(), [], 'no timeout involved');
+  assert.equal(b.holder.isHolder, true);
+  assert.deepEqual(b.events, ['become']);
+});
+
+test('setPlaying broadcasts at once so a visible newcomer sees the hidden holder mid-clip and leaves it alone', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  const a = makeTab(bus, 'a', clock, () => false); // hidden holder
+  a.holder.start();
+  a.holder.setPlaying(true); // no tick after this
+  const b = makeTab(bus, 'b', clock, () => true);
+  b.holder.start();
+  assert.equal(a.holder.isHolder, true, 'hidden holder keeps the clip');
+  assert.equal(b.holder.isHolder, false);
+  a.holder.setPlaying(false); // clip ends → broadcast → visible tab may now take over
+  assert.equal(b.holder.isHolder, true);
+  assert.equal(a.holder.isHolder, false);
+});
+
+test('announce() posts a claim that peers answer immediately and the holder republishes state for', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  const a = makeTab(bus, 'a', clock);
+  const b = makeTab(bus, 'b', clock);
+  a.holder.start();
+  b.holder.start();
+  const beatsA = () => bus.log.filter((m) => m.type === 'heartbeat' && m.tabId === 'a').length;
+  const claimsB = () => bus.log.filter((m) => m.type === 'claim' && m.tabId === 'b').length;
+  const [ba, cb] = [beatsA(), claimsB()];
+  b.holder.announce(); // b became visible / focused after a long throttled sleep
+  assert.equal(claimsB(), cb + 1);
+  assert.equal(beatsA(), ba + 1, 'a answered the claim straight away');
 });
 
 test('visible tab preferred over hidden tab when nothing is playing', () => {
@@ -232,7 +324,7 @@ test('recording ownership: a recording tab that dies releases the pause via live
   b.holder.setRecording(true);
   assert.equal(a.holder.isAnyRecording(), true);
   // b vanishes without a release; a keeps ticking past the liveness timeout
-  clock.t += 11000;
+  clock.t += DEFAULT_TIMEOUT_MS + 1000;
   a.holder.tick();
   assert.equal(a.holder.isAnyRecording(), false, 'dead recording peer no longer blocks playback');
   assert.deepEqual(a.recording, [true, false]);

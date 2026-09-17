@@ -32,10 +32,27 @@ interface ManagedConnection {
   retryCount: number;
   retryTimeout: NodeJS.Timeout | null;
   lastConnected: number | null;
+  /** When the current EventSource entered CONNECTING; null once open or closed. */
+  connectingSince: number | null;
   id: string;
 }
 
 type StatusListener = (status: ConnectionStatus) => void;
+
+/**
+ * Read-only picture of this tab's long-lived connections for the per-browser
+ * budget tally (card #0356). Consumed by useConnectionBudget; never drives
+ * reconnects or input.
+ */
+export interface ConnectionReport {
+  /** EventSources currently CONNECTING or OPEN — each holds an HTTP/1.1 slot. */
+  streams: number;
+  /** Some stream received data/heartbeat recently — the host is reachable. */
+  active: boolean;
+  /** Age of the longest-waiting CONNECTING stream, 0 when none is waiting. */
+  connectingForMs: number;
+}
+type ReportListener = () => void;
 
 // Backoff configuration
 const INITIAL_BACKOFF_MS = 1000;
@@ -59,6 +76,7 @@ function cmLog(...args: unknown[]): void {
 class ConnectionManagerImpl {
   private connections = new Map<string, ManagedConnection>();
   private statusListeners = new Set<StatusListener>();
+  private reportListeners = new Set<ReportListener>();
   private _status: ConnectionStatus = 'connected';
   private connectionIdCounter = 0;
   private isPageVisible = true;
@@ -227,6 +245,7 @@ class ConnectionManagerImpl {
       retryCount: 0,
       retryTimeout: null,
       lastConnected: null,
+      connectingSince: null,
       id,
     };
 
@@ -258,10 +277,14 @@ class ConnectionManagerImpl {
     try {
       const eventSource = new EventSource(conn.url);
       conn.eventSource = eventSource;
+      conn.connectingSince = Date.now();
+      this.notifyReport();
 
       eventSource.onopen = () => {
         conn.retryCount = 0;
         conn.lastConnected = Date.now();
+        conn.connectingSince = null;
+        this.notifyReport();
         this.consecutiveHealthFailures = 0;
         cmLog(`OPEN ${id} → ${conn.url}`);
         this.updateOverallStatus();
@@ -275,14 +298,23 @@ class ConnectionManagerImpl {
         // Schedule reconnect if connection is closed
         if (eventSource.readyState === EventSource.CLOSED) {
           cmLog(`CLOSED ${id} — scheduling reconnect`);
+          conn.connectingSince = null;
           this.scheduleReconnect(id);
+        } else if (eventSource.readyState === EventSource.CONNECTING && conn.connectingSince === null) {
+          // Native EventSource reconnect: the browser dropped the socket and is
+          // retrying on its own (onopen cleared the timer, so re-arm it here or
+          // the stalled-connection signal would be dead after the first open).
+          conn.connectingSince = Date.now();
         }
+        this.notifyReport();
       };
 
       eventSource.onmessage = (event) => {
         conn.lastConnected = Date.now();
         conn.handlers.onMessage?.(event);
       };
+      // (Named events and heartbeats below also refresh lastConnected; the
+      // budget tally reads `active` on its own timer, so no per-event notify.)
 
       // Listen for heartbeat events to keep lastConnected fresh on idle connections
       eventSource.addEventListener('heartbeat', () => {
@@ -399,6 +431,7 @@ class ConnectionManagerImpl {
 
     this.connections.delete(id);
     this.updateOverallStatus();
+    this.notifyReport();
   }
 
   /**
@@ -476,6 +509,45 @@ class ConnectionManagerImpl {
       this._status = status;
       this.statusListeners.forEach((listener) => listener(status));
     }
+  }
+
+  /**
+   * Snapshot of this tab's long-lived connections for the per-browser budget
+   * tally (card #0356). Read-only.
+   */
+  report(): ConnectionReport {
+    const now = Date.now();
+    let streams = 0;
+    let connectingForMs = 0;
+    this.connections.forEach((conn) => {
+      const es = conn.eventSource;
+      if (!es || es.readyState === EventSource.CLOSED) return;
+      streams++;
+      if (es.readyState === EventSource.CONNECTING) {
+        // Safety net: a source seen CONNECTING without a start time (a native
+        // reconnect whose onerror we somehow missed) starts its clock now.
+        if (conn.connectingSince === null) conn.connectingSince = now;
+        connectingForMs = Math.max(connectingForMs, now - conn.connectingSince);
+      }
+    });
+    return { streams, active: this.hasRecentlyActiveConnection(), connectingForMs };
+  }
+
+  /**
+   * Notified whenever a stream is created, opens, closes, or is removed —
+   * i.e. whenever `report()` may have changed. Data arrival does not notify.
+   */
+  subscribeReport(listener: ReportListener): () => void {
+    this.reportListeners.add(listener);
+    return () => {
+      this.reportListeners.delete(listener);
+    };
+  }
+
+  private notifyReport(): void {
+    this.reportListeners.forEach((l) => {
+      try { l(); } catch { /* listener error must not break the manager */ }
+    });
   }
 
   /**

@@ -1033,3 +1033,17 @@ body {
     animation: none;
   }
 }
+
+/* ========== Connection starvation banner (card #0356) ========== */
+
+/* Overflow cells past the 6-slot limit breathe slowly; still under reduced motion. */
+@keyframes conn-budget-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.conn-budget-breathe {
+  animation: conn-budget-breathe 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-budget-breathe { animation: none; }
+}

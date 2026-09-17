@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-09-17
+
+### Added
+- Connection budget banner — a new sticky banner appears when your browser hits its per-origin connection cap (mostly plain HTTP, where Chrome caps you at around six live streams). A live slot gauge counts your open card sessions across all tabs of this origin, and if a tailnet HTTPS URL is configured a one-click Switch to HTTPS link lifts the cap. The starvation signal fires as soon as a new session cannot get a stream instead of waiting for a timeout.
+
+### Fixed
+- Voice speaker election and card presence now survive throttled background tabs. When you leave the dashboard in a background tab, Chrome throttles its timers to about once a minute — the old sub-30-second peer expiry would strand the audio holder and empty the presence roster. Peer expiry is now minutes long, the audio holder is released cleanly on pagehide, and re-announce fires on focus and pageshow so your presence and the speaker slot come back immediately when you return to the tab. The old beforeunload stop hook has been dropped (it was firing on tab-hide and killing sessions).
+- Card edits are now flushed to disk before any action, session start, or tab switch. If you had a queued title or description change pending when you clicked Start Session or opened the Terminal tab, the session used to boot against pre-edit state. The debounced save is now flushable, joined-write failures propagate to the caller, and the terminal panel waits for the flush and renders the prompt from the post-flush card context. Create-mode also flips the modal cleanly: type a title, switch to another tab, and the card is created, awaited, and the modal switches to the persisted card.
+- Bridge starting is now visible, not fatal. If you open the dashboard while the bridge is still booting, the web UI shows a reconnecting banner and keeps your session state instead of failing. The bridge binds and serves `/health` before it restores sessions, the proxy returns 503 with a single warning line until it is ready, the scheduler waits for `/health` before its first tick (so boot-time prompts do not fire against a dead bridge), and the start scripts wait for the bridge port to accept connections before starting the web server.
+- Cross-card prompt verification works on Claude Code 2.1.274. Claude 2.1.274 draws the session title inside the top rule of the input box, which the old submit-verify anchor logic mistook for a missing input region. It now finds the input box on the new layout, including the 60-column truncated-title case. Real Claude 2.1.274 fixtures were added so this stays regression-tested.
+
 ## [0.4.9] - 2026-09-14
 
 ### Added
