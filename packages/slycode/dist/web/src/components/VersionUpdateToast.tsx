@@ -45,25 +45,25 @@ export function VersionUpdateToast() {
   if (!info || dismissed) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-lg border border-neon-blue-400/40 bg-void-50 px-4 py-2.5 shadow-(--shadow-card) dark:border-neon-blue-400/25 dark:bg-void-900">
+    <div className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-xl border border-line bg-surface-1 px-4 py-2.5 shadow-(--shadow-overlay)">
       <div className="flex items-center gap-2">
         <span
-          className="h-2 w-2 rounded-full bg-neon-blue-400"
+          className="h-2 w-2 rounded-full bg-accent"
           style={{ boxShadow: '0 0 6px rgba(0,191,255,0.5)' }}
         />
-        <span className="text-sm text-void-700 dark:text-void-300">
-          SlyCode <span className="font-medium text-neon-blue-500 dark:text-neon-blue-400">v{info.latest}</span> available
+        <span className="text-sm text-ink-2">
+          SlyCode <span className="font-medium text-accent">v{info.latest}</span> available
         </span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-void-500 dark:text-void-400">run in terminal:</span>
-        <code className="rounded bg-void-100 px-1.5 py-0.5 text-xs text-void-600 dark:bg-void-800 dark:text-void-400">
+        <span className="text-xs text-ink-3">run in terminal:</span>
+        <code className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ink-2">
           slycode update
         </code>
       </div>
       <button
         onClick={handleDismiss}
-        className="ml-1 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"
+        className="ml-1 rounded p-0.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
         aria-label="Dismiss"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

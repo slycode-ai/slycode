@@ -6,6 +6,13 @@
  * the TTS readiness probe behind GET /speaker and, in the speak route, for
  * POST /tts/render.
  */
+/** Accept the DTO only when it has the fields every consumer relies on. */
+function parseSpeech(value) {
+    if (!value || typeof value !== 'object')
+        return null;
+    const v = value;
+    return typeof v.provider === 'string' && typeof v.ready === 'boolean' ? v : null;
+}
 export class MessagingError extends Error {
     code;
     status;
@@ -32,7 +39,7 @@ export class MessagingClient {
     /** Cached readiness probe: at most one request per 15 s. */
     async health(now = Date.now()) {
         if (!this.baseUrl)
-            return { configured: false, tts: null, checkedAt: now };
+            return { configured: false, tts: null, speech: null, checkedAt: now };
         if (this.healthCache && now - this.healthCache.checkedAt < HEALTH_CACHE_MS)
             return this.healthCache;
         if (this.healthInFlight)
@@ -46,11 +53,13 @@ export class MessagingClient {
         try {
             const res = await fetch(`${this.baseUrl}/health`, { signal: ctrl.signal });
             const body = res.ok ? await res.json().catch(() => null) : null;
-            const tts = body && typeof body.tts === 'boolean' ? body.tts : null;
-            this.healthCache = { configured: true, tts, checkedAt: now };
+            const speech = parseSpeech(body?.speech);
+            // Prefer the DTO's readiness; fall back to the legacy boolean (pre-087 service).
+            const tts = speech ? speech.ready : body && typeof body.tts === 'boolean' ? body.tts : null;
+            this.healthCache = { configured: true, tts, speech, checkedAt: now };
         }
         catch {
-            this.healthCache = { configured: true, tts: null, checkedAt: now };
+            this.healthCache = { configured: true, tts: null, speech: null, checkedAt: now };
         }
         finally {
             clearTimeout(timer);

@@ -1,5 +1,5 @@
 var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/atlas/git/route.js")
-R.c("server/chunks/[root-of-the-server]__1yq6m_0._.js")
+R.c("server/chunks/[root-of-the-server]__1r4ytfc._.js")
 R.c("server/chunks/_0m5nd5h._.js")
 R.c("server/chunks/[root-of-the-server]__15bjnu5._.js")
 R.c("server/chunks/node_modules_next_1zc5q0a._.js")

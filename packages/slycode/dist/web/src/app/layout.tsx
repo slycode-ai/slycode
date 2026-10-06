@@ -1,17 +1,13 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono, JetBrains_Mono, Press_Start_2P } from 'next/font/google';
+import { Geist, JetBrains_Mono, Press_Start_2P } from 'next/font/google';
 import './globals.css';
 import { VoiceProvider } from '@/contexts/VoiceContext';
 import CleartextWarningBanner from '@/components/CleartextWarningBanner';
 import ConnectionStarvationBanner from '@/components/ConnectionStarvationBanner';
+import WhatsNewGate from '@/components/WhatsNewGate';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
   subsets: ['latin'],
 });
 
@@ -49,11 +45,12 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${pressStart2P.variable} font-sans antialiased`}
+        className={`${geistSans.variable} ${jetbrainsMono.variable} ${pressStart2P.variable} font-sans antialiased`}
       >
         <CleartextWarningBanner />
         <ConnectionStarvationBanner />
         <VoiceProvider>{children}</VoiceProvider>
+        <WhatsNewGate />
       </body>
     </html>
   );

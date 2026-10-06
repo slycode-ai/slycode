@@ -129,7 +129,7 @@ export function SkillUpdateToast({ projectId }: Props) {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-lg border border-amber-400/40 bg-void-50 px-3 py-2.5 shadow-(--shadow-card) dark:border-amber-400/30 dark:bg-void-900 sm:max-w-md"
+      className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-line bg-surface-1 px-3 py-2.5 shadow-(--shadow-overlay) sm:max-w-md"
       style={{
         paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))',
         paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
@@ -143,7 +143,7 @@ export function SkillUpdateToast({ projectId }: Props) {
           {overflow.length > 0 && (
             <button
               onClick={() => handleClick(overflow[0])}
-              className="text-left text-[11px] text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200"
+              className="text-left text-[11px] text-ink-3 hover:text-ink-2"
             >
               +{overflow.length} more skill {overflow.length === 1 ? 'update' : 'updates'}
             </button>
@@ -152,7 +152,7 @@ export function SkillUpdateToast({ projectId }: Props) {
         <Tooltip content="Dismiss for 1 hour">
           <button
             onClick={handleDismiss}
-            className="ml-1 mt-0.5 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"
+            className="ml-1 mt-0.5 rounded p-0.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
             aria-label="Dismiss for 1 hour"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,11 +167,11 @@ export function SkillUpdateToast({ projectId }: Props) {
 
 function SkillRow({ status, onClick }: { status: SkillUpdateStatus; onClick: () => void }) {
   const isAccept = status.state === 'accept';
-  const accent = isAccept ? 'bg-amber-400' : 'bg-neon-blue-400';
+  const accent = isAccept ? 'bg-amber-400' : 'bg-accent';
   const accentGlow = isAccept ? '0 0 6px rgba(251,191,36,0.6)' : '0 0 6px rgba(0,191,255,0.5)';
   const versionColor = isAccept
     ? 'text-amber-500 dark:text-amber-400'
-    : 'text-neon-blue-500 dark:text-neon-blue-400';
+    : 'text-accent';
 
   const message = isAccept
     ? (
@@ -186,7 +186,7 @@ function SkillRow({ status, onClick }: { status: SkillUpdateStatus; onClick: () 
         <span className="capitalize">{status.name}</span>{' '}
         <span className={`font-mono font-medium ${versionColor}`}>v{status.latestVersion ?? '?'}</span>{' '}
         available — this project is on{' '}
-        <span className="font-mono text-void-500 dark:text-void-400">v{status.projectVersion ?? '?'}</span>
+        <span className="font-mono text-ink-3">v{status.projectVersion ?? '?'}</span>
       </>
     );
 
@@ -202,10 +202,10 @@ function SkillRow({ status, onClick }: { status: SkillUpdateStatus; onClick: () 
         style={{ boxShadow: accentGlow }}
       />
       <span className="flex flex-col">
-        <span className="text-sm text-void-700 group-hover:text-void-900 dark:text-void-300 dark:group-hover:text-void-100">
+        <span className="text-sm text-ink-2 group-hover:text-ink-1">
           {message}
         </span>
-        <span className="text-[11px] text-void-500 dark:text-void-400">
+        <span className="text-[11px] text-ink-3">
           {subtitle}
         </span>
       </span>

@@ -46,12 +46,12 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
     <div className="flex h-full min-h-0 flex-col">
       {/* Headline — full width, generous rhythm (no text-balance: it broke
           the line early and read as crumpled at drawer widths) */}
-      <p className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.2em] text-(--cm-atlas)">
+      <p className="mb-1.5 font-mono text-[11px] text-(--cm-atlas)">
         since {digest.since_date ? relTime(digest.since_date) : digest.since_commit.slice(0, 8)}
         {totalCommits > 0 && ` · ${totalCommits} commits`}
         {' · generated '}{relTime(digest.generated_at)}
       </p>
-      <p className="mb-3.5 w-full text-[14.5px] font-medium leading-[1.55] text-(--cm-text)">
+      <p className="mb-3.5 w-full text-[15px] font-medium leading-[1.55] text-(--cm-text)">
         {digest.headline}
       </p>
 
@@ -67,14 +67,14 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
                 <Tooltip content={`Open ${meta?.name ?? entry.area}`}>
                 <button
                   onClick={() => onEnterArea(entry.area)}
-                  className="flex items-center gap-1.5 font-mono text-[10.5px] text-(--cm-muted) transition-colors hover:text-(--cm-text)"
+                  className="flex items-center gap-1.5 font-mono text-[11px] text-(--cm-muted) transition-colors hover:text-(--cm-text)"
                 >
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta?.color ?? 'var(--cm-atlas)' }} />
                   <span className="font-semibold">{meta?.name ?? entry.area}</span>
                   {entry.commits !== undefined && <span className="text-(--cm-faint)">{entry.commits}c</span>}
                   {entry.files_changed !== undefined && <span className="text-(--cm-faint)">{entry.files_changed}f</span>}
                   {rarelyViewed && (
-                    <span className="rounded bg-amber-500/15 px-1 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                    <span className="rounded bg-amber-500/15 px-1 py-px font-sans text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                       rarely viewed
                     </span>
                   )}
@@ -89,7 +89,7 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
         {/* Notable jump targets */}
         {digest.notable && digest.notable.length > 0 && (
           <div className="w-[320px] min-w-0 flex-none overflow-y-auto">
-            <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Worth a look</p>
+            <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Worth a look</p>
             <div className="space-y-0.5">
               {digest.notable.map((n, i) => (
                 <Tooltip key={i} content={`${n.file}${n.line ? ':' + n.line : ''}`}>
@@ -97,10 +97,10 @@ export function DigestTab({ snapshot, onOpenFile, onEnterArea }: DigestTabProps)
                     onClick={() => onOpenFile(n.file, n.line)}
                     className="block w-full rounded px-1.5 py-1 text-left transition-colors hover:bg-(--cm-panel3)"
                   >
-                    <span className="block truncate font-mono text-[10.5px] text-(--cm-atlas)">
+                    <span className="block truncate font-mono text-[11px] text-(--cm-atlas)">
                       {n.file.split('/').slice(-2).join('/')}{n.line ? `:${n.line}` : ''}
                     </span>
-                    <span className="block text-[10.5px] leading-snug text-(--cm-muted)">{n.note}</span>
+                    <span className="block text-[11px] leading-snug text-(--cm-muted)">{n.note}</span>
                   </button>
                 </Tooltip>
               ))}

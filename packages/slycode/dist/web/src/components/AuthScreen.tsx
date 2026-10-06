@@ -68,38 +68,36 @@ export default function AuthScreen({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div className="dark min-h-svh w-full flex items-center justify-center bg-void-950 text-void-100 px-4 relative overflow-hidden">
+    <div className="relative flex min-h-svh w-full items-center justify-center overflow-hidden bg-page px-4 text-ink-1">
       {/* ambient neon glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-60"
         style={{
           background:
-            'radial-gradient(60% 50% at 50% 0%, rgba(0,191,255,0.10), transparent 70%), radial-gradient(40% 40% at 80% 100%, rgba(0,191,255,0.06), transparent 70%)',
+            'radial-gradient(60% 50% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%)',
         }}
       />
       <form
         onSubmit={onSubmit}
-        className="relative z-10 w-full max-w-sm rounded-2xl border border-void-700 bg-void-900/80 backdrop-blur p-8 shadow-[0_24px_64px_rgba(0,0,0,0.6),0_0_0_1px_rgba(0,191,255,0.08)]"
+        className="relative z-10 w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-8 shadow-(--shadow-overlay)"
       >
-        <div className="flex flex-col items-center text-center mb-7">
-          <span
-            className="text-neon-blue-400 text-[15px] tracking-tight mb-3"
-            style={{ fontFamily: 'var(--font-press-start-2p)', textShadow: '0 0 12px rgba(0,191,255,0.45)' }}
-          >
-            SlyCode
-          </span>
-          <h1 className="text-lg font-semibold text-void-100">
-            {isSetup ? 'Create a password' : 'Sign in'}
+        <div className="mb-7 flex flex-col items-start">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/slycode_logo_light.webp" alt="SlyCode" className="mb-4 h-11 w-11 object-contain mix-blend-multiply dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/slycode_logo.webp" alt="SlyCode" className="mb-4 hidden h-11 w-11 object-contain mix-blend-lighten dark:block" />
+          <h1 className="text-xl font-semibold tracking-tight text-ink-1">
+            {isSetup ? 'Create a password' : 'Sign in to SlyCode'}
           </h1>
-          <p className="mt-1.5 text-sm text-void-400">
+          <p className="mt-1.5 text-sm text-ink-2">
             {isSetup
               ? 'Set a password to protect this dashboard. You can reset it from the server with “slycode reset-password”.'
               : 'Enter your password to access the dashboard.'}
           </p>
         </div>
 
-        <label className="block text-xs font-medium text-void-400 mb-1.5" htmlFor="password">
+        <label className="mb-1.5 block text-[13px] font-medium text-ink-2" htmlFor="password">
           Password
         </label>
         <input
@@ -109,13 +107,13 @@ export default function AuthScreen({ mode }: { mode: Mode }) {
           autoComplete={isSetup ? 'new-password' : 'current-password'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-lg border border-void-700 bg-void-950 px-3.5 py-2.5 text-void-100 placeholder-void-500 outline-none focus:border-neon-blue-400 focus:ring-1 focus:ring-neon-blue-400/40 transition"
+          className="w-full rounded-lg border border-line-strong bg-surface-2 px-3.5 py-2.5 text-ink-1 placeholder:text-ink-3 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
           placeholder="••••••••"
         />
 
         {isSetup && (
           <>
-            <label className="block text-xs font-medium text-void-400 mt-4 mb-1.5" htmlFor="confirm">
+            <label className="mb-1.5 mt-4 block text-[13px] font-medium text-ink-2" htmlFor="confirm">
               Confirm password
             </label>
             <input
@@ -124,14 +122,14 @@ export default function AuthScreen({ mode }: { mode: Mode }) {
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
-              className="w-full rounded-lg border border-void-700 bg-void-950 px-3.5 py-2.5 text-void-100 placeholder-void-500 outline-none focus:border-neon-blue-400 focus:ring-1 focus:ring-neon-blue-400/40 transition"
+              className="w-full rounded-lg border border-line-strong bg-surface-2 px-3.5 py-2.5 text-ink-1 placeholder:text-ink-3 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
               placeholder="••••••••"
             />
           </>
         )}
 
         {error && (
-          <p className="mt-4 text-sm text-red-400" role="alert">
+          <p className="mt-4 text-sm text-danger-text" role="alert">
             {error}
           </p>
         )}
@@ -139,7 +137,7 @@ export default function AuthScreen({ mode }: { mode: Mode }) {
         <button
           type="submit"
           disabled={submitting}
-          className="mt-6 w-full rounded-lg bg-neon-blue-400 px-4 py-2.5 font-semibold text-void-950 hover:bg-neon-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-[0_0_20px_rgba(0,191,255,0.25)]"
+          className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? 'Please wait…' : isSetup ? 'Create password' : 'Sign in'}
         </button>

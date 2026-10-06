@@ -92,14 +92,14 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 w-full max-w-sm rounded-lg border border-void-200/60 bg-void-50 p-4 shadow-(--shadow-overlay) dark:border-void-700 dark:bg-void-850">
+      <div className="mx-4 w-full max-w-sm rounded-lg border border-line bg-surface-2 p-4 shadow-(--shadow-overlay)">
         <div className="mb-3 flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold text-void-900 dark:text-void-100">Provider config</h3>
+          <h3 className="text-sm font-semibold text-ink-1">Provider config</h3>
           <span
             aria-live="polite"
             className={`text-[10px] transition-opacity ${
-              saveState === 'saved' ? 'text-emerald-400 opacity-100'
-              : saveState === 'error' ? 'text-red-400 opacity-100'
+              saveState === 'saved' ? 'text-st-done opacity-100'
+              : saveState === 'error' ? 'text-danger-text opacity-100'
               : 'opacity-0'
             }`}
           >
@@ -107,7 +107,7 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
           </span>
         </div>
 
-        {!rows && !error && <p className="py-4 text-center text-xs text-void-500">Loading…</p>}
+        {!rows && !error && <p className="py-4 text-center text-xs text-ink-3">Loading…</p>}
 
         {rows && (
           <ul className="space-y-1">
@@ -116,8 +116,8 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
                 key={r.id}
                 className={`flex items-center gap-2 rounded-md border px-2 py-1.5 transition-colors ${
                   r.disabled
-                    ? 'border-transparent bg-void-100/60 dark:bg-void-900/40'
-                    : 'border-void-200/60 bg-white dark:border-void-700/60 dark:bg-void-800'
+                    ? 'border-transparent bg-surface-2'
+                    : 'border-line bg-surface-1'
                 }`}
               >
                 <span
@@ -138,7 +138,7 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
                         onClick={() => move(i, -1)}
                         disabled={i === 0}
                         aria-label={`Move ${r.displayName} up`}
-                        className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
+                        className="rounded p-1 text-ink-3 hover:text-accent disabled:opacity-30 disabled:hover:text-void-500"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
                       </button>
@@ -150,7 +150,7 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
                         onClick={() => move(i, 1)}
                         disabled={i === rows.length - 1}
                         aria-label={`Move ${r.displayName} down`}
-                        className="rounded p-1 text-void-500 hover:text-neon-blue-400 disabled:opacity-30 disabled:hover:text-void-500"
+                        className="rounded p-1 text-ink-3 hover:text-accent disabled:opacity-30 disabled:hover:text-void-500"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                       </button>
@@ -171,9 +171,9 @@ export function ProviderConfigModal({ onClose }: { onClose: () => void }) {
           </ul>
         )}
 
-        {error && <p className="mt-2 text-[11px] leading-snug text-red-400">{error}</p>}
+        {error && <p className="mt-2 text-[11px] leading-snug text-danger-text">{error}</p>}
 
-        <p className="mt-3 border-t border-void-200/60 pt-2 text-[10px] leading-snug text-void-500 dark:border-void-700/60">
+        <p className="mt-3 border-t border-line pt-2 text-[10px] leading-snug text-ink-3">
           Applies to this machine only. Disabled providers disappear from pickers and can't start new sessions; running sessions are left alone.
         </p>
       </div>

@@ -43,7 +43,7 @@ interface ProvidersData {
 // Dynamic import to avoid SSR issues with xterm
 const Terminal = dynamic(
   () => import('./Terminal').then((mod) => mod.Terminal),
-  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-void-500">Loading terminal...</div> }
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-ink-3">Loading terminal...</div> }
 );
 
 interface SessionInfo {
@@ -421,7 +421,7 @@ export function ClaudeTerminalPanel({
   const instructionFileWarning = instructionFileCheck?.needed ? (
     instructionFileCheck.nativelyReads ? (
       <div className="flex max-w-xs flex-col items-center gap-1 text-center">
-        <span className="text-xs text-void-400">
+        <span className="text-xs text-ink-3">
           {instructionFileCheck.targetFile} not found. {instructionFileCheck.note}
         </span>
         <div className="flex items-center gap-3">
@@ -444,7 +444,7 @@ export function ClaudeTerminalPanel({
               }).catch(() => {});
               setInstructionFileCheck({ needed: false });
             }}
-            className="text-xs text-void-500 underline-offset-2 hover:text-void-300 hover:underline"
+            className="text-xs text-ink-3 underline-offset-2 hover:text-void-300 hover:underline"
           >
             Don't ask again for this project
           </button>
@@ -486,8 +486,8 @@ export function ClaudeTerminalPanel({
               }}
               className={`rounded-md px-3 py-1 text-xs font-medium transition-all ${
                 selectedProvider === p.id
-                  ? 'border border-neon-blue-400/60 bg-neon-blue-400/15 text-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.2)]'
-                  : 'border border-void-600 bg-void-800 text-void-400 hover:border-void-500 hover:text-void-300'
+                  ? 'border border-accent/60 bg-accent/15 text-accent'
+                  : 'border border-void-600 bg-void-800 text-ink-3 hover:border-void-500 hover:text-void-300'
               }`}
             >
               {p.displayName}
@@ -495,7 +495,7 @@ export function ClaudeTerminalPanel({
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs text-void-500 cursor-pointer">
+          <label className="flex items-center gap-1.5 text-xs text-ink-3 cursor-pointer">
             <input
               type="checkbox"
               checked={skipPermissions}
@@ -793,8 +793,11 @@ export function ClaudeTerminalPanel({
     setShowActionsMenu(false);
   }, [visibleCount]);
 
+  // The terminal is always Signal Den: scoping `dark` here makes every token
+  // and dark: variant inside (footer, pills, scheduled sends) use the dark
+  // palette in both themes, so accents stay legible on the dark chrome.
   return (
-    <div className={`relative flex h-full flex-col overflow-hidden ${className}`}>
+    <div className={`dark relative flex h-full flex-col overflow-hidden ${className}`}>
       {bridgeUnavailable && (
         <div
           role="status"
@@ -837,18 +840,18 @@ export function ClaudeTerminalPanel({
             />
           </div>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-void-400">
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-ink-3">
             {isRunning ? (
               <>
                 <div className="text-lg">Session Running</div>
                 {sessionInfo?.provider && (
-                  <span className="text-xs text-void-500">
+                  <span className="text-xs text-ink-3">
                     {providersData?.providers[sessionInfo.provider]?.displayName || sessionInfo.provider}
                   </span>
                 )}
                 <button
                   onClick={connectToSession}
-                  className="rounded-lg border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)]"
+                  className="rounded-lg border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-medium text-accent transition-all hover:bg-accent/25"
                 >
                   Connect
                 </button>
@@ -861,7 +864,7 @@ export function ClaudeTerminalPanel({
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   placeholder="Describe what you want to do..."
                   rows={4}
-                  className="mb-3 w-full rounded border border-void-600 bg-void-800 p-3 text-sm text-void-200 placeholder-void-500 focus:border-neon-blue-400 focus:outline-none"
+                  className="mb-3 w-full rounded border border-void-600 bg-void-800 p-3 text-sm text-void-200 placeholder:text-ink-3 focus:border-accent focus:outline-none"
                   autoFocus
                 />
                 <div className="flex justify-center gap-2">
@@ -874,7 +877,7 @@ export function ClaudeTerminalPanel({
                   <button
                     onClick={() => startSession(null, customPrompt)}
                     disabled={isStarting || !customPrompt.trim()}
-                    className="rounded-lg border border-green-400/40 bg-green-400/15 px-4 py-2 text-sm font-medium text-green-400 transition-all hover:bg-green-400/25 hover:shadow-[0_0_12px_rgba(0,230,118,0.3)] disabled:opacity-50"
+                    className="rounded-lg border border-green-400/40 bg-green-400/15 px-4 py-2 text-sm font-medium text-green-400 transition-all hover:bg-green-400/25 disabled:opacity-50"
                   >
                     {isStarting ? 'Starting...' : 'Start'}
                   </button>
@@ -888,7 +891,7 @@ export function ClaudeTerminalPanel({
                   <button
                     onClick={() => startSession({ id: 'resume', label: 'Resume', prompt: '' })}
                     disabled={isStarting}
-                    className="rounded-lg border border-green-400/40 bg-green-400/15 px-4 py-2 text-sm font-medium text-green-400 transition-all hover:bg-green-400/25 hover:shadow-[0_0_12px_rgba(0,230,118,0.3)] disabled:opacity-50"
+                    className="rounded-lg border border-green-400/40 bg-green-400/15 px-4 py-2 text-sm font-medium text-green-400 transition-all hover:bg-green-400/25 disabled:opacity-50"
                   >
                     {isStarting ? 'Starting...' : 'Resume'}
                   </button>
@@ -902,7 +905,7 @@ export function ClaudeTerminalPanel({
                         .catch(console.error);
                     }}
                     disabled={isStarting}
-                    className="rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:bg-red-400/20 hover:shadow-[0_0_12px_rgba(255,59,92,0.3)] disabled:opacity-50"
+                    className="rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:bg-red-400/20 disabled:opacity-50"
                   >
                     Reset
                   </button>
@@ -913,7 +916,7 @@ export function ClaudeTerminalPanel({
                       key={cmd.id}
                       onClick={() => startSession(cmd)}
                       disabled={isStarting}
-                      className="rounded-lg border border-neon-blue-400/30 bg-neon-blue-400/10 px-3 py-1.5 text-xs font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/20 hover:shadow-[0_0_8px_rgba(0,191,255,0.2)] disabled:opacity-50"
+                      className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent transition-all hover:bg-accent/20 disabled:opacity-50"
                     >
                       {cmd.label}
                     </button>
@@ -921,7 +924,7 @@ export function ClaudeTerminalPanel({
                   <button
                     onClick={() => setShowCustomPrompt(true)}
                     disabled={isStarting}
-                    className="rounded-lg border border-void-500/30 bg-void-700/50 px-3 py-1.5 text-xs font-medium text-void-300 transition-all hover:border-neon-blue-400/30 hover:text-neon-blue-400 disabled:opacity-50"
+                    className="rounded-lg border border-void-500/30 bg-void-700/50 px-3 py-1.5 text-xs font-medium text-void-300 transition-all hover:border-accent/30 hover:text-accent disabled:opacity-50"
                   >
                     Custom...
                   </button>
@@ -938,7 +941,7 @@ export function ClaudeTerminalPanel({
                       key={cmd.id}
                       onClick={() => startSession(cmd)}
                       disabled={isStarting}
-                      className="rounded-lg border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] disabled:opacity-50"
+                      className="rounded-lg border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-medium text-accent transition-all hover:bg-accent/25 disabled:opacity-50"
                     >
                       {isStarting ? 'Starting...' : cmd.label}
                     </button>
@@ -946,7 +949,7 @@ export function ClaudeTerminalPanel({
                   <button
                     onClick={() => setShowCustomPrompt(true)}
                     disabled={isStarting}
-                    className="rounded-lg border border-void-500/40 bg-void-700/50 px-4 py-2 text-sm font-medium text-void-300 transition-all hover:border-neon-blue-400/30 hover:text-neon-blue-400 disabled:opacity-50"
+                    className="rounded-lg border border-void-500/40 bg-void-700/50 px-4 py-2 text-sm font-medium text-void-300 transition-all hover:border-accent/30 hover:text-accent disabled:opacity-50"
                   >
                     Custom...
                   </button>
@@ -954,7 +957,7 @@ export function ClaudeTerminalPanel({
                 <button
                   onClick={() => startSession()}
                   disabled={isStarting}
-                  className="text-sm text-void-500 hover:text-void-300"
+                  className="text-sm text-ink-3 hover:text-void-300"
                 >
                   Start without prompt
                 </button>
@@ -977,7 +980,7 @@ export function ClaudeTerminalPanel({
           />
           <div className="flex flex-col gap-0.5">
             {screenshotToast.status === 'uploading' && (
-              <div className="flex items-center gap-1.5 text-xs text-neon-blue-400">
+              <div className="flex items-center gap-1.5 text-xs text-accent">
                 <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -998,7 +1001,7 @@ export function ClaudeTerminalPanel({
           </div>
           <button
             onClick={() => { setScreenshotToast(null); URL.revokeObjectURL(screenshotToast.previewUrl); }}
-            className="ml-1 text-void-500 hover:text-void-300"
+            className="ml-1 text-ink-3 hover:text-void-300"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1019,7 +1022,7 @@ export function ClaudeTerminalPanel({
             </div>
             <button
               onClick={() => setExitToast(null)}
-              className="text-void-500 hover:text-void-300 flex-shrink-0"
+              className="text-ink-3 hover:text-void-300 flex-shrink-0"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1042,7 +1045,7 @@ export function ClaudeTerminalPanel({
             </div>
             <button
               onClick={() => setSpawnError(null)}
-              className="text-void-500 hover:text-void-300 flex-shrink-0"
+              className="text-ink-3 hover:text-void-300 flex-shrink-0"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1065,7 +1068,7 @@ export function ClaudeTerminalPanel({
             </div>
             <button
               onClick={() => setDeliveryToast(null)}
-              className="text-void-500 hover:text-void-300 flex-shrink-0"
+              className="text-ink-3 hover:text-void-300 flex-shrink-0"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1086,7 +1089,7 @@ export function ClaudeTerminalPanel({
           {renderedActiveCommands.map((action) => (
             <button
               key={action.id}
-              className="rounded-md border border-neon-blue-400/25 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400"
+              className="rounded-md border border-accent/25 bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
               tabIndex={-1}
             >
               {action.label}
@@ -1114,7 +1117,7 @@ export function ClaudeTerminalPanel({
             >
               <button
                 onClick={(e) => sendCommand(action, !e.shiftKey)}
-                className="flex-shrink-0 whitespace-nowrap rounded-md border border-neon-blue-400/25 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/20 hover:border-neon-blue-400/40 hover:shadow-[0_0_8px_rgba(0,191,255,0.15)]"
+                className="flex-shrink-0 whitespace-nowrap rounded-md border border-accent/25 bg-accent/10 px-2 py-1 text-xs font-medium text-accent transition-all hover:bg-accent/20 hover:border-accent/40"
               >
                 {action.label}
               </button>
@@ -1151,7 +1154,7 @@ export function ClaudeTerminalPanel({
           <div ref={rightControlsRef} className="flex flex-shrink-0 items-center gap-2">
             {/* Provider + Session ID */}
             {sessionInfo?.provider && sessionInfo.provider !== 'claude' && (
-              <span className="text-xs text-void-500">
+              <span className="text-xs text-ink-3">
                 {providersData?.providers[sessionInfo.provider]?.displayName || sessionInfo.provider}
               </span>
             )}
@@ -1175,7 +1178,7 @@ export function ClaudeTerminalPanel({
                 <button
                   onClick={() => setShowRelinkConfirm(true)}
                   disabled={isRelinking}
-                  className="rounded-md border border-void-500/25 bg-void-700/50 px-2 py-1 text-xs font-medium text-void-400 transition-all hover:border-neon-blue-400/30 hover:text-neon-blue-400 hover:bg-neon-blue-400/10 disabled:opacity-50"
+                  className="rounded-md border border-void-500/25 bg-void-700/50 px-2 py-1 text-xs font-medium text-ink-3 transition-all hover:border-accent/30 hover:text-accent hover:bg-accent/10 disabled:opacity-50"
                 >
                   {isRelinking ? 'Relinking...' : 'Relink'}
                 </button>
@@ -1191,14 +1194,14 @@ export function ClaudeTerminalPanel({
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={() => setShowRelinkConfirm(false)}
-                      className="rounded border border-void-600 bg-void-700 px-2 py-1 text-xs text-void-400 hover:text-void-300"
+                      className="rounded border border-void-600 bg-void-700 px-2 py-1 text-xs text-ink-3 hover:text-void-300"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={relinkSession}
                       disabled={isRelinking}
-                      className="rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-xs text-neon-blue-400 hover:bg-neon-blue-400/25 disabled:opacity-50"
+                      className="rounded border border-accent/40 bg-accent/15 px-2 py-1 text-xs text-accent hover:bg-accent/25 disabled:opacity-50"
                     >
                       {isRelinking ? 'Relinking...' : 'Confirm'}
                     </button>
@@ -1211,7 +1214,7 @@ export function ClaudeTerminalPanel({
             <button
               onClick={stopSession}
               disabled={isStopping}
-              className="flex items-center gap-1 rounded-md border border-red-400/25 bg-red-400/10 px-2 py-1 text-xs font-medium text-red-400 transition-all hover:bg-red-400/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(255,59,92,0.15)] disabled:opacity-50"
+              className="flex items-center gap-1 rounded-md border border-red-400/25 bg-red-400/10 px-2 py-1 text-xs font-medium text-red-400 transition-all hover:bg-red-400/20 hover:border-red-400/40 disabled:opacity-50"
             >
               {isStopping && (
                 <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">

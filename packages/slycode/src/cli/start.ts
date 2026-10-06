@@ -7,6 +7,7 @@ import { resolveWorkspaceOrExit, resolveConfig, ensureStateDir, getStateDir, res
 import { refreshUpdates } from './sync';
 import { ensureClis } from '../platform/symlinks';
 import { SERVICES, detectInstalledServiceManager, ensureXdgRuntime } from '../platform/service-detect';
+import { messagingHasWork } from '../platform/service-common';
 
 interface ServiceState {
   pid: number;
@@ -321,11 +322,10 @@ export async function start(_args: string[]): Promise<void> {
       if (eq > 0) envVars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
     }
   }
-  const hasMessagingChannel = !!(envVars.TELEGRAM_BOT_TOKEN || envVars.SLACK_TOKEN);
-  // TTS-only workspaces (feature 086): the messaging service also hosts
-  // ElevenLabs rendering for spoken terminal replies, so an ElevenLabs key
-  // alone is reason enough to start it. services.messaging=false still wins.
-  const hasTts = !!envVars.ELEVENLABS_API_KEY;
+  // TTS-only workspaces (features 086/087): the messaging service also hosts
+  // speech rendering for spoken terminal replies, so an ElevenLabs or Gemini
+  // key alone is reason enough to start it. services.messaging=false still wins.
+  const messagingNeeded = messagingHasWork(envVars);
   const messagingUrl = `http://127.0.0.1:${config.ports.messaging}`;
 
   // Determine entry points
@@ -388,8 +388,8 @@ export async function start(_args: string[]): Promise<void> {
     }
 
     // Skip messaging only when it has nothing to do: no chat channel AND no TTS
-    if (svc.name === 'Messaging' && !hasMessagingChannel && !hasTts) {
-      console.log(`  ⊘ ${svc.name}: skipped (no channels or TTS configured — add TELEGRAM_BOT_TOKEN or ELEVENLABS_API_KEY to .env)`);
+    if (svc.name === 'Messaging' && !messagingNeeded) {
+      console.log(`  ⊘ ${svc.name}: skipped (no channels or TTS configured — add TELEGRAM_BOT_TOKEN, ELEVENLABS_API_KEY or GEMINI_API_KEY to .env)`);
       continue;
     }
 

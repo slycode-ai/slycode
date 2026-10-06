@@ -4,7 +4,7 @@
  * Shared speech-bubble tooltip (#0354).
  *
  * Built from the kanban card's hover bubble in KanbanCardItem: same surface
- * (`border-neon-blue-400/20 bg-void-50 dark:bg-void-850`), same 8px rotated
+ * (`border-line bg-surface-1`), same 8px rotated
  * square arrow, same portal + viewport-aware flip. Use it anywhere a `title=`
  * attribute would otherwise act as a tooltip.
  *
@@ -254,12 +254,12 @@ export default function Tooltip({ content, placement = 'top', delay = 350, class
           className={`tooltip-bubble pointer-events-none fixed z-[120] max-w-72 ${layout ? 'tooltip-bubble-in' : ''}`}
           style={bubbleStyle}
         >
-          <div className={`rounded-lg border border-neon-blue-400/20 bg-void-50 px-2.5 py-1.5 text-xs leading-snug text-void-700 shadow-(--shadow-overlay) dark:bg-void-850 dark:text-void-300 ${typeof content === 'string' ? 'whitespace-pre-wrap' : ''} ${className}`}>
+          <div className={`rounded-lg border border-line bg-surface-1 px-2.5 py-1.5 text-xs leading-snug text-ink-2 shadow-(--shadow-overlay) ${typeof content === 'string' ? 'whitespace-pre-wrap' : ''} ${className}`}>
             {content}
           </div>
           {/* Arrow — same rotated square as the card bubble; border sides follow the resolved placement */}
           <div
-            className={`absolute h-2 w-2 rotate-45 border-neon-blue-400/20 bg-void-50 dark:bg-void-850 ${ARROW_CLASS[side]}`}
+            className={`absolute h-2 w-2 rotate-45 border-line bg-surface-1 ${ARROW_CLASS[side]}`}
             style={arrowStyle}
           />
         </div>,

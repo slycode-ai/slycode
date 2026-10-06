@@ -16,6 +16,9 @@ export class TelegramChannel {
     commandHandlers = new Map();
     persistentKeyboard = null;
     pendingVoiceList = [];
+    /** The list the buttons belong to: bumps on every list, so older buttons are recognisably stale. */
+    voiceListGeneration = 0;
+    voiceListMeta = null;
     // Photo album batching
     photoBuffer = new Map();
     // Polling state
@@ -101,12 +104,15 @@ export class TelegramChannel {
             await this.apiSendMessage(this.chatId, chunks[i], opts);
         }
     }
-    async sendVoice(audio) {
+    async sendVoice(audio, format = 'ogg') {
         if (!this.chatId)
             throw new Error('No active chat. Send a message from Telegram first.');
+        // Label the upload by what it really is (feature 087): the MP3 fallback
+        // used to go up as voice.ogg/audio/ogg. Telegram shows OGG/Opus and MP3
+        // both as a voice bubble.
         const messageId = await this.apiSendMultipart('sendVoice', 'voice', this.chatId, audio, {
-            mime: 'audio/ogg',
-            filename: 'voice.ogg',
+            mime: format === 'mp3' ? 'audio/mpeg' : 'audio/ogg',
+            filename: format === 'mp3' ? 'voice.mp3' : 'voice.ogg',
             reply_markup: this.keyboardMarkup().reply_markup,
         });
         return { messageId };
@@ -177,13 +183,16 @@ export class TelegramChannel {
             // Ignore chat action failures
         }
     }
-    async sendVoiceList(voices) {
+    async sendVoiceList(voices, meta) {
         if (!this.chatId)
             return;
-        this.pendingVoiceList = voices.map(v => ({ id: v.id, name: v.name }));
+        this.pendingVoiceList = voices.map(v => ({ id: v.id, name: v.name, ...(v.kind ? { kind: v.kind } : {}), ...(v.expiresAt ? { expiresAt: v.expiresAt } : {}) }));
+        this.voiceListGeneration += 1;
+        this.voiceListMeta = meta ?? null;
+        const gen = this.voiceListGeneration;
         const keyboard = voices.map((v, i) => ([{
                 text: `${v.name} (${v.description})`,
-                callback_data: `voice_${i}`,
+                callback_data: `voice_${gen}_${i}`,
             }]));
         await this.apiSendMessage(this.chatId, 'Select a voice:', {
             reply_markup: { inline_keyboard: keyboard },
@@ -466,13 +475,19 @@ export class TelegramChannel {
             return;
         this.setChatId(query.message.chat.id);
         await this.apiAnswerCallbackQuery(query.id);
-        // Voice selection (index-based lookup)
+        // Voice selection: `voice_<generation>_<index>` (feature 087). Buttons
+        // from an older list — or pre-087 `voice_<index>` buttons — are stale.
         if (query.data.startsWith('voice_') && this.voiceSelectHandler) {
-            const idx = parseInt(query.data.replace('voice_', ''), 10);
-            const voice = this.pendingVoiceList[idx];
-            if (voice) {
-                this.voiceSelectHandler(voice.id, voice.name);
-            }
+            const m = /^voice_(\d+)_(\d+)$/.exec(query.data);
+            const stale = !m || Number(m[1]) !== this.voiceListGeneration;
+            const voice = m ? this.pendingVoiceList[Number(m[2])] : undefined;
+            this.voiceSelectHandler(voice?.id ?? '', voice?.name ?? '', {
+                provider: this.voiceListMeta?.provider ?? null,
+                revision: this.voiceListMeta?.revision ?? null,
+                stale: stale || !voice,
+                ...(voice?.kind ? { kind: voice.kind } : {}),
+                ...(voice?.expiresAt ? { expiresAt: voice.expiresAt } : {}),
+            });
             return;
         }
         // Generic prefix routing

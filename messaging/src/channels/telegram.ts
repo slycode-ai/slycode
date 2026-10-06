@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { Channel, TelegramChannelConfig, InlineButton } from '../types.js';
+import type { Channel, TelegramChannelConfig, InlineButton, VoicePick } from '../types.js';
 
 // --- Minimal Telegram Bot API types ---
 
@@ -64,11 +64,14 @@ export class TelegramChannel implements Channel {
   private textHandler?: (text: string) => void;
   private voiceHandler?: (filePath: string, messageId?: number) => void;
   private photoHandler?: (photos: { filePath: string; caption?: string }[]) => void;
-  private voiceSelectHandler?: (voiceId: string, voiceName: string) => void;
+  private voiceSelectHandler?: (voiceId: string, voiceName: string, pick: VoicePick) => void;
   private callbackHandlers: Map<string, (data: string) => void> = new Map();
   private commandHandlers: Map<string, (args: string) => void> = new Map();
   private persistentKeyboard: string[][] | null = null;
-  private pendingVoiceList: { id: string; name: string }[] = [];
+  private pendingVoiceList: { id: string; name: string; kind?: 'prebuilt' | 'library' | 'custom'; expiresAt?: string }[] = [];
+  /** The list the buttons belong to: bumps on every list, so older buttons are recognisably stale. */
+  private voiceListGeneration = 0;
+  private voiceListMeta: { provider: string; revision: number } | null = null;
   // Photo album batching
   private photoBuffer: Map<string, { photos: { filePath: string; caption?: string }[]; timer: ReturnType<typeof setTimeout> }> = new Map();
 
@@ -163,11 +166,14 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  async sendVoice(audio: Buffer): Promise<{ messageId: number }> {
+  async sendVoice(audio: Buffer, format: 'ogg' | 'mp3' = 'ogg'): Promise<{ messageId: number }> {
     if (!this.chatId) throw new Error('No active chat. Send a message from Telegram first.');
+    // Label the upload by what it really is (feature 087): the MP3 fallback
+    // used to go up as voice.ogg/audio/ogg. Telegram shows OGG/Opus and MP3
+    // both as a voice bubble.
     const messageId = await this.apiSendMultipart('sendVoice', 'voice', this.chatId, audio, {
-      mime: 'audio/ogg',
-      filename: 'voice.ogg',
+      mime: format === 'mp3' ? 'audio/mpeg' : 'audio/ogg',
+      filename: format === 'mp3' ? 'voice.mp3' : 'voice.ogg',
       reply_markup: this.keyboardMarkup().reply_markup,
     });
     return { messageId };
@@ -241,14 +247,17 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  async sendVoiceList(voices: { id: string; name: string; description: string }[]): Promise<void> {
+  async sendVoiceList(voices: { id: string; name: string; description: string; kind?: 'prebuilt' | 'library' | 'custom'; expiresAt?: string }[], meta?: { provider: string; revision: number }): Promise<void> {
     if (!this.chatId) return;
 
-    this.pendingVoiceList = voices.map(v => ({ id: v.id, name: v.name }));
+    this.pendingVoiceList = voices.map(v => ({ id: v.id, name: v.name, ...(v.kind ? { kind: v.kind } : {}), ...(v.expiresAt ? { expiresAt: v.expiresAt } : {}) }));
+    this.voiceListGeneration += 1;
+    this.voiceListMeta = meta ?? null;
+    const gen = this.voiceListGeneration;
 
     const keyboard = voices.map((v, i) => ([{
       text: `${v.name} (${v.description})`,
-      callback_data: `voice_${i}`,
+      callback_data: `voice_${gen}_${i}`,
     }]));
 
     await this.apiSendMessage(this.chatId, 'Select a voice:', {
@@ -256,7 +265,7 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  onVoiceSelect(handler: (voiceId: string, voiceName: string) => void): void {
+  onVoiceSelect(handler: (voiceId: string, voiceName: string, pick: VoicePick) => void): void {
     this.voiceSelectHandler = handler;
   }
 
@@ -551,13 +560,19 @@ export class TelegramChannel implements Channel {
 
     await this.apiAnswerCallbackQuery(query.id);
 
-    // Voice selection (index-based lookup)
+    // Voice selection: `voice_<generation>_<index>` (feature 087). Buttons
+    // from an older list — or pre-087 `voice_<index>` buttons — are stale.
     if (query.data.startsWith('voice_') && this.voiceSelectHandler) {
-      const idx = parseInt(query.data.replace('voice_', ''), 10);
-      const voice = this.pendingVoiceList[idx];
-      if (voice) {
-        this.voiceSelectHandler(voice.id, voice.name);
-      }
+      const m = /^voice_(\d+)_(\d+)$/.exec(query.data);
+      const stale = !m || Number(m[1]) !== this.voiceListGeneration;
+      const voice = m ? this.pendingVoiceList[Number(m[2])] : undefined;
+      this.voiceSelectHandler(voice?.id ?? '', voice?.name ?? '', {
+        provider: this.voiceListMeta?.provider ?? null,
+        revision: this.voiceListMeta?.revision ?? null,
+        stale: stale || !voice,
+        ...(voice?.kind ? { kind: voice.kind } : {}),
+        ...(voice?.expiresAt ? { expiresAt: voice.expiresAt } : {}),
+      });
       return;
     }
 

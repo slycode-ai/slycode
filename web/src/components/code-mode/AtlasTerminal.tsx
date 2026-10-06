@@ -101,8 +101,8 @@ export function AtlasTerminal({ projectId, projectName, projectPath, onClose, on
   return (
     <div ref={rootRef} className="flex h-full w-full flex-col bg-[#222228] dark:bg-[#1a1a1a]">
       <div className="flex items-center gap-2.5 border-b border-white/10 bg-[#1a1a20] px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#46d7c2]">Atlas Terminal</span>
-        <span className="truncate font-mono text-[10px] text-[#6b7484]">ask the codebase · can drive the view</span>
+        <span className="font-mono text-[11px] text-(--cm-atlas)">Atlas Terminal</span>
+        <span className="truncate font-mono text-[11px] text-[#6b7484]">ask the codebase · can drive the view</span>
         <Tooltip content="Close panel" placement="bottom">
           <button onClick={onClose} aria-label="Close panel" className="ml-auto font-mono text-[12px] text-[#6b7484] hover:text-[#e2e8f0]">
             ✕

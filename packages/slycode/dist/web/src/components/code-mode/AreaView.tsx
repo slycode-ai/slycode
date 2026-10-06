@@ -58,7 +58,7 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
       {/* Scrollable content: header + module grid + drift banner */}
       <div className={drawerExpanded ? 'hidden' : 'min-h-0 flex-1 overflow-y-auto p-6 pb-3'}>
         <div className="mx-auto max-w-[1100px]">
-          <p className="cm-hue-ink font-mono text-[10px] uppercase tracking-[0.22em]" style={{ color: area.color }}>
+          <p className="cm-hue-ink font-mono text-[11px]" style={{ color: area.color }}>
             Codebase Atlas · zoom level 1
           </p>
           <h1 className="mb-5 text-balance text-lg font-semibold text-(--cm-text)">
@@ -88,17 +88,17 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
                 style={{ ['--hue' as string]: area.color ?? 'var(--cm-atlas)' }}
               >
                 <Tooltip content={m.path}>
-                <h4 className="flex items-baseline gap-2 truncate font-mono text-[12.5px] font-bold text-(--cm-text)">
+                <h4 className="flex items-baseline gap-2 truncate font-mono text-[13px] font-bold text-(--cm-text)">
                   <span className="min-w-0 truncate">{m.name}</span>
                   {isChanged(m.path) && (
-                    <span className="ml-auto shrink-0 rounded bg-amber-500/15 px-1.5 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                    <span className="ml-auto shrink-0 rounded bg-amber-500/15 px-1.5 py-px font-sans text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                       changed
                     </span>
                   )}
                 </h4>
                 </Tooltip>
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-(--cm-muted)">{m.summary}</p>
-                <p className="mt-2 truncate font-mono text-[9.5px] text-(--cm-faint)">{m.path}</p>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-(--cm-muted)">{m.summary}</p>
+                <p className="mt-2 truncate font-mono text-[11px] text-(--cm-faint)">{m.path}</p>
               </button>
             ))}
           </div>
@@ -107,7 +107,7 @@ export function AreaView({ projectId, snapshot, areaId, onOpenFileSmart, onOpenF
             <div className="mt-6 max-w-2xl rounded-lg border border-amber-500/40 bg-amber-500/8 px-4 py-2.5 text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">
               ⚠ {fresh.changedFiles.length} described file{fresh.changedFiles.length === 1 ? '' : 's'} changed since this
               analysis — explanations may be outdated.{' '}
-              <button onClick={onRunRefresh} disabled={refreshBusy} className="font-mono text-[11px] uppercase tracking-wide underline disabled:opacity-50">
+              <button onClick={onRunRefresh} disabled={refreshBusy} className="font-mono text-[11px] underline disabled:opacity-50">
                 {refreshBusy ? 'starting…' : 'refresh now'}
               </button>
             </div>
@@ -173,13 +173,13 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
                 autoFocus
                 className="min-w-0 rounded border border-(--cm-line2) bg-(--cm-bg2) px-2 py-0.5 text-[13px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
               />
-              <button type="submit" className="shrink-0 font-mono text-[10px] text-(--cm-atlas)">save</button>
+              <button type="submit" className="shrink-0 font-mono text-[11px] text-(--cm-atlas)">save</button>
             </form>
           ) : (
             <>
-              <span className="text-[13.5px] font-semibold text-(--cm-text)">{area.name}</span>
+              <span className="text-[14px] font-semibold text-(--cm-text)">{area.name}</span>
               <Tooltip content="Rename (pins the area)" placement="bottom">
-                <button onClick={() => { setName(area.name); setRenaming(true); }} aria-label="Rename (pins the area)" className="text-[10px] text-(--cm-faint) hover:text-(--cm-atlas)">✎</button>
+                <button onClick={() => { setName(area.name); setRenaming(true); }} aria-label="Rename (pins the area)" className="text-[11px] text-(--cm-faint) hover:text-(--cm-atlas)">✎</button>
               </Tooltip>
               <Tooltip content={area.pinned ? 'Unpin' : 'Pin — name survives refreshes'} placement="bottom">
                 <button
@@ -192,9 +192,9 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
               </Tooltip>
             </>
           )}
-          <span className="font-mono text-[10px] text-(--cm-faint)">{area.paths.join(' · ')}</span>
+          <span className="font-mono text-[11px] text-(--cm-faint)">{area.paths.join(' · ')}</span>
           <span
-            className={`rounded px-1.5 py-px font-sans text-[9px] font-semibold uppercase tracking-[0.08em] ${
+            className={`rounded px-1.5 py-px font-sans text-[11px] font-semibold ${
               stale ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
             }`}
           >
@@ -212,7 +212,7 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
         </div>
 
         <div className="flex min-h-0 flex-1 gap-6">
-          <div className="min-w-0 flex-[2] overflow-y-auto pr-2 text-[12.5px] leading-relaxed text-(--cm-muted)">
+          <div className="min-w-0 flex-[2] overflow-y-auto pr-2 text-[13px] leading-relaxed text-(--cm-muted)">
             {(node?.explanation ?? 'No AI analysis for this area yet — the next refresh will write one.')
               .split(/\n{2,}/)
               .map((para, i) => (
@@ -224,38 +224,38 @@ function AreaDrawer({ projectId, snapshot, areaId, expanded, onToggleExpand, onO
               {/* This area's guided tours (feature 079) */}
               {onStartTour && (snapshot.tours ?? []).some(t => t.tour.area === areaId) && (
                 <div className="mb-2">
-                  <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Guided tours</p>
+                  <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Guided tours</p>
                   {(snapshot.tours ?? []).filter(t => t.tour.area === areaId).map(({ tour, stale: tourStale }) => (
                     <Tooltip key={tour.id} content={tour.description ?? tour.title}>
                     <button
                       onClick={() => onStartTour(tour.id)}
                       className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
                     >
-                      <span className="flex items-center gap-1.5 truncate text-[11.5px] font-medium text-(--cm-text)">
+                      <span className="flex items-center gap-1.5 truncate text-[12px] font-medium text-(--cm-text)">
                         ▶ {tour.title}
                         {tourStale && (
-                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px font-sans text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                             stale
                           </span>
                         )}
                       </span>
-                      <span className="block font-mono text-[9.5px] text-(--cm-faint)">{tour.steps.length} steps</span>
+                      <span className="block font-mono text-[11px] text-(--cm-faint)">{tour.steps.length} steps</span>
                     </button>
                     </Tooltip>
                   ))}
                 </div>
               )}
-              <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key files</p>
+              <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Key files</p>
               {node.key_files.map(k => (
                 <Tooltip key={k.path} content={k.path}>
                   <button
                     onClick={() => onOpenFile(k.path)}
                     className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
                   >
-                    <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
+                    <span className="block truncate font-mono text-[11px] text-(--cm-muted)">
                       {k.path.split('/').slice(-2).join('/')}
                     </span>
-                    <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
+                    <span className="block text-[11px] leading-snug text-(--cm-faint)">{k.role}</span>
                   </button>
                 </Tooltip>
               ))}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PlaybackGate, unlockAutoplay, planManualPlay, describePlayError, describeMediaError, computeProgress, progressFillStyle, clipListRefreshKey, trackPhase, TRACK_HOLD_MS, TRACK_FADE_MS } from './speaker-playback-gate';
+import { PlaybackGate, unlockAutoplay, planManualPlay, planPlayRejection, isAutoPlayable, handoverReceivedAt, AUTO_PLAY_WINDOW_MS, describePlayError, describeMediaError, computeProgress, progressFillStyle, clipListRefreshKey, trackPhase, TRACK_HOLD_MS, TRACK_FADE_MS } from './speaker-playback-gate';
 
 test('gate waits until a fresh snapshot arrives after invalidate (handover)', () => {
   const g = new PlaybackGate();
@@ -206,4 +206,64 @@ test('after a clip ends the bar holds at 100%, fades, then hides; Replay brings 
   // Replay: the clip restarts (fraction 0, complete false) → the bar is back.
   assert.equal(trackPhase({ playing: true, complete: false, msSinceComplete: 5000 }), 'live');
   assert.deepEqual(progressFillStyle({ fraction: 0, indeterminate: false, complete: false }), { transform: 'scaleX(0)', transformOrigin: 'left' });
+});
+
+// #0377: an interrupted auto clip was marked seen and dropped, so the bubble
+// showed "interrupted", its Play reply found nothing, and only the card Replay worked.
+const REJ = { errName: 'AbortError', manual: false, superseded: false, isHolder: true, retried: false, fresh: true, visible: true };
+
+test('planPlayRejection: an outside interruption of a fresh auto clip retries once, then holds it for Play reply', () => {
+  assert.equal(planPlayRejection(REJ), 'retry');
+  assert.equal(planPlayRejection({ ...REJ, retried: true }), 'hold', 'visible tab, live clip: the user is waiting, show why');
+  assert.equal(planPlayRejection({ ...REJ, retried: true, visible: false }), 'park', 'background interruption: silent, Play reply stays');
+});
+
+test('planPlayRejection: our own stop/replace and a lost holdership never surface an error or drop the clip', () => {
+  assert.equal(planPlayRejection({ ...REJ, superseded: true }), 'ignore');
+  assert.equal(planPlayRejection({ ...REJ, manual: true, superseded: true }), 'ignore');
+  assert.equal(planPlayRejection({ ...REJ, isHolder: false }), 'ignore', 'handover carried the clip to the new holder');
+});
+
+test('planPlayRejection: a stale clip is retired silently, never warned about (resume / late retry)', () => {
+  assert.equal(planPlayRejection({ ...REJ, fresh: false }), 'demote');
+  assert.equal(planPlayRejection({ ...REJ, fresh: false, retried: true }), 'demote');
+  assert.equal(planPlayRejection({ ...REJ, errName: 'NotAllowedError', fresh: false }), 'demote');
+  assert.equal(planPlayRejection({ ...REJ, manual: true, fresh: false }), 'hold', 'a click on an old clip still shows why it failed');
+});
+
+test('planPlayRejection: autoplay block parks silently, manual failures warn, real auto failures skip', () => {
+  assert.equal(planPlayRejection({ ...REJ, errName: 'NotAllowedError' }), 'park');
+  assert.equal(planPlayRejection({ ...REJ, errName: 'NotAllowedError', manual: true }), 'hold');
+  assert.equal(planPlayRejection({ ...REJ, errName: 'NotSupportedError', manual: true }), 'hold');
+  assert.equal(planPlayRejection({ ...REJ, errName: 'NotSupportedError' }), 'skip');
+  assert.equal(planPlayRejection({ ...REJ, errName: '' }), 'skip');
+});
+
+test('isAutoPlayable: only fresh, unheard, unexpired clips start without a click', () => {
+  const now = 10_000_000;
+  assert.equal(isAutoPlayable({ receivedAt: now - 5_000, expiresAt: now + 60_000, seen: false, now }), true);
+  assert.equal(isAutoPlayable({ receivedAt: now - 5_000, expiresAt: now + 60_000, seen: true, now }), false, 'heard in any tab never comes back on its own');
+  assert.equal(isAutoPlayable({ receivedAt: now - 5_000, expiresAt: now - 1, seen: false, now }), false, 'past the bridge expiry');
+  assert.equal(isAutoPlayable({ receivedAt: now - AUTO_PLAY_WINDOW_MS - 1, expiresAt: null, seen: false, now }), false, 'card-replay clip (no expiry) parked, then resumed hours later');
+  assert.equal(isAutoPlayable({ receivedAt: now - AUTO_PLAY_WINDOW_MS, expiresAt: null, seen: false, now }), true);
+});
+
+test('resume after hours away: a dictation-end resume / late retry of the parked clip is refused', () => {
+  // A clip parked at 12:00 (background interruption or dictation pause); the
+  // owner returns at 15:40 and the dictation-end resume or a throttled retry
+  // timer fires — the old clip must not start, so no "interrupted" warning either.
+  const parkedAt = Date.UTC(2026, 9, 5, 1, 0, 0);
+  const back = parkedAt + (3 * 60 + 40) * 60_000;
+  assert.equal(isAutoPlayable({ receivedAt: parkedAt, expiresAt: parkedAt + 90_000, seen: false, now: back }), false);
+  assert.equal(planPlayRejection({ ...REJ, fresh: false, visible: true, retried: true }), 'demote');
+});
+
+test('handover keeps the original arrival time, so an old clip cannot be re-armed by changing tabs', () => {
+  const now = 50_000_000;
+  const old = now - 3 * 60 * 60_000;
+  const received = handoverReceivedAt({ receivedAt: old }, now);
+  assert.equal(received, old);
+  assert.equal(isAutoPlayable({ receivedAt: received, expiresAt: null, seen: false, now }), false);
+  assert.equal(handoverReceivedAt({}, now), now, 'legacy payload without receivedAt');
+  assert.equal(handoverReceivedAt({ receivedAt: Number.NaN }, now), now);
 });

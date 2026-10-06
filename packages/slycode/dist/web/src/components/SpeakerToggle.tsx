@@ -37,10 +37,10 @@ export function SpeakerToggle({ speaker, variant = 'chrome', hideOnNarrow = fals
         ? 'Spoken replies allowed. Click to turn sound off'
         : 'Spoken replies off. Click to allow sound';
 
-  const base = 'rounded-md border p-1.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neon-blue-400/60';
+  const base = 'rounded-md border p-1.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
   const chrome = on
-    ? 'border-neon-blue-400/40 bg-neon-blue-400/15 text-[#2490b5] hover:bg-neon-blue-400/25 dark:text-neon-blue-400'
-    : 'border-void-400/30 bg-void-200/50 text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/10 hover:text-[#2490b5] dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/10 dark:hover:text-neon-blue-400';
+    ? 'border-accent/40 bg-accent/15 text-[#2490b5] hover:bg-accent/25 text-accent'
+    : 'border-line-strong bg-surface-3 text-ink-3 hover:border-accent/40 hover:bg-accent/10 hover:text-[#2490b5] hover:text-accent';
   const onBlue = on
     ? 'border-white/50 bg-white/25 text-white hover:bg-white/35'
     : 'border-white/25 bg-black/10 text-white/80 hover:bg-white/20 hover:text-white';

@@ -37,6 +37,7 @@ exports.SERVICES = void 0;
 exports.resolveEntryPoint = resolveEntryPoint;
 exports.resolveWrapperScript = resolveWrapperScript;
 exports.loadEnvFile = loadEnvFile;
+exports.messagingHasWork = messagingHasWork;
 exports.getEnabledServices = getEnabledServices;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -101,8 +102,17 @@ function loadEnvFile(workspace) {
     return vars;
 }
 /**
+ * The messaging service has work to do when a chat channel OR a TTS provider
+ * is configured: it also renders spoken terminal replies (feature 086), for
+ * ElevenLabs or Gemini (feature 087). One rule for start, update and service
+ * install, so a TTS-only workspace never loses `speak`.
+ */
+function messagingHasWork(envVars) {
+    return !!(envVars.TELEGRAM_BOT_TOKEN || envVars.SLACK_TOKEN || envVars.ELEVENLABS_API_KEY || envVars.GEMINI_API_KEY);
+}
+/**
  * Determine which services should be installed.
- * Skips disabled services and messaging without channel tokens.
+ * Skips disabled services and messaging with nothing to do (no chat channel, no TTS key).
  */
 function getEnabledServices(config, envVars) {
     const enabled = [];
@@ -111,9 +121,9 @@ function getEnabledServices(config, envVars) {
             console.log(`  \u2298 ${svc}: disabled in config \u2014 skipping`);
             continue;
         }
-        if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN) {
-            console.log(`  \u2298 messaging: no channels configured \u2014 skipping`);
-            console.log('    (add TELEGRAM_BOT_TOKEN to .env, then run service install again)');
+        if (svc === 'messaging' && !messagingHasWork(envVars)) {
+            console.log(`  \u2298 messaging: no channels or TTS configured \u2014 skipping`);
+            console.log('    (add TELEGRAM_BOT_TOKEN, ELEVENLABS_API_KEY or GEMINI_API_KEY to .env, then run service install again)');
             continue;
         }
         enabled.push(svc);

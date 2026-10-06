@@ -64,7 +64,7 @@ export function SearchRail({ projectId, onOpenFile }: SearchRailProps) {
         {[...groups.entries()].map(([file, fileMatches]) => (
           <div key={file} className="mb-1.5">
             <Tooltip content={file} placement="right">
-              <p className="truncate px-2 pt-1 font-mono text-[10.5px] font-semibold text-(--cm-text)">
+              <p className="truncate px-2 pt-1 font-mono text-[11px] font-semibold text-(--cm-text)">
                 {file} <span className="font-normal text-(--cm-faint)">({fileMatches.length})</span>
               </p>
             </Tooltip>
@@ -81,7 +81,7 @@ export function SearchRail({ projectId, onOpenFile }: SearchRailProps) {
           </div>
         ))}
         {truncated && (
-          <p className="p-2 font-mono text-[10.5px] text-(--cm-stale)">result cap hit — refine the query</p>
+          <p className="p-2 font-mono text-[11px] text-(--cm-stale)">result cap hit — refine the query</p>
         )}
       </div>
     </div>

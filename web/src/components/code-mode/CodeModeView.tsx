@@ -457,7 +457,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
                   <button
                     key={tab}
                     onClick={() => setRailTab(tab)}
-                    className={`flex-1 py-2 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                    className={`flex-1 py-2 font-mono text-[11px] capitalize transition-colors ${
                       railTab === tab
                         ? 'text-(--cm-text) shadow-[inset_0_-2px_0_var(--cm-atlas)]'
                         : 'text-(--cm-faint) hover:text-(--cm-muted)'
@@ -542,7 +542,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
             <Tooltip content={termOpen ? 'Close the Atlas terminal' : 'Open the Atlas terminal — ask the codebase'} placement="bottom">
               <button
                 onClick={() => setTermOpen(o => !o)}
-                className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] transition-all ${
+                className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] transition-all ${
                   termOpen
                     ? 'border-(--cm-atlas) bg-(--cm-atlas-dim) text-(--cm-atlas)'
                     : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
@@ -662,7 +662,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
               node?.key_files.find(k => k.path === selection.path)?.role;
             const area = areaId ? snapshot?.root?.areas.find(a => a.id === areaId) : undefined;
             return (
-              <div className="flex min-w-0 items-center gap-2.5 border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[10.5px]">
+              <div className="flex min-w-0 items-center gap-2.5 border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[11px]">
                 {area && (
                   <Tooltip content={`Back to ${area.name}`}>
                     <button
@@ -738,7 +738,7 @@ export function CodeModeView({ projectId, projectName, projectPath }: CodeModeVi
       )}
 
       {/* ---------- Status strip ---------- */}
-      <footer className="flex items-center gap-5 border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[10.5px] text-(--cm-faint)">
+      <footer className="flex items-center gap-5 border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[11px] text-(--cm-faint)">
         <span>
           ATLAS{' '}
           {atlasStats ? (

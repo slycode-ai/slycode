@@ -147,6 +147,75 @@ export function describeMediaError(code: number | undefined, message?: string): 
   }
 }
 
+/** Delay before an interrupted auto clip is tried again. */
+export const AUTO_RETRY_DELAY_MS = 300;
+
+/** A clip may start on its own only this long after it first arrived (matches the bridge's clip TTL). */
+export const AUTO_PLAY_WINDOW_MS = 90_000;
+
+/**
+ * May this clip start WITHOUT a click? Never once any tab has heard it
+ * (seen), never after its expiry, never once it is older than the window
+ * since it FIRST arrived. Every automatic start goes through this: queue,
+ * dictation-end resume, interruption retry, handover (#0377).
+ */
+export function isAutoPlayable(input: { receivedAt: number; expiresAt: number | null; seen: boolean; now: number }): boolean {
+  if (input.seen) return false;
+  if (input.expiresAt !== null && input.expiresAt < input.now) return false;
+  return input.now - input.receivedAt <= AUTO_PLAY_WINDOW_MS;
+}
+
+/** A handed-over clip keeps its ORIGINAL arrival time, so a handover can never make an old clip fresh again. */
+export function handoverReceivedAt(clip: { receivedAt?: unknown }, now: number): number {
+  return typeof clip.receivedAt === 'number' && Number.isFinite(clip.receivedAt) ? clip.receivedAt : now;
+}
+
+export type PlayRejectionPlan =
+  /** Our own stop/replace caused it (dismiss, revoke, handover, newer clip): whoever stopped it owns what happens next. */
+  | 'ignore'
+  /** Something outside the player paused/reloaded a fresh auto clip we still hold: try once more. */
+  | 'retry'
+  /** Keep the clip loaded and SHOW why: the user is waiting on it (pressed Play, or it was the live clip in a visible tab). */
+  | 'hold'
+  /** Keep the clip loaded, no warning: Play reply stays available (autoplay block, background interruption). */
+  | 'park'
+  /** The clip is no longer fresh: silently retire it to Replay, never warn about it. */
+  | 'demote'
+  /** Real auto-path failure (unsupported, decode): surface it and move on to the next clip. */
+  | 'skip';
+
+/**
+ * What to do when play() rejects (#0377). An interruption (AbortError) is NOT a
+ * broken clip: the old path marked it seen and dropped it, so the bubble said
+ * "interrupted", its Play reply found nothing, and only the card's Replay
+ * (bridge clip store) could play it. The warning is only for a user who is
+ * actually waiting on that clip; background/resume interruptions stay silent.
+ */
+export function planPlayRejection(input: {
+  errName: string;
+  manual: boolean;
+  /** This attempt was replaced by a later start or stopped by our own code. */
+  superseded: boolean;
+  isHolder: boolean;
+  /** This clip has already been retried once after an interruption. */
+  retried: boolean;
+  /** Still within the auto-play window (see isAutoPlayable). */
+  fresh: boolean;
+  /** This tab is visible (the clip is the live one the user would be hearing). */
+  visible: boolean;
+}): PlayRejectionPlan {
+  if (input.superseded) return 'ignore';
+  if (input.manual) return 'hold';
+  if (!input.fresh) return 'demote';
+  if (input.errName === 'NotAllowedError') return 'park';
+  if (input.errName === 'AbortError') {
+    if (!input.isHolder) return 'ignore';
+    if (!input.retried) return 'retry';
+    return input.visible ? 'hold' : 'park';
+  }
+  return 'skip';
+}
+
 export interface ManualPlayInput {
   isHolder: boolean;
   /** The clip currently loaded in the player (blocked or paused), if any. */

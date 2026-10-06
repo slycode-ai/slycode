@@ -9,7 +9,7 @@ interface MarkdownContentProps {
 
 export function MarkdownContent({ children }: MarkdownContentProps) {
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-void-900 dark:prose-headings:text-void-100 prose-code:rounded prose-code:bg-void-200/70 prose-code:px-1 prose-code:py-0.5 dark:prose-code:bg-void-800 prose-pre:bg-void-200/70 prose-pre:text-void-800 dark:prose-pre:bg-void-800 dark:prose-pre:text-[var(--tw-prose-invert-pre-code)] prose-table:border-collapse prose-th:border prose-th:border-void-300 prose-th:bg-void-100 prose-th:px-3 prose-th:py-1.5 dark:prose-th:border-void-700 dark:prose-th:bg-void-800 prose-td:border prose-td:border-void-300 prose-td:px-3 prose-td:py-1.5 dark:prose-td:border-void-700">
+    <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-ink-1 prose-code:rounded prose-code:bg-surface-3 prose-code:px-1 prose-code:py-0.5 prose-pre:bg-surface-3 prose-pre:text-void-800 dark:prose-pre:text-[var(--tw-prose-invert-pre-code)] prose-table:border-collapse prose-th:border prose-th:border-line-strong prose-th:bg-surface-2 prose-th:px-3 prose-th:py-1.5 prose-td:border prose-td:border-line-strong prose-td:px-3 prose-td:py-1.5">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
     </div>
   );

@@ -12,6 +12,12 @@ import { useSlyActionsConfig } from '@/hooks/useSlyActionsConfig';
 import { submitVerified, notifyDeliveryFailure, type VerifiedDelivery } from '@/lib/submit-verified';
 import { ClaudeTerminalPanel, type TerminalContext } from './ClaudeTerminalPanel';
 import EndedSessionPanel from './EndedSessionPanel';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { StagePipeline } from './StagePipeline';
+import { VOICE_SHEET_QUERY, visibleBottom } from '@/lib/visible-viewport';
+import { VoiceSheet } from './VoiceSheet';
+import { Check, ChevronDown, Columns2 } from 'lucide-react';
+import { readCardSplit, writeCardSplit, readSplitDefault, writeSplitDefault, readSplitRatio, writeSplitRatio, clampRatio, DEFAULT_RATIO } from '@/lib/card-split-prefs';
 import { AutomationConfig } from './AutomationConfig';
 import { QuestionnaireTab } from './QuestionnaireTab';
 import { HtmlAttachmentsTab } from './HtmlAttachmentsTab';
@@ -30,6 +36,7 @@ import { readStatus, formatStatusForPrompt } from '@/lib/status';
 import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
 import { formatDate } from '@/lib/date-format';
 import { formatCardNumber } from '@/lib/kanban-numbering';
+import { placePopover } from '@/lib/popover-placement';
 import Tooltip from './Tooltip';
 
 interface VoiceFocusTarget {
@@ -46,6 +53,7 @@ interface SessionInfo {
   hasHistory?: boolean;
   lastActive?: string;
   createdAt?: string;
+  conversationStartedAt?: string;
   provider?: string;
   exitedAt?: string;
 }
@@ -56,6 +64,8 @@ interface CardSession {
   status: 'running' | 'stopped' | 'detached';
   hasHistory: boolean;
   createdAt: string;
+  /** When the current conversation began (card #0373); absent from older bridges. */
+  conversationStartedAt?: string;
   displayName: string;
   /** False for stopped sessions whose provider conversation id was never captured (feature 080). */
   resumable: boolean;
@@ -123,27 +133,29 @@ const STAGES: { id: KanbanStage; label: string }[] = [
 
 const PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 
+// Visual elevation: type and priority are information, not decoration —
+// neutral chips, with only Critical in the danger colour.
 const typeColors: Record<string, string> = {
-  feature: 'bg-neon-blue-400/20 text-neon-blue-600 dark:text-neon-blue-400 border border-neon-blue-400/30',
-  chore: 'bg-void-200 text-void-600 dark:bg-void-700 dark:text-void-200 border border-void-300 dark:border-void-600',
-  bug: 'bg-[#ff3b5c]/20 text-[#ff3b5c] border border-[#ff3b5c]/30',
+  feature: 'border border-line bg-surface-2 text-ink-2',
+  chore: 'border border-line bg-surface-2 text-ink-2',
+  bug: 'border border-line bg-surface-2 text-ink-2',
 };
 
 const priorityColors: Record<string, string> = {
-  critical: 'bg-[#ff3b5c]/20 text-[#ff3b5c] border border-[#ff3b5c]/30',
-  high: 'bg-neon-orange-400/20 text-neon-orange-600 dark:text-neon-orange-400 border border-neon-orange-400/30',
-  medium: 'bg-[#ffd600]/15 text-[#b39700] dark:text-[#ffd600]/80 border border-[#ffd600]/25',
-  low: 'bg-green-500/15 text-green-700 dark:text-green-400/70 border border-green-500/20',
+  critical: 'border border-transparent bg-danger/10 text-danger-text',
+  high: 'border border-line bg-surface-2 text-ink-1',
+  medium: 'border border-line bg-surface-2 text-ink-2',
+  low: 'border border-line bg-surface-2 text-ink-3',
 };
 
 type TabId = 'details' | 'design' | 'feature' | 'html' | 'test' | 'questionnaires' | 'notes' | 'checklist' | 'terminal';
 
 const stageTerminalColors: Record<KanbanStage, string> = {
-  backlog: 'border-t border-void-600 bg-void-800',
-  design: 'border-t-2 border-neon-blue-400/40 bg-void-800',
-  implementation: 'border-t-2 border-neon-blue-400/50 bg-void-800',
-  testing: 'border-t-2 border-neon-orange-400/40 bg-void-800',
-  done: 'border-t-2 border-green-400/40 bg-void-800',
+  backlog: 'border-t border-line bg-void-800',
+  design: 'border-t border-line bg-void-800',
+  implementation: 'border-t border-line bg-void-800',
+  testing: 'border-t border-line bg-void-800',
+  done: 'border-t border-line bg-void-800',
 };
 
 const stageTerminalTint: Record<KanbanStage, string> = {
@@ -154,59 +166,61 @@ const stageTerminalTint: Record<KanbanStage, string> = {
   done: 'rgba(0, 230, 118, 0.1)',
 };
 
+// Stage identity: a 2px stage rule on the modal's top edge and a faint stage
+// tint in the header (stronger in the dark skin). Everything else is flat.
 const stageModalStyles: Record<KanbanStage, { header: string; tabs: string; modalBorder: string; headerBorder: string; tabsBorder: string }> = {
   backlog: {
-    header: 'bg-gradient-to-r from-void-200 to-void-100 dark:from-void-850 dark:to-void-850/60',
-    tabs: 'bg-gradient-to-r from-void-200/50 to-void-100/50 dark:from-void-850/60 dark:to-void-850/30',
-    modalBorder: 'dark:border dark:border-void-600',
-    headerBorder: 'border-b border-void-300 dark:border-void-600',
-    tabsBorder: 'border-b border-void-200 dark:border-void-600',
+    header: 'bg-gradient-to-r from-st-backlog/[0.07] to-transparent dark:from-st-backlog/[0.12]',
+    tabs: '',
+    modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-st-backlog',
+    headerBorder: 'border-b border-line',
+    tabsBorder: 'border-b border-line',
   },
   design: {
-    header: 'bg-gradient-to-r from-neon-blue-200/85 to-neon-blue-50/50 dark:from-neon-blue-950/90 dark:to-neon-blue-950/30',
-    tabs: 'bg-gradient-to-r from-neon-blue-100/50 to-neon-blue-50/15 dark:from-neon-blue-950/50 dark:to-neon-blue-950/15',
-    modalBorder: 'dark:border dark:border-neon-blue-400/25',
-    headerBorder: 'border-b border-neon-blue-200/50 dark:border-neon-blue-400/25',
-    tabsBorder: 'border-b border-neon-blue-100/50 dark:border-neon-blue-400/20',
+    header: 'bg-gradient-to-r from-st-design/[0.07] to-transparent dark:from-st-design/[0.12]',
+    tabs: '',
+    modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-st-design',
+    headerBorder: 'border-b border-line',
+    tabsBorder: 'border-b border-line',
   },
   implementation: {
-    header: 'bg-gradient-to-r from-neon-blue-200/85 to-neon-blue-50/50 dark:from-neon-blue-950/90 dark:to-neon-blue-900/20',
-    tabs: 'bg-gradient-to-r from-neon-blue-100/50 to-neon-blue-50/15 dark:from-neon-blue-950/50 dark:to-neon-blue-950/15',
-    modalBorder: 'dark:border dark:border-neon-blue-400/30',
-    headerBorder: 'border-b border-neon-blue-200/50 dark:border-neon-blue-400/30',
-    tabsBorder: 'border-b border-neon-blue-100/50 dark:border-neon-blue-400/20',
+    header: 'bg-gradient-to-r from-st-impl/[0.07] to-transparent dark:from-st-impl/[0.12]',
+    tabs: '',
+    modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-st-impl',
+    headerBorder: 'border-b border-line',
+    tabsBorder: 'border-b border-line',
   },
   testing: {
-    header: 'bg-gradient-to-r from-[#ff6a33]/25 to-[#ff6a33]/10 dark:from-[#ff6a33]/15 dark:to-[#ff6a33]/5',
-    tabs: 'bg-gradient-to-r from-[#ff6a33]/15 to-[#ff6a33]/5 dark:from-[#ff6a33]/10 dark:to-[#ff6a33]/5',
-    modalBorder: 'dark:border dark:border-[#ff6a33]/30',
-    headerBorder: 'border-b border-[#ff6a33]/25 dark:border-[#ff6a33]/30',
-    tabsBorder: 'border-b border-[#ff6a33]/15 dark:border-[#ff6a33]/25',
+    header: 'bg-gradient-to-r from-st-test/[0.07] to-transparent dark:from-st-test/[0.12]',
+    tabs: '',
+    modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-st-test',
+    headerBorder: 'border-b border-line',
+    tabsBorder: 'border-b border-line',
   },
   done: {
-    header: 'bg-gradient-to-r from-green-200/85 to-green-50/50 dark:from-green-950/90 dark:to-green-950/30',
-    tabs: 'bg-gradient-to-r from-green-100/50 to-green-50/15 dark:from-green-950/50 dark:to-green-950/15',
-    modalBorder: 'dark:border dark:border-green-400/25',
-    headerBorder: 'border-b border-green-200/50 dark:border-green-400/25',
-    tabsBorder: 'border-b border-green-100/50 dark:border-green-400/20',
+    header: 'bg-gradient-to-r from-st-done/[0.07] to-transparent dark:from-st-done/[0.12]',
+    tabs: '',
+    modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-st-done',
+    headerBorder: 'border-b border-line',
+    tabsBorder: 'border-b border-line',
   },
 };
 
 // Orange-themed styles for automation cards
 const automationModalStyles = {
-  header: 'bg-gradient-to-r from-orange-200/85 to-orange-50/50 dark:from-orange-950/90 dark:to-orange-950/30',
-  tabs: 'bg-gradient-to-r from-orange-100/50 to-orange-50/15 dark:from-orange-950/50 dark:to-orange-950/15',
-  modalBorder: 'dark:border dark:border-orange-400/30',
-  headerBorder: 'border-b border-orange-200/50 dark:border-orange-400/30',
-  tabsBorder: 'border-b border-orange-100/50 dark:border-orange-400/20',
+  header: 'bg-gradient-to-r from-agent/[0.08] to-transparent dark:from-agent/[0.12]',
+  tabs: '',
+  modalBorder: 'lg:border lg:border-line lg:border-t-2 lg:border-t-agent',
+  headerBorder: 'border-b border-line',
+  tabsBorder: 'border-b border-line',
 };
-const automationTerminalColor = 'border-t-2 border-orange-400/50 bg-void-800';
+const automationTerminalColor = 'border-t border-line bg-void-800';
 const automationTerminalTint = 'rgba(249, 115, 22, 0.12)';
 
 // Stage-aware input focus colors — uses CSS variable for reliable dynamic color
 const stageFocusRgb: Record<KanbanStage, string> = {
   backlog: '161, 161, 170',    // void-400
-  design: '129, 140, 248',     // indigo-400
+  design: '138, 111, 245',     // stage design hue
   implementation: '0, 191, 255', // neon-blue-400
   testing: '255, 106, 51',     // #ff6a33
   done: '74, 222, 128',        // green-400
@@ -222,20 +236,27 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
+      // Below the gear, or above when there is more room; the popover's
+      // height is capped to that room via --voice-popover-max-h (#0369).
+      // Capped to what can be seen, so the keyboard or a toolbar never hides its end (#0376).
+      const place = placePopover(rect, { width: window.innerWidth, height: visibleBottom(window) });
       setStyle({
         position: 'fixed',
-        top: rect.bottom + 8,
-        right: window.innerWidth - rect.right,
+        ...(place.side === 'below' ? { top: place.top } : { bottom: place.bottom }),
+        right: place.right,
         zIndex: 9999,
         opacity: 1,
+        ['--voice-popover-max-h' as string]: `${place.maxHeight}px`,
       });
     };
     update();
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
     return () => {
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
     };
   }, [anchorRef]);
 
@@ -244,6 +265,45 @@ function VoicePopoverPortal({ anchorRef, children }: { anchorRef: React.RefObjec
 
 export function CardModal({ card, stage, projectId, projectPath, onClose, onUpdate, onFlushSave, onMove, onDelete, isCreateMode, onCreate, creatingState, onRetryCreate, onCancelCreate, onAutomationToggle, suppressAutoTerminal, pendingShortcut, onPendingShortcutConsumed }: CardModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
+  // Workbench (wide screens): the terminal sits beside the card instead of in
+  // a tab. The left side shows the last non-terminal tab; selecting
+  // "terminal" (auto-open, questionnaire submit) leaves it where it was.
+  const isWide = useMediaQuery('(min-width: 1280px)');
+  const voiceSheetLayout = useMediaQuery(VOICE_SHEET_QUERY);
+  // Side by side: per card, falling back to a per-browser default (off out of
+  // the box) — handy for reading a design doc while typing in the terminal,
+  // not always wanted. Rules live in lib/card-split-prefs.
+  const [splitPref, setSplitPref] = useState(() => readCardSplit(card.id));
+  const [splitDefault, setSplitDefault] = useState(() => readSplitDefault());
+  const [splitPrefCardId, setSplitPrefCardId] = useState(card.id);
+  if (splitPrefCardId !== card.id) {
+    setSplitPrefCardId(card.id);
+    setSplitPref(readCardSplit(card.id));
+  }
+  const toggleSplit = () => {
+    const next = !splitPref;
+    setSplitPref(next);
+    writeCardSplit(card.id, next);
+  };
+  const [splitMenuOpen, setSplitMenuOpen] = useState(false);
+  const splitMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const toggleSplitDefault = () => {
+    const next = !splitDefault;
+    writeSplitDefault(next);
+    setSplitDefault(next);
+    setSplitPref(readCardSplit(card.id));
+  };
+  // Column ratio (card side's share), dragged on an invisible strip over the
+  // column border; one value for every card.
+  const [splitRatio, setSplitRatio] = useState(() => readSplitRatio());
+  const [splitDragging, setSplitDragging] = useState(false);
+  const splitGridRef = useRef<HTMLDivElement>(null);
+  const setRatioAndSave = (r: number) => { const c = clampRatio(r); setSplitRatio(c); writeSplitRatio(c); };
+  const canSplit = isWide && !isCreateMode;
+  const splitMode = canSplit && splitPref;
+  const [lastLeftTab, setLastLeftTab] = useState<TabId>('details');
+  if (activeTab !== 'terminal' && activeTab !== lastLeftTab) setLastLeftTab(activeTab);
+  const contentTab: TabId = splitMode && activeTab === 'terminal' ? lastLeftTab : activeTab;
 
   // Questionnaire delivery warning — lives at modal level so it survives the
   // auto-switch to the terminal tab that follows a submit (the tab-local toast
@@ -504,6 +564,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   const lastVoiceInputRef = useRef<HTMLElement | null>(null);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
+  const splitModeRef = useRef(splitMode);
+  splitModeRef.current = splitMode;
+  // Workbench: which side last had focus decides where dictation lands.
+  const terminalPaneRef = useRef<HTMLDivElement>(null);
+  const lastFocusZoneRef = useRef<'terminal' | 'input'>('terminal');
 
   const isVoiceInput = (el: Element | null | undefined): el is HTMLInputElement | HTMLTextAreaElement =>
     !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && !!el.closest('[data-voice-target]');
@@ -588,6 +653,17 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         const lastInput = lastVoiceInputRef.current;
         if (isVoiceInput(active)) {
           voiceFocusRef.current = { type: 'input', element: active };
+        } else if (splitModeRef.current) {
+          // Workbench: both sides are visible — dictate into whichever side
+          // had focus last (the terminal unless a card field was used since).
+          if (lastFocusZoneRef.current === 'input' && lastInput && document.contains(lastInput)) {
+            voiceFocusRef.current = { type: 'input', element: lastInput };
+          } else if (terminalHandleRef.current) {
+            const handle = terminalHandleRef.current;
+            voiceFocusRef.current = { type: 'terminal', sendInput: handle.sendInput, sessionName: handle.sessionName };
+          } else {
+            voiceFocusRef.current = null;
+          }
         } else if (activeTabRef.current === 'terminal' && terminalHandleRef.current) {
           const handle = terminalHandleRef.current;
           voiceFocusRef.current = { type: 'terminal', sendInput: handle.sendInput, sessionName: handle.sessionName };
@@ -612,6 +688,18 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
   useEffect(() => {
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement;
+      if (splitModeRef.current) {
+        // Workbench: the terminal is always present, so voice is always armed;
+        // remember which side was focused last for dictation targeting.
+        if (terminalPaneRef.current?.contains(target)) {
+          lastFocusZoneRef.current = 'terminal';
+        } else if (isVoiceInput(target)) {
+          lastVoiceInputRef.current = target;
+          lastFocusZoneRef.current = 'input';
+        }
+        voice.setHasFieldFocus(true);
+        return;
+      }
       if (activeTabRef.current === 'terminal') {
         voice.setHasFieldFocus(true);
         return;
@@ -622,9 +710,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       }
     };
     const handleFocusOut = () => {
-      if (activeTabRef.current === 'terminal') return;
+      if (activeTabRef.current === 'terminal' || splitModeRef.current) return;
       setTimeout(() => {
-        if (activeTabRef.current === 'terminal') return;
+        if (activeTabRef.current === 'terminal' || splitModeRef.current) return;
         const active = document.activeElement as HTMLElement;
         const isVoiceTarget = active?.closest('[data-voice-target]') && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
         if (!isVoiceTarget) voice.setHasFieldFocus(false);
@@ -638,12 +726,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     };
   }, [voice]);
 
-  // Terminal tab always counts as having field focus
+  // Terminal tab (or the always-visible workbench terminal) counts as field focus
   useEffect(() => {
-    if (activeTab === 'terminal') {
+    if (activeTab === 'terminal' || splitMode) {
       voice.setHasFieldFocus(true);
     }
-  }, [activeTab, voice]);
+  }, [activeTab, splitMode, voice]);
 
   // Track scroll position for shadow indicators
   const updateNotesScrollState = useCallback(() => {
@@ -909,6 +997,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
             status: s.status as CardSession['status'],
             hasHistory: s.hasHistory ?? false,
             createdAt: s.createdAt ?? '',
+            conversationStartedAt: s.conversationStartedAt,
             displayName: provider.charAt(0).toUpperCase() + provider.slice(1),
             resumable: s.status !== 'stopped' || (s.hasHistory ?? false),
             exitedAt: s.exitedAt,
@@ -1082,6 +1171,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
   // Automation mode — compute effective styles (orange overrides stage colors)
   const isAutomation = !!card.automation;
+  // The session an automation run would resume, for the panel's conversation-age
+  // line (card #0373): undefined until sessions load, null when there is none.
+  const automationSession = !isAutomation || !sessionsLoaded
+    ? undefined
+    : cardSessions.find(s => s.provider === (card.automation?.provider || 'claude')) ?? null;
   const modalStyles = isAutomation ? automationModalStyles : stageModalStyles[stage];
   const terminalColor = isAutomation ? automationTerminalColor : stageTerminalColors[stage];
   const terminalTint = isAutomation ? automationTerminalTint : stageTerminalTint[stage];
@@ -1337,14 +1431,22 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
 
-      // Let Escape pass through to the terminal uninterrupted
-      if (activeTab === 'terminal') return;
+      // Let Escape pass through to the terminal uninterrupted — on the
+      // terminal tab, or (workbench) whenever the terminal pane has focus.
+      if (activeTab === 'terminal' && !splitMode) return;
+      if (splitMode && terminalPaneRef.current?.contains(document.activeElement)) return;
 
       e.stopImmediatePropagation();
 
       // Suppress Escape-to-close while a card create is in flight — closing
       // mid-flight could orphan the just-persisted card from the user's view.
       if (isCreateMode && creatingState?.status === 'pending') return;
+
+      // Side-by-side options menu open: close just the menu
+      if (splitMenuOpen) {
+        setSplitMenuOpen(false);
+        return;
+      }
 
       // If delete confirmation is showing, close that instead
       if (showDeleteConfirm) {
@@ -1364,7 +1466,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeTab, showDeleteConfirm, handleCloseWithSave, isCreateMode, creatingState]);
+  }, [activeTab, splitMode, showDeleteConfirm, handleCloseWithSave, isCreateMode, creatingState, splitMenuOpen]);
 
   // Left/right arrow keys to navigate tabs (when not in a text input)
   useEffect(() => {
@@ -1377,7 +1479,8 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.tagName === 'SELECT' ||
-        target.isContentEditable
+        target.isContentEditable ||
+        target.getAttribute('role') === 'separator'
       ) {
         return;
       }
@@ -1391,9 +1494,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
       if (hasQuestionnaires) visibleTabs.push('questionnaires');
       visibleTabs.push('notes');
       if (hasChecklist) visibleTabs.push('checklist');
-      visibleTabs.push('terminal');
+      if (!splitMode) visibleTabs.push('terminal'); // workbench: terminal is always visible
 
-      const currentIndex = visibleTabs.indexOf(activeTab);
+      const currentIndex = visibleTabs.indexOf(contentTab);
       if (currentIndex === -1) return;
 
       const nextIndex = e.key === 'ArrowRight'
@@ -1406,469 +1509,10 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, hasDesign, hasFeature, hasHtml, hasTest, hasQuestionnaires, hasChecklist, selectTab]);
+  }, [contentTab, splitMode, hasDesign, hasFeature, hasHtml, hasTest, hasQuestionnaires, hasChecklist, selectTab]);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden lg:overflow-y-auto bg-black/50 p-0 lg:p-4 lg:pb-16 lg:pt-16"
-      onMouseDown={(e) => { mouseDownOnBackdrop.current = e.target === e.currentTarget; }}
-      onClick={(e) => { if (e.target === e.currentTarget && mouseDownOnBackdrop.current) handleCloseWithSave(); }}
-    >
-      <div
-        style={{ '--focus-rgb': focusRgb } as React.CSSProperties}
-        className={`flex w-full max-w-full h-full lg:h-auto flex-col lg:max-w-4xl overflow-hidden rounded-none lg:rounded-xl bg-void-100 shadow-(--shadow-overlay) dark:bg-void-900 ${modalStyles.modalBorder}`}
-      >
-        {/* Header */}
-        <div className={`grain depth-glow flex items-start justify-between p-3 sm:p-4 ${modalStyles.headerBorder} ${modalStyles.header}`}>
-          <div className="min-w-0 flex-1">
-            <div className="mb-2 flex items-center gap-2">
-              <span className={`rounded px-2 py-0.5 text-xs font-medium ${typeColors[card.type]}`}>
-                {card.type}
-              </span>
-              <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${priorityColors[card.priority] || priorityColors.medium}`}>
-                {card.priority}
-              </span>
-              {card.claude_session?.active && (
-                <span className="flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
-                  </span>
-                  Session Active
-                </span>
-              )}
-            </div>
-            <div className="flex items-start gap-2">
-              {isEditingTitle ? (
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  value={editedTitle}
-                  data-voice-target
-                  onChange={(e) => {
-                    markFieldEditing('title');
-                    lastKnownTitleRef.current = e.target.value; // Track local edit immediately
-                    setEditedTitle(e.target.value);
-                  }}
-                  onBlur={() => !isCreateMode && handleTitleSave()}
-                  onFocus={() => markFieldEditing('title')}
-                  onKeyDown={(e) => {
-                    // Ctrl+Enter to save and close
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                      e.preventDefault();
-                      handleCloseWithSave();
-                      return;
-                    }
-                    // Enter to save title (non-create mode) or move to description (create mode)
-                    if (e.key === 'Enter') {
-                      if (isCreateMode) {
-                        e.preventDefault();
-                        descriptionRef.current?.focus();
-                      } else {
-                        handleTitleSave();
-                      }
-                      return;
-                    }
-                    // Tab to move to description
-                    if (e.key === 'Tab' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (!isCreateMode) handleTitleSave();
-                      descriptionRef.current?.focus();
-                    }
-                  }}
-                  placeholder={isCreateMode ? "Enter card title..." : ""}
-                  className="w-full rounded border bg-transparent px-1 text-base sm:text-xl font-bold text-void-900 outline-none dark:text-void-100"
-                  style={{ borderColor: `rgb(${focusRgb})` }}
-                  autoFocus
-                />
-              ) : (
-                <Tooltip content="Click to edit" placement="bottom">
-                  <h2
-                    onClick={() => setIsEditingTitle(true)}
-                    className="cursor-pointer text-base sm:text-xl font-bold text-void-900 hover:text-blue-600 dark:text-void-100 dark:hover:text-blue-400"
-                  >
-                    {card.title}
-                  </h2>
-                </Tooltip>
-              )}
-              {!isCreateMode && (
-                <Tooltip content={copiedTitle ? 'Copied!' : 'Copy title'} placement="bottom">
-                  <button
-                    onClick={handleCopyTitle}
-                    aria-label={copiedTitle ? 'Copied!' : 'Copy title'}
-                    className="mt-1 flex-shrink-0 rounded p-1 text-void-400 hover:bg-void-200/50 hover:text-void-600 dark:hover:bg-void-700/50 dark:hover:text-void-300"
-                  >
-                    {copiedTitle ? (
-                      <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    )}
-                  </button>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-shrink-0 flex-col items-end gap-2">
-            <div className="flex items-center gap-1.5 sm:gap-3">
-            {/* Automation toggle switch — disabled for archived cards */}
-            {!isCreateMode && (
-              <Tooltip content={card.archived ? 'Unarchive card before enabling automation' : 'Toggle automation mode'} placement="bottom">
-                <label className={`flex items-center gap-1 sm:gap-2 ${card.archived ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
-                  <span className={`hidden sm:inline text-xs font-medium ${isAutomation ? 'text-orange-600 dark:text-orange-400' : 'text-void-500 dark:text-void-400'}`}>
-                    Automation
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isAutomation}
-                    disabled={!!card.archived}
-                    onClick={() => {
-                      if (card.archived) return;
-                      if (isAutomation) {
-                        // Toggle off — remove automation config
-                        const { automation: _, ...rest } = card;
-                        onUpdate({ ...rest, updated_at: new Date().toISOString() } as KanbanCard);
-                        onAutomationToggle?.(false);
-                      } else {
-                        // Toggle on — add default automation config
-                        const defaultConfig: AutomationConfigType = {
-                          enabled: false,
-                          schedule: '',
-                          scheduleType: 'recurring',
-                          provider: 'claude',
-                          freshSession: false,
-                          reportViaMessaging: false,
-                        };
-                        onUpdate({ ...card, automation: defaultConfig, updated_at: new Date().toISOString() });
-                        onAutomationToggle?.(true);
-                      }
-                    }}
-                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                      card.archived ? 'cursor-not-allowed' : 'cursor-pointer'
-                    } ${
-                      isAutomation
-                        ? 'bg-orange-500 focus:ring-orange-500'
-                        : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        isAutomation ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </label>
-              </Tooltip>
-            )}
-
-            {/* Archive toggle switch — disabled for automation cards */}
-            {!isCreateMode && (
-              <Tooltip content={isAutomation ? 'Automation cards cannot be archived' : 'Archive card'} placement="bottom">
-                <label className={`flex items-center gap-1 sm:gap-2 ${isAutomation ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
-                  <span className={`hidden sm:inline text-xs font-medium ${card.archived ? 'text-red-600 dark:text-red-400' : 'text-void-500 dark:text-void-400'}`}>
-                    Archived
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={card.archived || false}
-                    disabled={isAutomation}
-                    onClick={() => {
-                      if (isAutomation) return;
-                      const updatedCard = {
-                        ...card,
-                        archived: !card.archived,
-                        updated_at: new Date().toISOString(),
-                      };
-                      onUpdate(updatedCard);
-                    }}
-                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                      isAutomation ? 'cursor-not-allowed' : 'cursor-pointer'
-                    } ${
-                      card.archived
-                        ? 'bg-red-500 focus:ring-red-500'
-                        : 'bg-void-300 focus:ring-void-500 dark:bg-void-600'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        card.archived ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </label>
-              </Tooltip>
-            )}
-
-            {/* Delete button */}
-            {!isCreateMode && onDelete && (
-              <Tooltip content="Delete card permanently" placement="bottom">
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  aria-label="Delete card permanently"
-                  className="rounded-lg p-2 text-void-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </Tooltip>
-            )}
-
-            {/* Close button */}
-            <button
-              onClick={handleCloseWithSave}
-              className="rounded-lg p-2 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            </div>
-            {/* Voice controls — right-aligned below header buttons */}
-            {!isCreateMode && (
-              <div ref={voiceAnchorRef}>
-                <VoiceControlBar
-                  voiceState={voice.voiceState}
-                  elapsedSeconds={voice.elapsedSeconds}
-                  disabled={!voice.hasFieldFocus && voice.voiceState === 'idle'}
-                  error={voice.error}
-                  onRecord={voice.startRecording}
-                  onPause={voice.pauseRecording}
-                  onResume={voice.resumeRecording}
-                  onClear={voice.clearRecording}
-                  onSubmit={voice.submitRecording}
-                  onRetry={voice.retryTranscription}
-                  onOpenSettings={() => {
-                    if (Date.now() - voiceSettingsClosedAtRef.current < 200) return;
-                    voice.setShowSettings(!voice.showSettings);
-                  }}
-                  beforeSettings={
-                    <SpeakerToggle
-                      speaker={voice.speaker}
-                      hideOnNarrow={voice.voiceState === 'recording' || voice.voiceState === 'paused' || voice.voiceState === 'transcribing'}
-                    />
-                  }
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Eager-create status banner (pending / error). Render only in create mode. */}
-        {isCreateMode && creatingState && creatingState.status !== 'idle' && (
-          <div
-            role={creatingState.status === 'error' ? 'alert' : 'status'}
-            aria-live="polite"
-            className={`flex items-center justify-between gap-3 border-b-2 px-5 py-3.5 text-base font-medium ${
-              creatingState.status === 'pending'
-                ? 'border-neon-blue-400/60 bg-neon-blue-100/80 text-neon-blue-800 dark:border-neon-blue-400/50 dark:bg-neon-blue-950/70 dark:text-neon-blue-100'
-                : 'border-red-400/60 bg-red-50 text-red-800 dark:border-red-500/50 dark:bg-red-950/60 dark:text-red-100'
-            }`}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              {creatingState.status === 'pending' ? (
-                <>
-                  <svg className="h-6 w-6 flex-shrink-0 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-                    <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                  </svg>
-                  <span className="text-lg font-semibold tracking-wide">Saving card…</span>
-                </>
-              ) : (
-                <>
-                  <span aria-hidden className="flex-shrink-0 text-xl leading-none">⚠</span>
-                  <span className="truncate">Couldn&apos;t save: {creatingState.message}</span>
-                </>
-              )}
-            </div>
-            {creatingState.status === 'error' && (
-              <div className="flex flex-shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onRetryCreate?.()}
-                  className="rounded border border-red-400/50 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/50 dark:text-red-200 dark:hover:bg-red-900/40"
-                >
-                  Retry
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onCancelCreate?.()}
-                  className="rounded border border-red-400/30 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:text-red-200 dark:hover:bg-red-900/40"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tabs — scrollable with arrow indicators */}
-        <div className={`relative grain grain-soft ${modalStyles.tabsBorder} ${modalStyles.tabs}`}>
-        <div ref={tabBarRef} onWheel={handleTabBarWheel} onMouseDown={handleTabBarMouseDown} className={`flex overflow-x-auto scrollbar-hide ${tabBarCanScrollLeft || tabBarCanScrollRight ? 'cursor-grab' : ''}`}>
-          <button
-            onClick={() => selectTab('details')}
-            className={`shrink-0 px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === 'details'
-                ? isAutomation
-                  ? 'border-b-2 border-orange-400 text-orange-500 dark:text-orange-400'
-                  : 'border-b-2 border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
-                : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-            }`}
-          >
-            Details
-          </button>
-          {hasDesign && (
-            <button
-              onClick={() => selectTab('design')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'design'
-                  ? 'border-b-2 border-neon-blue-300 text-neon-blue-400 dark:text-neon-blue-300'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Design
-              {designRefs.length > 1 && (
-                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{designRefs.length}</span>
-              )}
-            </button>
-          )}
-          {hasFeature && (
-            <button
-              onClick={() => selectTab('feature')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'feature'
-                  ? 'border-b-2 border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              Feature
-              {featureRefs.length > 1 && (
-                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{featureRefs.length}</span>
-              )}
-            </button>
-          )}
-          {hasHtml && (
-            <button
-              onClick={() => selectTab('html')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'html'
-                  ? 'border-b-2 border-[#ff6a33] text-[#ff6a33]/90 dark:text-[#ff6a33]/90'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
-              HTML
-            </button>
-          )}
-          {hasTest && (
-            <button
-              onClick={() => selectTab('test')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'test'
-                  ? 'border-b-2 border-[#00e676] text-[#00e676]/80 dark:text-[#00e676]/80'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-              Test
-              {testRefs.length > 1 && (
-                <span className="rounded bg-void-200 px-1.5 py-0.5 text-xs dark:bg-void-700">{testRefs.length}</span>
-              )}
-            </button>
-          )}
-          {hasQuestionnaires && (
-            <button
-              onClick={() => selectTab('questionnaires')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'questionnaires'
-                  ? 'border-b-2 border-cyan-400 text-cyan-500 dark:text-cyan-400'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-              Questionnaires
-              {(card.questionnaire_refs?.length ?? 0) > 1 && (
-                <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-xs dark:bg-cyan-900/50">
-                  {card.questionnaire_refs!.length}
-                </span>
-              )}
-            </button>
-          )}
-          <button
-            onClick={() => selectTab('notes')}
-            className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === 'notes'
-                ? 'border-b-2 border-purple-400 text-purple-500 dark:text-purple-400'
-                : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-            }`}
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-            </svg>
-            Notes
-            {(card.agentNotes?.length ?? 0) > 0 && (
-              <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs dark:bg-purple-900/50">
-                {card.agentNotes!.length}
-              </span>
-            )}
-          </button>
-          {hasChecklist && (
-            <button
-              onClick={() => selectTab('checklist')}
-              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
-                activeTab === 'checklist'
-                  ? 'border-b-2 border-[#ffd600] text-[#ffd600]/80 dark:text-[#ffd600]/80'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Checklist
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs dark:bg-amber-900/50">
-                {localChecklist.filter((i) => i.done).length}/{localChecklist.length}
-              </span>
-            </button>
-          )}
-          <button
-            onClick={() => selectTab('terminal')}
-            className={`flex shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === 'terminal'
-                ? 'border-b-2 border-neon-orange-400 text-neon-orange-500 dark:text-neon-orange-400'
-                : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-300'
-            }`}
-          >
-            <div className={`h-2 w-2 rounded-full ${
-              anyRunning ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]'
-                : anyDetached ? 'bg-neon-orange-400 shadow-[0_0_6px_rgba(255,160,0,0.4)]'
-                : 'bg-void-400'
-            }`} />
-            Terminal
-            {anyRunning && (
-              <span className="rounded bg-orange-100 px-1.5 py-0.5 text-xs dark:bg-orange-900/50">
-                {activeSession?.status}
-              </span>
-            )}
-          </button>
-          {/* Provider pills + "+" button — right-aligned when terminal tab active */}
-          {activeTab === 'terminal' && (
+  // Provider pills + "+" — in the tab bar (terminal tab) or the workbench terminal header.
+  const providerPills = (
             <div className="ml-auto flex shrink-0 items-center gap-1 pr-2">
               {hasMultipleSessions && cardSessions.map(session => {
                 const colors = getProviderColor(session.provider);
@@ -1896,10 +1540,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                         <div className="h-1.5 w-1.5 rounded-full border border-current opacity-70" />
                       ) : (
                         <div className="h-1.5 w-1.5 rounded-full" style={{
-                          backgroundColor: session.status === 'running' ? '#00e676'
-                            : session.status === 'detached' ? '#ff9800'
-                            : '#6b7280',
-                          boxShadow: session.status === 'running' ? '0 0 4px rgba(0, 230, 118, 0.6)' : 'none',
+                          backgroundColor: session.status === 'running' ? 'var(--live)'
+                            : session.status === 'detached' ? 'var(--agent)'
+                            : 'var(--line-strong)',
                         }} />
                       )}
                       {session.displayName}
@@ -1916,7 +1559,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                   <div ref={newSessionRef}>
                     <button
                       onClick={() => { setNewSessionDropdown(!newSessionDropdown); setNewSessionProvider(null); }}
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-void-600 text-xs text-void-400 transition-all hover:border-void-500 hover:text-void-300"
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-line-strong text-xs text-ink-3 transition-colors hover:border-ink-3 hover:text-ink-1"
                     >
                       +
                     </button>
@@ -1924,601 +1567,11 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 );
               })()}
             </div>
-          )}
-        </div>
-        {/* Scroll arrow indicators */}
-        {tabBarCanScrollLeft && (
-          <button
-            onClick={() => tabBarRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
-            className="absolute left-0 top-0 z-10 flex h-full w-7 items-center justify-center bg-gradient-to-r from-void-800/90 to-transparent text-void-400 hover:text-void-200 transition-colors"
-            aria-label="Scroll tabs left"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
-          </button>
-        )}
-        {tabBarCanScrollRight && (
-          <button
-            onClick={() => tabBarRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
-            className="absolute right-0 top-0 z-10 flex h-full w-7 items-center justify-center bg-gradient-to-l from-void-800/90 to-transparent text-void-400 hover:text-void-200 transition-colors"
-            aria-label="Scroll tabs right"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
-          </button>
-        )}
-        </div>
+  );
 
-        {/* Content */}
-        <div className={activeTab === 'terminal' || activeTab === 'notes' || activeTab === 'html' || activeTab === 'questionnaires' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]'}>
-          {activeTab === 'details' ? (
-            <div className="p-4">
-              {/* Compact Metadata Strip */}
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                {/* Stage/Priority/Areas — hidden in automation mode */}
-                {!isAutomation && (
-                  <>
-                    {/* Stage dropdown */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-void-500 dark:text-void-400">Stage:</span>
-                      <select
-                        value={stage}
-                        onChange={(e) => onMove(card.id, e.target.value as KanbanStage)}
-                        className="stage-focus rounded border border-void-300 bg-white px-2 py-1 text-xs font-medium text-void-700 dark:border-void-600 dark:bg-void-800 dark:text-void-300"
-                      >
-                        {STAGES.map((s) => (
-                          <option key={s.id} value={s.id}>{s.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Priority dropdown */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-medium text-void-500 dark:text-void-400">Priority:</span>
-                      <select
-                        value={card.priority}
-                        onChange={(e) => onUpdate({ ...card, priority: e.target.value as typeof PRIORITIES[number], updated_at: new Date().toISOString() })}
-                        className="stage-focus rounded border border-void-300 bg-white px-2 py-1 text-xs font-medium capitalize text-void-700 dark:border-void-600 dark:bg-void-800 dark:text-void-300"
-                      >
-                        {PRIORITIES.map((p) => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
-
-                    {/* Areas */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs font-medium text-void-500 dark:text-void-400">Areas:</span>
-                      {card.areas.map((area) => (
-                        <span
-                          key={area}
-                          className="inline-flex items-center gap-1 rounded bg-indigo-100 px-1.5 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300"
-                        >
-                          {area}
-                          <button
-                            onClick={() => handleRemoveArea(area)}
-                            className="ml-0.5 hover:text-indigo-900 dark:hover:text-indigo-100"
-                          >
-                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </span>
-                      ))}
-                      {unusedAreas.length > 0 && (
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            if (e.target.value) handleAddArea(e.target.value);
-                          }}
-                          className="stage-focus rounded border border-dashed border-void-300 bg-transparent px-1.5 py-0.5 text-xs text-void-500 hover:border-void-400 dark:border-void-600 dark:text-void-400"
-                        >
-                          <option value="">+ Add</option>
-                          {unusedAreas.map((area) => (
-                            <option key={area} value={area}>{area}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-
-                    {/* Divider */}
-                    <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
-                  </>
-                )}
-
-                {/* Tags (drag-to-reorder) */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-medium text-void-500 dark:text-void-400">Tags:</span>
-                  {card.tags.map((tag, index) => (
-                    <span
-                      key={tag}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragTagIndex(index);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = 'move';
-                        setDragOverTagIndex(index);
-                      }}
-                      onDragLeave={() => setDragOverTagIndex(null)}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        if (dragTagIndex !== null) handleTagDrop(dragTagIndex, index);
-                      }}
-                      onDragEnd={() => {
-                        setDragTagIndex(null);
-                        setDragOverTagIndex(null);
-                      }}
-                      className={`inline-flex cursor-grab items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-all active:cursor-grabbing ${
-                        dragTagIndex === index
-                          ? 'opacity-50'
-                          : dragOverTagIndex === index
-                            ? 'bg-orange-200 text-orange-700 ring-1 ring-orange-400/50 dark:bg-orange-900/30 dark:text-orange-300'
-                            : index === 0 && isAutomation
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
-                              : 'bg-void-100 text-void-600 dark:bg-void-700 dark:text-void-400'
-                      }`}
-                    >
-                      {tag}
-                      <button
-                        onClick={() => handleRemoveTag(tag)}
-                        className="ml-0.5 hover:text-void-900 dark:hover:text-void-100"
-                      >
-                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    type="text"
-                    value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newTagInput.trim()) {
-                        e.preventDefault();
-                        handleAddTag(newTagInput);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (newTagInput.trim()) handleAddTag(newTagInput);
-                    }}
-                    placeholder="+ tag"
-                    className="stage-focus w-16 rounded border border-dashed border-void-300 bg-transparent px-1.5 py-0.5 text-xs text-void-500 placeholder-void-400 hover:border-void-400 dark:border-void-600 dark:text-void-400 dark:placeholder-void-500"
-                  />
-                </div>
-
-                {/* References (icons only) */}
-                {(hasDesign || hasFeature || hasTest || hasHtml) && (
-                  <>
-                    <div className="h-4 w-px bg-void-300 dark:bg-void-600" />
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs font-medium text-void-500 dark:text-void-400">Docs:</span>
-                      {hasDesign && (
-                        <Tooltip content={designRefs.join('\n')}>
-                          <button
-                            onClick={() => selectTab('design')}
-                            className="relative rounded p-1.5 text-purple-600 hover:bg-purple-100 dark:text-purple-400 dark:hover:bg-purple-900/30"
-                          >
-                            {/* Clipboard/pencil icon for design */}
-                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                            </svg>
-                            {designRefs.length > 1 && (
-                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                                {designRefs.length}
-                              </span>
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {hasFeature && (
-                        <Tooltip content={featureRefs.join('\n')}>
-                          <button
-                            onClick={() => selectTab('feature')}
-                            className="relative rounded p-1.5 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                          >
-                            {/* Checklist icon for feature */}
-                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                            </svg>
-                            {featureRefs.length > 1 && (
-                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                                {featureRefs.length}
-                              </span>
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {hasHtml && (
-                        <Tooltip content={htmlRefs.join('\n')}>
-                          <button
-                            onClick={() => selectTab('html')}
-                            className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
-                          >
-                            {/* Code-brackets icon for HTML */}
-                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                            </svg>
-                            {htmlRefs.length > 1 && (
-                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff6a33] px-1 font-mono text-[10px] font-bold leading-none text-white">
-                                {htmlRefs.length}
-                              </span>
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                      {hasTest && (
-                        <Tooltip content={testRefs.join('\n')}>
-                          <button
-                            onClick={() => selectTab('test')}
-                            className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
-                          >
-                            {/* Checkmark box icon for test */}
-                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {testRefs.length > 1 && (
-                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
-                                {testRefs.length}
-                              </span>
-                            )}
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Description */}
-              <div className="mb-4">
-                <label className="mb-2 block text-sm font-medium text-void-700 dark:text-void-300">
-                  {isAutomation ? 'Description / Automation Instructions' : 'Description'}
-                  {isCreateMode && (
-                    <span className="ml-2 font-normal text-void-400">(Ctrl+Enter to save)</span>
-                  )}
-                </label>
-                <textarea
-                  ref={descriptionRef}
-                  value={editedDescription}
-                  data-voice-target
-                  onChange={(e) => handleDescriptionChange(e.target.value)}
-                  onFocus={() => markFieldEditing('description')}
-                  onKeyDown={(e) => {
-                    // Ctrl+Enter or Cmd+Enter to save and close
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                      e.preventDefault();
-                      handleCloseWithSave();
-                    }
-                  }}
-                  placeholder="Add a description..."
-                  className="stage-focus h-[235px] w-full resize-none overflow-y-auto rounded-lg border border-void-300 bg-white p-3 text-sm text-void-700 dark:border-void-600 dark:bg-void-800 dark:text-void-300"
-                />
-              </div>
-
-              {/* Automation Config — shown instead of problems when automation mode is on */}
-              {isAutomation && card.automation ? (
-                <div className="mb-4">
-                  <AutomationConfig
-                    config={card.automation}
-                    cardId={card.id}
-                    projectId={projectId}
-                    onChange={(newConfig) => {
-                      onUpdate({ ...card, automation: newConfig, updated_at: new Date().toISOString() });
-                    }}
-                  />
-                </div>
-              ) : (
-                /* Problems / Issues — hidden for automation cards */
-                <div className="mb-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-void-700 dark:text-void-300">
-                      Problems / Issues ({unresolvedProblems.length} open)
-                    </label>
-                    {unresolvedProblems.length > 0 && stage === 'testing' && (
-                      <button
-                        onClick={handlePushBackForBugs}
-                        className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700"
-                      >
-                        Push to Implementation
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="mb-2 space-y-2">
-                    {unresolvedProblems.map((problem) => (
-                      <div
-                        key={problem.id}
-                        className="flex items-start gap-2 rounded-lg bg-red-50 p-2 dark:bg-red-900/20"
-                      >
-                        <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                        <div className="flex-1">
-                          <p className="text-sm text-red-800 dark:text-red-200">{problem.description}</p>
-                          <p className="text-xs text-red-600 dark:text-red-400">
-                            {formatDate(problem.created_at)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleResolveProblem(problem.id)}
-                          className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/40"
-                        >
-                          Resolve
-                        </button>
-                      </div>
-                    ))}
-
-                    {resolvedProblems.length > 0 && (
-                      <details className="text-sm">
-                        <summary className="cursor-pointer text-void-500">
-                          {resolvedProblems.length} resolved
-                        </summary>
-                        <div className="mt-2 space-y-1">
-                          {resolvedProblems.map((problem) => (
-                            <div
-                              key={problem.id}
-                              className="rounded bg-void-100 p-2 text-void-500 line-through dark:bg-void-800"
-                            >
-                              {problem.description}
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      data-voice-target
-                      value={newProblem}
-                      onChange={(e) => setNewProblem(e.target.value)}
-                      placeholder="Describe an issue..."
-                      className="stage-focus flex-1 rounded-lg border border-void-300 bg-white px-3 py-2 text-sm dark:border-void-600 dark:bg-void-800 dark:text-void-100"
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddProblem()}
-                    />
-                    <button
-                      onClick={handleAddProblem}
-                      className="rounded-lg bg-void-200 px-3 py-2 text-sm font-medium text-void-700 hover:bg-void-300 dark:bg-void-700 dark:text-void-300 dark:hover:bg-void-600"
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          ) : activeTab === 'questionnaires' ? (
-            /* Questionnaires View — interactive Q&A forms */
-            <div className="flex h-full flex-col">
-              <QuestionnaireTab
-                card={card}
-                projectId={projectId}
-                activeSessionName={activeSession?.name ?? sessionName}
-                activeProvider={selectedProvider ?? activeSession?.provider ?? undefined}
-                cwd={cwd}
-                onSubmitSuccess={(warning) => {
-                  setQuestionnaireWarning(warning ?? null);
-                  setActiveTab('terminal');
-                }}
-                onUnlink={handleUnlinkRef}
-              />
-            </div>
-          ) : activeTab === 'html' && hasHtml ? (
-            /* HTML Attachments View — index list + sandboxed iframe viewer (feature 072) */
-            <div className="flex h-full flex-col">
-              <HtmlAttachmentsTab refs={htmlRefs} projectId={projectId} cardId={card.id} onUnlink={handleUnlinkRef} />
-            </div>
-          ) : activeTab === 'design' || activeTab === 'feature' || activeTab === 'test' ? (
-            /* Document View - Design, Feature, or Test (multi-attachment, feature 074) */
-            <div className="flex h-full flex-col">
-              <DocAttachmentsTab
-                key={activeTab}
-                kind={activeTab}
-                refs={activeTab === 'design' ? designRefs : activeTab === 'feature' ? featureRefs : testRefs}
-                projectId={projectId}
-                cardId={card.id}
-                onUnlink={handleUnlinkRef}
-              />
-            </div>
-          ) : activeTab === 'checklist' ? (
-            /* Checklist View */
-            <div className="p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-medium text-void-900 dark:text-void-100">
-                  Checklist ({localChecklist.filter((i) => i.done).length}/{localChecklist.length} complete)
-                </h3>
-                <div className="h-2 flex-1 mx-4 rounded-full bg-void-200 dark:bg-void-700">
-                  <div
-                    className="h-2 rounded-full bg-green-500 transition-all"
-                    style={{ width: `${(localChecklist.filter((i) => i.done).length / localChecklist.length) * 100}%` }}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                {localChecklist.map((item) => (
-                  <label
-                    key={item.id}
-                    className={`flex cursor-pointer select-none items-center gap-3 rounded-lg p-3 transition-colors active:scale-[0.99] ${
-                      item.done
-                        ? 'bg-green-50 dark:bg-green-900/20'
-                        : 'bg-void-50 hover:bg-void-100 dark:bg-void-800 dark:hover:bg-void-700'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={() => toggleChecklistItem(item.id)}
-                      className="h-5 w-5 flex-shrink-0 rounded border-void-300 text-green-600 focus:ring-green-500"
-                    />
-                    <span className={`flex-1 ${item.done ? 'text-void-500 line-through' : 'text-void-900 dark:text-void-100'}`}>
-                      {item.text}
-                    </span>
-                  </label>
-                ))}
-              </div>
-              {/* Add new checklist item */}
-              <div className="mt-4 flex gap-2">
-                <input
-                  type="text"
-                  data-voice-target
-                  placeholder="Add checklist item..."
-                  className="stage-focus flex-1 rounded-lg border border-void-300 bg-white px-3 py-2 text-sm dark:border-void-600 dark:bg-void-800 dark:text-void-100"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                      addChecklistItem(e.currentTarget.value.trim());
-                      e.currentTarget.value = '';
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          ) : activeTab === 'notes' ? (
-            /* Agent Notes View */
-            <div className="flex h-full flex-col p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-medium text-void-900 dark:text-void-100">
-                  Notes ({card.agentNotes?.length ?? 0})
-                </h3>
-                {(card.agentNotes?.length ?? 0) > 0 && (
-                  showClearConfirm ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-void-500">Clear all notes?</span>
-                      <button
-                        onClick={clearNotes}
-                        className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => setShowClearConfirm(false)}
-                        className="rounded px-2 py-1 text-xs font-medium text-void-500 hover:bg-void-100 dark:hover:bg-void-800"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowClearConfirm(true)}
-                      className="rounded px-2 py-1 text-xs font-medium text-void-500 hover:bg-void-100 hover:text-red-600 dark:hover:bg-void-800 dark:hover:text-red-400"
-                    >
-                      Clear All
-                    </button>
-                  )
-                )}
-              </div>
-              <div className="relative min-h-0 flex-1">
-              {/* Scroll shadow: top */}
-              {notesCanScrollUp && (
-                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-void-100/90 to-transparent dark:from-void-900/90" />
-              )}
-              {/* Scroll shadow: bottom */}
-              {notesCanScrollDown && (
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-void-100/90 to-transparent dark:from-void-900/90" />
-              )}
-              <div
-                ref={notesScrollRef}
-                onScroll={updateNotesScrollState}
-                className="h-full overflow-y-auto"
-              >
-              {(card.agentNotes?.length ?? 0) === 0 ? (
-                <div className="py-8 text-center text-sm text-void-400">
-                  No notes yet. Add a note below or use the CLI: <code className="rounded bg-void-100 px-1.5 py-0.5 text-xs dark:bg-void-800">sly-kanban notes {card.id} add &quot;...&quot;</code>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {card.agentNotes!.map((note) => {
-                    const noteDate = new Date(note.timestamp);
-                    const now = new Date();
-                    const diffMs = now.getTime() - noteDate.getTime();
-                    const diffMins = Math.floor(diffMs / 60000);
-                    const diffHours = Math.floor(diffMs / 3600000);
-                    const diffDays = Math.floor(diffMs / 86400000);
-                    let timeAgo = 'just now';
-                    if (diffDays > 0) timeAgo = `${diffDays}d ago`;
-                    else if (diffHours > 0) timeAgo = `${diffHours}h ago`;
-                    else if (diffMins > 0) timeAgo = `${diffMins}m ago`;
-
-                    return (
-                      <div
-                        key={note.id}
-                        className="group rounded-lg bg-void-50 p-3 dark:bg-void-800"
-                      >
-                        <div className="mb-1 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {note.agent && (
-                              <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
-                                {note.agent}
-                              </span>
-                            )}
-                            {note.summary && (
-                              <Tooltip content={`Summary of ${note.summarizedCount ?? '?'} notes${note.dateRange ? ` (${note.dateRange})` : ''}`}>
-                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                                  Summary
-                                </span>
-                              </Tooltip>
-                            )}
-                            <span className="text-xs text-void-400">{timeAgo}</span>
-                          </div>
-                          <Tooltip content="Delete note">
-                            <button
-                              onClick={() => deleteNote(note.id)}
-                              aria-label="Delete note"
-                              className="rounded p-1 text-void-400 opacity-0 transition-opacity hover:bg-void-200 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-void-700 dark:hover:text-red-400"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </Tooltip>
-                        </div>
-                        <p className="whitespace-pre-wrap text-sm text-void-700 dark:text-void-200">
-                          {note.text}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              </div>
-              </div>
-              {/* Add new note */}
-              <div className="mt-4 flex flex-shrink-0 gap-2">
-                <textarea
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  data-voice-target
-                  placeholder="Type a note... (Shift+Enter for new line)"
-                  rows={2}
-                  className="stage-focus flex-1 resize-none rounded-lg border border-void-300 bg-white px-3 py-2 text-sm dark:border-void-600 dark:bg-void-800 dark:text-void-100"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && newNoteText.trim()) {
-                      e.preventDefault();
-                      addNote(newNoteText.trim());
-                      setNewNoteText('');
-                    }
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    if (newNoteText.trim()) {
-                      addNote(newNoteText.trim());
-                      setNewNoteText('');
-                    }
-                  }}
-                  disabled={!newNoteText.trim()}
-                  className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-          ) : activeTab === 'terminal' && activeSession && !activeSession.resumable ? (
+  // The terminal (or the ended-session panel) — one instance, placed either in
+  // the Terminal tab or in the workbench's right-hand column.
+  const terminalPane = activeSession && !activeSession.resumable ? (
             /* Ended session with no captured conversation id (feature 080) —
                nothing to resume, so offer recovery/removal instead of a terminal */
             <div className="h-full min-w-0">
@@ -2531,7 +1584,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 onDismissed={refreshCardSessions}
               />
             </div>
-          ) : activeTab === 'terminal' ? (
+  ) : (
             /* Terminal Tab - uses shared component */
             <div className="h-full min-w-0">
               <ClaudeTerminalPanel
@@ -2587,7 +1640,1207 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                 }}
               />
             </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden lg:overflow-y-auto bg-black/40 p-0 backdrop-blur-[2px] dark:bg-black/60 lg:p-4 lg:pb-16 lg:pt-16"
+      onMouseDown={(e) => { mouseDownOnBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => { if (e.target === e.currentTarget && mouseDownOnBackdrop.current) handleCloseWithSave(); }}
+    >
+      <div
+        style={{ '--focus-rgb': focusRgb } as React.CSSProperties}
+        className={`flex w-full max-w-full h-full lg:h-auto flex-col lg:max-w-5xl ${splitMode ? 'xl:max-w-[min(1440px,96vw)]' : ''} overflow-hidden rounded-none lg:rounded-xl bg-surface-1 shadow-(--shadow-overlay) ${modalStyles.modalBorder}`}
+      >
+        {/* Header */}
+        <div className={`flex items-start justify-between p-3 sm:px-5 sm:py-4 ${modalStyles.headerBorder} ${modalStyles.header}`}>
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex items-center gap-2">
+              <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${typeColors[card.type]}`}>
+                {card.type}
+              </span>
+              <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${priorityColors[card.priority] || priorityColors.medium}`}>
+                {card.priority}
+              </span>
+              {card.claude_session?.active && (
+                <span className="flex items-center gap-1.5 rounded bg-live/10 px-2 py-0.5 text-xs font-medium text-live-text">
+                  <span className="relative flex h-2 w-2">
+                    <span className="live-dot" />
+                  </span>
+                  Session Active
+                </span>
+              )}
+              {!isCreateMode && !isAutomation && (
+                <StagePipeline stages={STAGES} stage={stage} onMove={(s) => onMove(card.id, s)} />
+              )}
+            </div>
+            <div className="flex items-start gap-2">
+              {isEditingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  type="text"
+                  value={editedTitle}
+                  data-voice-target
+                  onChange={(e) => {
+                    markFieldEditing('title');
+                    lastKnownTitleRef.current = e.target.value; // Track local edit immediately
+                    setEditedTitle(e.target.value);
+                  }}
+                  onBlur={() => !isCreateMode && handleTitleSave()}
+                  onFocus={() => markFieldEditing('title')}
+                  onKeyDown={(e) => {
+                    // Ctrl+Enter to save and close
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleCloseWithSave();
+                      return;
+                    }
+                    // Enter to save title (non-create mode) or move to description (create mode)
+                    if (e.key === 'Enter') {
+                      if (isCreateMode) {
+                        e.preventDefault();
+                        descriptionRef.current?.focus();
+                      } else {
+                        handleTitleSave();
+                      }
+                      return;
+                    }
+                    // Tab to move to description
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!isCreateMode) handleTitleSave();
+                      descriptionRef.current?.focus();
+                    }
+                  }}
+                  placeholder={isCreateMode ? "Enter card title..." : ""}
+                  className="w-full rounded border bg-transparent px-1 text-lg font-semibold tracking-tight text-ink-1 outline-none sm:text-[22px] sm:leading-7"
+                  style={{ borderColor: `rgb(${focusRgb})` }}
+                  autoFocus
+                />
+              ) : (
+                <Tooltip content="Click to edit" placement="bottom">
+                  <h2
+                    onClick={() => setIsEditingTitle(true)}
+                    className="cursor-pointer text-lg font-semibold tracking-tight text-ink-1 transition-colors hover:text-accent sm:text-[22px] sm:leading-7"
+                  >
+                    {card.title}
+                  </h2>
+                </Tooltip>
+              )}
+              {!isCreateMode && (
+                <Tooltip content={copiedTitle ? 'Copied!' : 'Copy title'} placement="bottom">
+                  <button
+                    onClick={handleCopyTitle}
+                    aria-label={copiedTitle ? 'Copied!' : 'Copy title'}
+                    className="mt-1 flex-shrink-0 rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
+                  >
+                    {copiedTitle ? (
+                      <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-shrink-0 flex-col items-end gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-3">
+            {/* Automation toggle switch — disabled for archived cards */}
+            {!isCreateMode && (
+              <Tooltip content={card.archived ? 'Unarchive card before enabling automation' : 'Toggle automation mode'} placement="bottom">
+                <label className={`flex items-center gap-1 sm:gap-2 ${card.archived ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
+                  <span className={`hidden sm:inline text-xs font-medium ${isAutomation ? 'text-agent-text' : 'text-ink-3'}`}>
+                    Automation
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isAutomation}
+                    disabled={!!card.archived}
+                    onClick={() => {
+                      if (card.archived) return;
+                      if (isAutomation) {
+                        // Toggle off — remove automation config
+                        const { automation: _, ...rest } = card;
+                        onUpdate({ ...rest, updated_at: new Date().toISOString() } as KanbanCard);
+                        onAutomationToggle?.(false);
+                      } else {
+                        // Toggle on — add default automation config
+                        const defaultConfig: AutomationConfigType = {
+                          enabled: false,
+                          schedule: '',
+                          scheduleType: 'recurring',
+                          provider: 'claude',
+                          freshSession: false,
+                          reportViaMessaging: false,
+                        };
+                        onUpdate({ ...card, automation: defaultConfig, updated_at: new Date().toISOString() });
+                        onAutomationToggle?.(true);
+                      }
+                    }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      card.archived ? 'cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      isAutomation
+                        ? 'bg-agent focus:ring-agent'
+                        : 'bg-surface-3 focus:ring-void-500'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        isAutomation ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </Tooltip>
+            )}
+
+            {/* Archive toggle switch — disabled for automation cards */}
+            {!isCreateMode && (
+              <Tooltip content={isAutomation ? 'Automation cards cannot be archived' : 'Archive card'} placement="bottom">
+                <label className={`flex items-center gap-1 sm:gap-2 ${isAutomation ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}>
+                  <span className={`hidden sm:inline text-xs font-medium ${card.archived ? 'text-red-600 dark:text-red-400' : 'text-ink-3'}`}>
+                    Archived
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={card.archived || false}
+                    disabled={isAutomation}
+                    onClick={() => {
+                      if (isAutomation) return;
+                      const updatedCard = {
+                        ...card,
+                        archived: !card.archived,
+                        updated_at: new Date().toISOString(),
+                      };
+                      onUpdate(updatedCard);
+                    }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                      isAutomation ? 'cursor-not-allowed' : 'cursor-pointer'
+                    } ${
+                      card.archived
+                        ? 'bg-red-500 focus:ring-red-500'
+                        : 'bg-surface-3 focus:ring-void-500'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        card.archived ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </Tooltip>
+            )}
+
+            {/* Delete button */}
+            {!isCreateMode && onDelete && (
+              <Tooltip content="Delete card permanently" placement="bottom">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  aria-label="Delete card permanently"
+                  className="rounded-lg p-2 text-ink-3 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </Tooltip>
+            )}
+
+            {/* Close button */}
+            <button
+              onClick={handleCloseWithSave}
+              className="rounded-lg p-2 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            </div>
+            {/* Voice controls — right-aligned below header buttons */}
+            {!isCreateMode && (
+              <div ref={voiceAnchorRef}>
+                <VoiceControlBar
+                  voiceState={voice.voiceState}
+                  elapsedSeconds={voice.elapsedSeconds}
+                  disabled={!voice.hasFieldFocus && voice.voiceState === 'idle'}
+                  error={voice.error}
+                  onRecord={voice.startRecording}
+                  onPause={voice.pauseRecording}
+                  onResume={voice.resumeRecording}
+                  onClear={voice.clearRecording}
+                  onSubmit={voice.submitRecording}
+                  onRetry={voice.retryTranscription}
+                  onOpenSettings={() => {
+                    if (Date.now() - voiceSettingsClosedAtRef.current < 200) return;
+                    voice.setShowSettings(!voice.showSettings);
+                  }}
+                  beforeSettings={
+                    <SpeakerToggle
+                      speaker={voice.speaker}
+                      hideOnNarrow={voice.voiceState === 'recording' || voice.voiceState === 'paused' || voice.voiceState === 'transcribing'}
+                    />
+                  }
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Eager-create status banner (pending / error). Render only in create mode. */}
+        {isCreateMode && creatingState && creatingState.status !== 'idle' && (
+          <div
+            role={creatingState.status === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`flex items-center justify-between gap-3 border-b-2 px-5 py-3.5 text-base font-medium ${
+              creatingState.status === 'pending'
+                ? 'border-accent/60 bg-accent/80 text-accent'
+                : 'border-red-400/60 bg-red-50 text-red-800 dark:border-red-500/50 dark:bg-red-950/60 dark:text-red-100'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              {creatingState.status === 'pending' ? (
+                <>
+                  <svg className="h-6 w-6 flex-shrink-0 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                    <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                  <span className="text-lg font-semibold tracking-wide">Saving card…</span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden className="flex-shrink-0 text-xl leading-none">⚠</span>
+                  <span className="truncate">Couldn&apos;t save: {creatingState.message}</span>
+                </>
+              )}
+            </div>
+            {creatingState.status === 'error' && (
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onRetryCreate?.()}
+                  className="rounded border border-red-400/50 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/50 dark:text-red-200 dark:hover:bg-red-900/40"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCancelCreate?.()}
+                  className="rounded border border-red-400/30 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:text-red-200 dark:hover:bg-red-900/40"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tabs — scrollable with arrow indicators */}
+        <div className={`flex items-stretch grain grain-soft ${modalStyles.tabsBorder} ${modalStyles.tabs}`}>
+        <div className="relative min-w-0 flex-1">
+        <div ref={tabBarRef} onWheel={handleTabBarWheel} onMouseDown={handleTabBarMouseDown} className={`flex overflow-x-auto scrollbar-hide ${tabBarCanScrollLeft || tabBarCanScrollRight ? 'cursor-grab' : ''}`}>
+          <button
+            onClick={() => selectTab('details')}
+            className={`shrink-0 px-4 py-2 text-sm font-medium transition-colors ${
+              contentTab === 'details'
+                ? isAutomation
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-accent text-ink-1'
+                : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+            }`}
+          >
+            Details
+          </button>
+          {hasDesign && (
+            <button
+              onClick={() => selectTab('design')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'design'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Design
+              {designRefs.length > 1 && (
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">{designRefs.length}</span>
+              )}
+            </button>
+          )}
+          {hasFeature && (
+            <button
+              onClick={() => selectTab('feature')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'feature'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Feature
+              {featureRefs.length > 1 && (
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">{featureRefs.length}</span>
+              )}
+            </button>
+          )}
+          {hasHtml && (
+            <button
+              onClick={() => selectTab('html')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'html'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              HTML
+            </button>
+          )}
+          {hasTest && (
+            <button
+              onClick={() => selectTab('test')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'test'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              Test
+              {testRefs.length > 1 && (
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">{testRefs.length}</span>
+              )}
+            </button>
+          )}
+          {hasQuestionnaires && (
+            <button
+              onClick={() => selectTab('questionnaires')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'questionnaires'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              Questionnaires
+              {(card.questionnaire_refs?.length ?? 0) > 1 && (
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+                  {card.questionnaire_refs!.length}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={() => selectTab('notes')}
+            className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+              contentTab === 'notes'
+                ? 'border-b-2 border-accent text-ink-1'
+                : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+            }`}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            Notes
+            {(card.agentNotes?.length ?? 0) > 0 && (
+              <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+                {card.agentNotes!.length}
+              </span>
+            )}
+          </button>
+          {hasChecklist && (
+            <button
+              onClick={() => selectTab('checklist')}
+              className={`flex shrink-0 items-center gap-1 px-4 py-2 text-sm font-medium transition-colors ${
+                contentTab === 'checklist'
+                  ? 'border-b-2 border-accent text-ink-1'
+                  : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Checklist
+              <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+                {localChecklist.filter((i) => i.done).length}/{localChecklist.length}
+              </span>
+            </button>
+          )}
+          {!splitMode && (
+          <button
+            onClick={() => selectTab('terminal')}
+            className={`flex shrink-0 items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+              contentTab === 'terminal'
+                ? 'border-b-2 border-accent text-ink-1'
+                : 'border-b-2 border-transparent text-ink-3 hover:text-ink-1'
+            }`}
+          >
+            <div className={`h-2 w-2 rounded-full ${
+              anyRunning ? 'bg-live'
+                : anyDetached ? 'bg-agent'
+                : 'bg-line-strong'
+            }`} />
+            Terminal
+            {anyRunning && (
+              <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
+                {activeSession?.status}
+              </span>
+            )}
+          </button>
+          )}
+          {/* Provider pills + "+" button — right-aligned when terminal tab active */}
+          {contentTab === 'terminal' && providerPills}
+        </div>
+        {/* Scroll arrow indicators */}
+        {tabBarCanScrollLeft && (
+          <button
+            onClick={() => tabBarRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
+            className="absolute left-0 top-0 z-10 flex h-full w-7 items-center justify-center bg-gradient-to-r from-surface-1 to-transparent text-ink-3 hover:text-ink-1 transition-colors"
+            aria-label="Scroll tabs left"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+          </button>
+        )}
+        {tabBarCanScrollRight && (
+          <button
+            onClick={() => tabBarRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
+            className="absolute right-0 top-0 z-10 flex h-full w-7 items-center justify-center bg-gradient-to-l from-surface-1 to-transparent text-ink-3 hover:text-ink-1 transition-colors"
+            aria-label="Scroll tabs right"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+          </button>
+        )}
+        </div>
+        {canSplit && (
+          <div className="relative my-1 mr-2 flex shrink-0 items-stretch">
+            <Tooltip content={splitMode ? 'Back to tabs for this card' : 'Show the terminal beside this card'} placement="bottom">
+              <button
+                type="button"
+                onClick={toggleSplit}
+                aria-pressed={splitMode}
+                className={`flex items-center gap-1.5 rounded-l-md pl-2.5 pr-2 text-[12px] font-medium transition-colors ${
+                  splitMode ? 'bg-accent/12 text-accent' : 'text-ink-3 hover:bg-surface-3 hover:text-ink-1'
+                }`}
+              >
+                <Columns2 aria-hidden className="h-4 w-4" strokeWidth={1.75} />
+                Side by side
+              </button>
+            </Tooltip>
+            <button
+              ref={splitMenuBtnRef}
+              type="button"
+              onClick={() => setSplitMenuOpen((o) => !o)}
+              aria-label="Side by side options"
+              aria-haspopup="menu"
+              aria-expanded={splitMenuOpen}
+              className={`flex items-center rounded-r-md px-1 transition-colors ${
+                splitMode ? 'bg-accent/12 text-accent hover:bg-accent/20' : 'text-ink-3 hover:bg-surface-3 hover:text-ink-1'
+              }`}
+            >
+              <ChevronDown aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            {/* Portalled: the tab bar's grain layer is its own stacking context,
+                which would trap the menu under the terminal column. */}
+            {splitMenuOpen && splitMenuBtnRef.current && createPortal(
+              <>
+                <div className="fixed inset-0 z-[60]" onClick={() => setSplitMenuOpen(false)} />
+                <div
+                  role="menu"
+                  className="fixed z-[61] w-64 rounded-lg border border-line bg-surface-1 p-1 shadow-(--shadow-overlay)"
+                  style={{ top: splitMenuBtnRef.current.getBoundingClientRect().bottom + 4, right: window.innerWidth - splitMenuBtnRef.current.getBoundingClientRect().right }}
+                >
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={splitDefault}
+                    autoFocus
+                    onClick={toggleSplitDefault}
+                    className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-1 outline-none hover:bg-surface-3 focus-visible:bg-surface-3"
+                  >
+                    <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${splitDefault ? 'border-accent bg-accent text-white dark:text-[#04121a]' : 'border-line-strong'}`}>
+                      {splitDefault && <Check aria-hidden className="h-3 w-3" strokeWidth={3} />}
+                    </span>
+                    <span>
+                      Side by side for all cards
+                      <span className="block text-[12px] text-ink-3">Cards you&apos;ve switched yourself keep their own setting.</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={splitRatio === DEFAULT_RATIO}
+                    onClick={() => { setRatioAndSave(DEFAULT_RATIO); setSplitMenuOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-1 outline-none hover:bg-surface-3 focus-visible:bg-surface-3 disabled:text-ink-3 disabled:hover:bg-transparent"
+                  >
+                    <span className="h-4 w-4 shrink-0" />
+                    Reset column widths
+                  </button>
+                </div>
+              </>,
+              document.body,
+            )}
+          </div>
+        )}
+        </div>
+
+        {/* Content — on wide screens a workbench: card on the left, terminal always on the right */}
+        <div
+          ref={splitGridRef}
+          className={splitMode ? `relative grid overflow-hidden${splitDragging ? ' select-none' : ''}` : 'contents'}
+          // Fixed height + one minmax(0,1fr) row: the terminal fits itself to
+          // its box, so a content-sized row would feed back and grow forever.
+          style={splitMode ? {
+            gridTemplateColumns: `minmax(0, ${splitRatio}fr) minmax(0, ${1 - splitRatio}fr)`,
+            gridTemplateRows: 'minmax(0, 1fr)',
+            height: 'clamp(480px, calc(100vh - 19rem), 860px)',
+            flex: 'none',
+          } : undefined}
+        >
+        <div className={splitMode
+          ? (contentTab === 'notes' || contentTab === 'html' || contentTab === 'questionnaires' ? 'h-full min-h-0' : 'h-full min-h-0 overflow-y-auto overscroll-contain')
+          : (contentTab === 'terminal' || contentTab === 'notes' || contentTab === 'html' || contentTab === 'questionnaires' ? 'min-h-0 flex-1 lg:flex-initial lg:h-[60vh]' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain lg:flex-initial lg:max-h-[60vh]')}>
+          {contentTab === 'details' ? (
+            <div className="p-4">
+              {/* Compact Metadata Strip */}
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                {/* Stage/Priority/Areas — hidden in automation mode */}
+                {!isAutomation && (
+                  <>
+                    {/* Stage dropdown */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-ink-3">Stage:</span>
+                      <select
+                        value={stage}
+                        onChange={(e) => onMove(card.id, e.target.value as KanbanStage)}
+                        className="stage-focus rounded border border-line-strong bg-surface-1 px-2 py-1 text-xs font-medium text-ink-2"
+                      >
+                        {STAGES.map((s) => (
+                          <option key={s.id} value={s.id}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Priority dropdown */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-ink-3">Priority:</span>
+                      <select
+                        value={card.priority}
+                        onChange={(e) => onUpdate({ ...card, priority: e.target.value as typeof PRIORITIES[number], updated_at: new Date().toISOString() })}
+                        className="stage-focus rounded border border-line-strong bg-surface-1 px-2 py-1 text-xs font-medium capitalize text-ink-2"
+                      >
+                        {PRIORITIES.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="h-4 w-px bg-surface-3" />
+
+                    {/* Areas */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-medium text-ink-3">Areas:</span>
+                      {card.areas.map((area) => (
+                        <span
+                          key={area}
+                          className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-xs text-ink-2"
+                        >
+                          {area}
+                          <button
+                            onClick={() => handleRemoveArea(area)}
+                            className="ml-0.5 text-ink-3 hover:text-ink-1"
+                          >
+                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </span>
+                      ))}
+                      {unusedAreas.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) handleAddArea(e.target.value);
+                          }}
+                          className="stage-focus rounded border border-dashed border-line-strong bg-transparent px-1.5 py-0.5 text-xs text-ink-3 hover:border-ink-3"
+                        >
+                          <option value="">+ Add</option>
+                          {unusedAreas.map((area) => (
+                            <option key={area} value={area}>{area}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* Divider */}
+                    <div className="h-4 w-px bg-surface-3" />
+                  </>
+                )}
+
+                {/* Tags (drag-to-reorder) */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-ink-3">Tags:</span>
+                  {card.tags.map((tag, index) => (
+                    <span
+                      key={tag}
+                      draggable
+                      onDragStart={(e) => {
+                        setDragTagIndex(index);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        setDragOverTagIndex(index);
+                      }}
+                      onDragLeave={() => setDragOverTagIndex(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (dragTagIndex !== null) handleTagDrop(dragTagIndex, index);
+                      }}
+                      onDragEnd={() => {
+                        setDragTagIndex(null);
+                        setDragOverTagIndex(null);
+                      }}
+                      className={`inline-flex cursor-grab items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-all active:cursor-grabbing ${
+                        dragTagIndex === index
+                          ? 'opacity-50'
+                          : dragOverTagIndex === index
+                            ? 'bg-orange-200 text-orange-700 ring-1 ring-orange-400/50 dark:bg-orange-900/30 dark:text-orange-300'
+                            : index === 0 && isAutomation
+                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                              : 'bg-surface-2 text-ink-2'
+                      }`}
+                    >
+                      {tag}
+                      <button
+                        onClick={() => handleRemoveTag(tag)}
+                        className="ml-0.5 hover:text-ink-1"
+                      >
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTagInput.trim()) {
+                        e.preventDefault();
+                        handleAddTag(newTagInput);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newTagInput.trim()) handleAddTag(newTagInput);
+                    }}
+                    placeholder="+ tag"
+                    className="stage-focus w-16 rounded border border-dashed border-line-strong bg-transparent px-1.5 py-0.5 text-xs text-ink-3 placeholder:text-ink-3 hover:border-ink-3"
+                  />
+                </div>
+
+                {/* References (icons only) */}
+                {(hasDesign || hasFeature || hasTest || hasHtml) && (
+                  <>
+                    <div className="h-4 w-px bg-surface-3" />
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-medium text-ink-3">Docs:</span>
+                      {hasDesign && (
+                        <Tooltip content={designRefs.join('\n')}>
+                          <button
+                            onClick={() => selectTab('design')}
+                            className="relative rounded p-1.5 text-ink-2 hover:bg-surface-3 hover:text-ink-1"
+                          >
+                            {/* Clipboard/pencil icon for design */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
+                            {designRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] font-bold leading-none text-white dark:text-[#04121a]">
+                                {designRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {hasFeature && (
+                        <Tooltip content={featureRefs.join('\n')}>
+                          <button
+                            onClick={() => selectTab('feature')}
+                            className="relative rounded p-1.5 text-accent hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                          >
+                            {/* Checklist icon for feature */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
+                            {featureRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-none text-on-primary">
+                                {featureRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {hasHtml && (
+                        <Tooltip content={htmlRefs.join('\n')}>
+                          <button
+                            onClick={() => selectTab('html')}
+                            className="relative rounded p-1.5 text-[#ff6a33] hover:bg-[#ff6a33]/15 dark:text-[#ff6a33] dark:hover:bg-[#ff6a33]/20"
+                          >
+                            {/* Code-brackets icon for HTML */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                            </svg>
+                            {htmlRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff6a33] px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {htmlRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                      {hasTest && (
+                        <Tooltip content={testRefs.join('\n')}>
+                          <button
+                            onClick={() => selectTab('test')}
+                            className="relative rounded p-1.5 text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+                          >
+                            {/* Checkmark box icon for test */}
+                            <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {testRefs.length > 1 && (
+                              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-green-600 px-1 font-mono text-[10px] font-bold leading-none text-white">
+                                {testRefs.length}
+                              </span>
+                            )}
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Description */}
+              <div className="mb-4">
+                <label className="mb-2 block text-sm font-medium text-ink-2">
+                  {isAutomation ? 'Description / Automation Instructions' : 'Description'}
+                  {isCreateMode && (
+                    <span className="ml-2 font-normal text-ink-3">(Ctrl+Enter to save)</span>
+                  )}
+                </label>
+                <textarea
+                  ref={descriptionRef}
+                  value={editedDescription}
+                  data-voice-target
+                  onChange={(e) => handleDescriptionChange(e.target.value)}
+                  onFocus={() => markFieldEditing('description')}
+                  onKeyDown={(e) => {
+                    // Ctrl+Enter or Cmd+Enter to save and close
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleCloseWithSave();
+                    }
+                  }}
+                  placeholder="Add a description..."
+                  className="stage-focus h-[235px] w-full resize-none overflow-y-auto rounded-lg border border-line-strong bg-surface-1 p-3 text-sm text-ink-2"
+                />
+              </div>
+
+              {/* Automation Config — shown instead of problems when automation mode is on */}
+              {isAutomation && card.automation ? (
+                <div className="mb-4">
+                  <AutomationConfig
+                    config={card.automation}
+                    cardId={card.id}
+                    projectId={projectId}
+                    session={automationSession}
+                    onChange={(newConfig) => {
+                      onUpdate({ ...card, automation: newConfig, updated_at: new Date().toISOString() });
+                    }}
+                  />
+                </div>
+              ) : (
+                /* Problems / Issues — hidden for automation cards */
+                <div className="mb-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-sm font-medium text-ink-2">
+                      Problems / Issues ({unresolvedProblems.length} open)
+                    </label>
+                    {unresolvedProblems.length > 0 && stage === 'testing' && (
+                      <button
+                        onClick={handlePushBackForBugs}
+                        className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700"
+                      >
+                        Push to Implementation
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mb-2 space-y-2">
+                    {unresolvedProblems.map((problem) => (
+                      <div
+                        key={problem.id}
+                        className="flex items-start gap-2 rounded-lg bg-red-50 p-2 dark:bg-red-900/20"
+                      >
+                        <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <div className="flex-1">
+                          <p className="text-sm text-red-800 dark:text-red-200">{problem.description}</p>
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            {formatDate(problem.created_at)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleResolveProblem(problem.id)}
+                          className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/40"
+                        >
+                          Resolve
+                        </button>
+                      </div>
+                    ))}
+
+                    {resolvedProblems.length > 0 && (
+                      <details className="text-sm">
+                        <summary className="cursor-pointer text-ink-3">
+                          {resolvedProblems.length} resolved
+                        </summary>
+                        <div className="mt-2 space-y-1">
+                          {resolvedProblems.map((problem) => (
+                            <div
+                              key={problem.id}
+                              className="rounded bg-surface-2 p-2 text-ink-3 line-through"
+                            >
+                              {problem.description}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      data-voice-target
+                      value={newProblem}
+                      onChange={(e) => setNewProblem(e.target.value)}
+                      placeholder="Describe an issue..."
+                      className="stage-focus flex-1 rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink-1"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddProblem()}
+                    />
+                    <button
+                      onClick={handleAddProblem}
+                      className="rounded-lg bg-surface-3 px-3 py-2 text-sm font-medium text-ink-2 hover:bg-surface-3"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          ) : contentTab === 'questionnaires' ? (
+            /* Questionnaires View — interactive Q&A forms */
+            <div className="flex h-full flex-col">
+              <QuestionnaireTab
+                card={card}
+                projectId={projectId}
+                activeSessionName={activeSession?.name ?? sessionName}
+                activeProvider={selectedProvider ?? activeSession?.provider ?? undefined}
+                cwd={cwd}
+                onSubmitSuccess={(warning) => {
+                  setQuestionnaireWarning(warning ?? null);
+                  setActiveTab('terminal');
+                }}
+                onUnlink={handleUnlinkRef}
+              />
+            </div>
+          ) : contentTab === 'html' && hasHtml ? (
+            /* HTML Attachments View — index list + sandboxed iframe viewer (feature 072) */
+            <div className="flex h-full flex-col">
+              <HtmlAttachmentsTab refs={htmlRefs} projectId={projectId} cardId={card.id} onUnlink={handleUnlinkRef} />
+            </div>
+          ) : contentTab === 'design' || contentTab === 'feature' || contentTab === 'test' ? (
+            /* Document View - Design, Feature, or Test (multi-attachment, feature 074) */
+            <div className="flex h-full flex-col">
+              <DocAttachmentsTab
+                key={contentTab}
+                kind={contentTab}
+                refs={contentTab === 'design' ? designRefs : contentTab === 'feature' ? featureRefs : testRefs}
+                projectId={projectId}
+                cardId={card.id}
+                onUnlink={handleUnlinkRef}
+              />
+            </div>
+          ) : contentTab === 'checklist' ? (
+            /* Checklist View */
+            <div className="p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-medium text-ink-1">
+                  Checklist ({localChecklist.filter((i) => i.done).length}/{localChecklist.length} complete)
+                </h3>
+                <div className="h-2 flex-1 mx-4 rounded-full bg-surface-3">
+                  <div
+                    className="h-2 rounded-full bg-green-500 transition-all"
+                    style={{ width: `${(localChecklist.filter((i) => i.done).length / localChecklist.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                {localChecklist.map((item) => (
+                  <label
+                    key={item.id}
+                    className={`flex cursor-pointer select-none items-center gap-3 rounded-lg p-3 transition-colors active:scale-[0.99] ${
+                      item.done
+                        ? 'bg-green-50 dark:bg-green-900/20'
+                        : 'bg-surface-2 hover:bg-surface-3'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      onChange={() => toggleChecklistItem(item.id)}
+                      className="h-5 w-5 flex-shrink-0 rounded border-line-strong text-green-600 focus:ring-green-500"
+                    />
+                    <span className={`flex-1 ${item.done ? 'text-ink-3 line-through' : 'text-ink-1'}`}>
+                      {item.text}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {/* Add new checklist item */}
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  data-voice-target
+                  placeholder="Add checklist item..."
+                  className="stage-focus flex-1 rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink-1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                      addChecklistItem(e.currentTarget.value.trim());
+                      e.currentTarget.value = '';
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          ) : contentTab === 'notes' ? (
+            /* Agent Notes View */
+            <div className="flex h-full flex-col p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-medium text-ink-1">
+                  Notes ({card.agentNotes?.length ?? 0})
+                </h3>
+                {(card.agentNotes?.length ?? 0) > 0 && (
+                  showClearConfirm ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-ink-3">Clear all notes?</span>
+                      <button
+                        onClick={clearNotes}
+                        className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setShowClearConfirm(false)}
+                        className="rounded px-2 py-1 text-xs font-medium text-ink-3 hover:bg-surface-3"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowClearConfirm(true)}
+                      className="rounded px-2 py-1 text-xs font-medium text-ink-3 hover:bg-surface-3 hover:text-red-600 dark:hover:text-red-400"
+                    >
+                      Clear All
+                    </button>
+                  )
+                )}
+              </div>
+              <div className="relative min-h-0 flex-1">
+              {/* Scroll shadow: top */}
+              {notesCanScrollUp && (
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-void-100/90 to-transparent dark:from-void-900/90" />
+              )}
+              {/* Scroll shadow: bottom */}
+              {notesCanScrollDown && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-void-100/90 to-transparent dark:from-void-900/90" />
+              )}
+              <div
+                ref={notesScrollRef}
+                onScroll={updateNotesScrollState}
+                className="h-full overflow-y-auto"
+              >
+              {(card.agentNotes?.length ?? 0) === 0 ? (
+                <div className="py-8 text-center text-sm text-ink-3">
+                  No notes yet. Add a note below or use the CLI: <code className="rounded bg-surface-2 px-1.5 py-0.5 text-xs">sly-kanban notes {card.id} add &quot;...&quot;</code>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {card.agentNotes!.map((note) => {
+                    const noteDate = new Date(note.timestamp);
+                    const now = new Date();
+                    const diffMs = now.getTime() - noteDate.getTime();
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const diffHours = Math.floor(diffMs / 3600000);
+                    const diffDays = Math.floor(diffMs / 86400000);
+                    let timeAgo = 'just now';
+                    if (diffDays > 0) timeAgo = `${diffDays}d ago`;
+                    else if (diffHours > 0) timeAgo = `${diffHours}h ago`;
+                    else if (diffMins > 0) timeAgo = `${diffMins}m ago`;
+
+                    return (
+                      <div
+                        key={note.id}
+                        className="group rounded-lg bg-surface-2 p-3"
+                      >
+                        <div className="mb-1 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {note.agent && (
+                              <span className="rounded bg-surface-3 px-1.5 py-0.5 text-xs font-medium text-ink-2">
+                                {note.agent}
+                              </span>
+                            )}
+                            {note.summary && (
+                              <Tooltip content={`Summary of ${note.summarizedCount ?? '?'} notes${note.dateRange ? ` (${note.dateRange})` : ''}`}>
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                  Summary
+                                </span>
+                              </Tooltip>
+                            )}
+                            <span className="text-xs text-ink-3">{timeAgo}</span>
+                          </div>
+                          <Tooltip content="Delete note">
+                            <button
+                              onClick={() => deleteNote(note.id)}
+                              aria-label="Delete note"
+                              className="rounded p-1 text-ink-3 opacity-0 transition-opacity hover:bg-surface-3 hover:text-red-500 group-hover:opacity-100 dark:hover:text-red-400"
+                            >
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </Tooltip>
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm text-ink-2">
+                          {note.text}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              </div>
+              </div>
+              {/* Add new note */}
+              <div className="mt-4 flex flex-shrink-0 gap-2">
+                <textarea
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  data-voice-target
+                  placeholder="Type a note... (Shift+Enter for new line)"
+                  rows={2}
+                  className="stage-focus flex-1 resize-none rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink-1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && newNoteText.trim()) {
+                      e.preventDefault();
+                      addNote(newNoteText.trim());
+                      setNewNoteText('');
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (newNoteText.trim()) {
+                      addNote(newNoteText.trim());
+                      setNewNoteText('');
+                    }
+                  }}
+                  disabled={!newNoteText.trim()}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          ) : contentTab === 'terminal' ? (
+            terminalPane
           ) : null}
+        </div>
+        {splitMode && (
+          /* Column divider: an invisible 9px strip over the existing border —
+             drag to resize, double-click to reset, arrow keys when focused. */
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize card and terminal columns"
+            aria-valuemin={25}
+            aria-valuemax={70}
+            aria-valuenow={Math.round(splitRatio * 100)}
+            tabIndex={0}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              setSplitDragging(true);
+            }}
+            onPointerMove={(e) => {
+              if (!splitDragging || !splitGridRef.current) return;
+              const r = splitGridRef.current.getBoundingClientRect();
+              setSplitRatio(clampRatio((e.clientX - r.left) / r.width));
+            }}
+            onPointerUp={() => { if (splitDragging) { setSplitDragging(false); writeSplitRatio(splitRatio); } }}
+            onPointerCancel={() => { if (splitDragging) { setSplitDragging(false); writeSplitRatio(splitRatio); } }}
+            onDoubleClick={() => setRatioAndSave(DEFAULT_RATIO)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                setRatioAndSave(splitRatio + (e.key === 'ArrowRight' ? 0.02 : -0.02));
+              } else if (e.key === 'Home') {
+                e.preventDefault();
+                setRatioAndSave(DEFAULT_RATIO);
+              }
+            }}
+            className="absolute inset-y-0 z-20 w-[9px] -translate-x-1/2 cursor-col-resize touch-none focus:outline-none focus-visible:bg-accent/30"
+            style={{ left: `${splitRatio * 100}%` }}
+          />
+        )}
+        {splitMode && (
+          <div ref={terminalPaneRef} className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-line">
+            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line pl-4">
+              <span className="text-[13px] font-medium text-ink-1">Terminal</span>
+              {anyRunning && (
+                <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-ink-2">{activeSession?.status}</span>
+              )}
+              {providerPills}
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">{terminalPane}</div>
+          </div>
+        )}
         </div>
 
         {/* Questionnaire delivery warning — modal-level so it outlives the
@@ -2620,9 +2873,9 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           </div>
         )}
 
-        {/* Footer - only show when not on terminal tab (terminal has its own footer) */}
-        {activeTab !== 'terminal' && (
-          <div className="flex items-center justify-between border-t border-void-200 px-4 py-2 text-xs text-void-500 dark:border-void-700 dark:text-void-400">
+        {/* Footer - hidden on the terminal tab (terminal has its own footer); always shown in the workbench */}
+        {(splitMode || activeTab !== 'terminal') && (
+          <div className="flex items-center justify-between border-t border-line px-4 py-2 text-[11px] text-ink-3">
             <span>Created: {formatDate(card.created_at)}</span>
             <span>Updated: {formatDate(card.updated_at)}</span>
           </div>
@@ -2639,7 +2892,7 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           setShowDeleteConfirm(false);
         }}
         title="Delete Card"
-        message={<>Are you sure you want to permanently delete <span className="font-medium text-void-900 dark:text-void-200">&quot;{card.title}&quot;</span>? This action cannot be undone.</>}
+        message={<>Are you sure you want to permanently delete <span className="font-medium text-ink-1">&quot;{card.title}&quot;</span>? This action cannot be undone.</>}
       />
 
       {/* Voice popovers — rendered via portal to escape header stacking context */}
@@ -2652,19 +2905,19 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
           return (
             <div
               ref={newSessionPortalRef}
-              className="fixed z-[60] min-w-[180px] rounded-lg border border-void-600 bg-void-800 p-2 shadow-(--shadow-overlay)"
+              className="fixed z-[60] min-w-[180px] rounded-lg border border-line bg-surface-1 p-2 shadow-(--shadow-overlay)"
               style={{ top: rect.bottom + 4, right: window.innerWidth - rect.right }}
             >
               {!newSessionProvider ? (
                 <div className="flex flex-col gap-1">
-                  <span className="px-1 text-[10px] font-medium uppercase tracking-wider text-void-500">Start session</span>
+                  <span className="px-1 text-[10px] font-medium text-ink-3">Start session</span>
                   {unused.map(p => {
                     const colors = getProviderColor(p.id);
                     return (
                       <button
                         key={p.id}
                         onClick={() => { setNewSessionProvider(p.id); setNewSessionSkipPerms(p.permissions.default); }}
-                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors hover:bg-void-700"
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors hover:bg-surface-3"
                         style={{ color: colors.color }}
                       >
                         <div className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.dot }} />
@@ -2685,8 +2938,8 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                           <div className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.dot }} />
                           {p.displayName}
                         </div>
-                        <label className="flex items-center gap-1.5 text-[11px] text-void-500 cursor-pointer">
-                          <input type="checkbox" checked={newSessionSkipPerms} onChange={e => setNewSessionSkipPerms(e.target.checked)} className="rounded border-void-600" />
+                        <label className="flex items-center gap-1.5 text-[11px] text-ink-3 cursor-pointer">
+                          <input type="checkbox" checked={newSessionSkipPerms} onChange={e => setNewSessionSkipPerms(e.target.checked)} className="rounded border-line-strong" />
                           {p.permissions.label}
                         </label>
                         <button
@@ -2717,12 +2970,12 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
                               setTimeout(() => refreshCardSessions(), 1000);
                             } catch { /* bridge error */ }
                           }}
-                          className="rounded-md bg-neon-blue-400/20 px-3 py-1.5 text-xs font-medium text-neon-blue-400 transition-colors hover:bg-neon-blue-400/30"
+                          className="rounded-md bg-accent/20 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/30"
                         >
                           Start
                         </button>
                         {newSessionError && (
-                          <div role="alert" className="max-w-[220px] text-[11px] leading-snug text-red-400">{newSessionError}</div>
+                          <div role="alert" className="max-w-[220px] text-[11px] leading-snug text-danger-text">{newSessionError}</div>
                         )}
                       </>
                     );
@@ -2734,18 +2987,24 @@ export function CardModal({ card, stage, projectId, projectPath, onClose, onUpda
         })(),
         document.body,
       )}
-      {voice.showSettings && createPortal(
-        <VoicePopoverPortal anchorRef={voiceAnchorRef}>
+      {voice.showSettings && (() => {
+        const closeVoiceSettings = () => { voiceSettingsClosedAtRef.current = Date.now(); voice.setShowSettings(false); };
+        const popover = (sheet: boolean) => (
           <VoiceSettingsPopover
             settings={voice.settings.voice}
             onSave={(patch) => voice.updateSettings({ voice: patch })}
-            onClose={() => { voiceSettingsClosedAtRef.current = Date.now(); voice.setShowSettings(false); }}
+            onClose={closeVoiceSettings}
             speaker={voice.speaker}
             saveError={voice.settingsSaveError}
+            projectId={projectId}
+            variant={sheet ? 'sheet' : 'popover'}
           />
-        </VoicePopoverPortal>,
-        document.body,
-      )}
+        );
+        // Phones: a bottom sheet sized to what can be seen (#0376).
+        return voiceSheetLayout
+          ? <VoiceSheet variant="bottom" label="Voice Settings" onClose={closeVoiceSettings}>{popover(true)}</VoiceSheet>
+          : createPortal(<VoicePopoverPortal anchorRef={voiceAnchorRef}>{popover(false)}</VoicePopoverPortal>, document.body);
+      })()}
       {voice.voiceState === 'error' && voice.error && createPortal(
         <VoicePopoverPortal anchorRef={voiceAnchorRef}>
           <VoiceErrorPopup

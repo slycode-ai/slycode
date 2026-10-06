@@ -127,11 +127,9 @@ export function BranchTab({ projectPath, isTerminalExpanded }: BranchTabProps) {
   const hue = branchToHue(gitStatus.branch!);
   const isOpen = popover !== 'hidden';
 
-  const tabBg = dark ? `hsla(${hue}, 55%, 22%, 0.9)` : `hsla(${hue}, 40%, 48%, 0.92)`;
+  // Branch identity: the hashed hue survives only as the tab's 2px top rule.
+  const tabHue = dark ? `hsl(${hue}, 60%, 55%)` : `hsl(${hue}, 50%, 42%)`;
   const border = dark ? `hsla(${hue}, 60%, 45%, 0.5)` : `hsla(${hue}, 45%, 38%, 0.4)`;
-  const glow = dark
-    ? `0 -3px 12px hsla(${hue}, 70%, 50%, 0.2), 0 0 6px hsla(${hue}, 60%, 40%, 0.1)`
-    : `0 -2px 8px hsla(${hue}, 50%, 50%, 0.15)`;
   const popoverBg = dark ? `hsla(${hue}, 50%, 15%, 0.95)` : `hsla(${hue}, 35%, 38%, 0.95)`;
 
   // Position: to the left of GlobalClaudePanel
@@ -166,7 +164,7 @@ export function BranchTab({ projectPath, isTerminalExpanded }: BranchTabProps) {
           className="px-3 py-1.5 flex items-center justify-between"
           style={{ borderBottom: `1px solid ${border}` }}
         >
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+          <span className="text-[10px] font-semibold text-white/50">
             Changed files
           </span>
           {popover === 'pinned' && (
@@ -179,20 +177,14 @@ export function BranchTab({ projectPath, isTerminalExpanded }: BranchTabProps) {
       {/* Tab */}
       <div
         onClick={handleClick}
-        className={`rounded-t-md px-3 py-1.5 backdrop-blur-sm flex flex-col ${isOpen ? 'rounded-t-none' : ''}`}
-        style={{
-          background: tabBg,
-          borderWidth: isOpen ? '0 1px 0 1px' : '1px 1px 0 1px',
-          borderStyle: 'solid',
-          borderColor: border,
-          boxShadow: isOpen ? 'none' : glow,
-        }}
+        className={`flex flex-col rounded-t-lg border border-b-0 border-line bg-surface-1 px-3 py-1.5 shadow-(--shadow-overlay) ${isOpen ? 'rounded-t-none' : ''}`}
+        style={{ borderTop: `2px solid ${tabHue}` }}
       >
-        <span className="max-w-[200px] truncate text-xs font-semibold text-white/90">
+        <span className="max-w-[200px] truncate font-mono text-[11px] font-medium text-ink-1">
           {gitStatus.branch}
         </span>
         {gitStatus.uncommitted > 0 && (
-          <span className="text-[10px] leading-tight text-white/55">
+          <span className="text-[11px] leading-tight text-ink-3">
             {gitStatus.uncommitted} uncommitted
           </span>
         )}

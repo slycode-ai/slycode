@@ -9,14 +9,16 @@ import { StateManager } from './state.js';
 import { KanbanClient } from './kanban-client.js';
 import { SlyActionFilter, fetchSpeakerState } from './sly-action-filter.js';
 import { transcribeAudio, validateSttConfig } from './stt.js';
-import { renderTtsAudio, RenderTimeoutError, RenderCancelledError } from './tts.js';
-import { SpeechRenderer } from './tts-render.js';
+import { TtsRuntime } from './tts/runtime.js';
+import { speedFromEnv } from './tts.js';
+import { loadEncoders } from './tts/audio-encode.js';
+import { createTtsRouter, serviceJsonParser } from './tts/routes.js';
+import { createVoiceCommands } from './tts/telegram-voice.js';
+import { PROVIDER_LABELS as TTS_PROVIDER_LABELS } from './tts/provider.js';
 import * as audioArchive from './audio-archive.js';
-import { searchVoices, searchVoicesStrict, VoicesUnavailableError } from './voices.js';
 import { projectSessionKeys, escapeRegex, resolveCanonicalProjectId } from './session-keys.js';
 import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
-import { preflightFile, resolveSendKind, FileSendError, preflightWritePath } from './file-send.js';
-import { buildGeneratedFilename, todayDateString } from './audio-utils.js';
+import { preflightFile, resolveSendKind, FileSendError } from './file-send.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // --- Shared Provider Labels ---
 // Provider labels come from data/providers.json (displayName) at startup —
@@ -209,6 +211,9 @@ async function detectBridgeUrl() {
     return candidates[0];
 }
 function loadConfig(bridgeUrl) {
+    const speed = speedFromEnv(process.env);
+    if (speed.warning)
+        console.warn(`[tts] ${speed.warning}`);
     return {
         service: {
             servicePort: parseInt(process.env.PORT || process.env.MESSAGING_SERVICE_PORT || '3005', 10),
@@ -224,7 +229,13 @@ function loadConfig(bridgeUrl) {
             awsTranscribeS3Bucket: process.env.AWS_TRANSCRIBE_S3_BUCKET || '',
             elevenlabsApiKey: process.env.ELEVENLABS_API_KEY || '',
             elevenlabsVoiceId: process.env.ELEVENLABS_VOICE_ID || '',
-            elevenlabsSpeed: parseFloat(process.env.ELEVENLABS_SPEED || '1.0'),
+            elevenlabsSpeed: speed.elevenlabsSpeed,
+            geminiApiKey: process.env.GEMINI_API_KEY || '',
+            geminiTtsModel: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
+            geminiTtsVoice: process.env.GEMINI_TTS_VOICE || '',
+            ttsProviderEnv: process.env.TTS_PROVIDER || '',
+            ttsSpeed: speed.ttsSpeed,
+            geminiTtsLanguage: process.env.GEMINI_TTS_LANGUAGE || 'en',
         },
     };
 }
@@ -241,7 +252,7 @@ function createChannel(state) {
     }
     return null;
 }
-async function logConfigStatus(channel, voiceConfig, bridgeUrl) {
+async function logConfigStatus(channel, voiceConfig, bridgeUrl, tts) {
     console.log('Messaging service starting...');
     console.log(`  Telegram: ${channel ? 'configured' : 'not configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID in .env'}`);
     if (voiceConfig.sttBackend === 'local') {
@@ -254,7 +265,15 @@ async function logConfigStatus(channel, voiceConfig, bridgeUrl) {
     else {
         console.log(`  STT (OpenAI): ${voiceConfig.openaiApiKey ? 'configured' : 'not configured — voice transcription unavailable'}`);
     }
-    console.log(`  TTS (ElevenLabs): ${voiceConfig.elevenlabsApiKey ? 'configured' : 'not configured — voice replies unavailable'}`);
+    const speech = tts.health();
+    const active = tts.active();
+    const model = active.provider ? ` (${active.provider.model})` : '';
+    console.log(`  TTS: ${TTS_PROVIDER_LABELS[speech.provider]}${model}, chosen by ${speech.providerSource} — ${speech.ready ? 'configured' : `not ready: ${speech.reason?.message}`}`);
+    const badEnv = tts.invalidProviderEnv();
+    if (badEnv)
+        console.warn(`  TTS_PROVIDER='${badEnv}' is not a known provider (elevenlabs, gemini); ignored.`);
+    for (const w of speech.warnings)
+        console.warn(`  TTS warning: ${w}`);
     console.log(`  Bridge URL: ${bridgeUrl}`);
 }
 // --- Breadcrumb Helpers ---
@@ -805,7 +824,7 @@ async function renderStartupActions(channel, state, bridge, kanban, actionFilter
     }
 }
 // --- Main Setup ---
-function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig) {
+function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig, tts) {
     // Expose actionFilter to module-level handlers (handleQuickLaunch) that need
     // to invoke handleSessionLifecycle.
     actionFilterRef.value = actionFilter;
@@ -1142,60 +1161,11 @@ function setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig)
         status += `\nVoice: ${voice ? voice.name : 'default'}`;
         await channel.sendTextRaw(status);
     });
-    // --- /voice ---
-    channel.onCommand('voice', async (args) => {
-        if (!voiceConfig.elevenlabsApiKey) {
-            await channel.sendText('ElevenLabs not configured (API key missing).');
-            return;
-        }
-        const query = args.trim();
-        if (!query) {
-            const voice = state.getVoice();
-            await channel.sendText(voice
-                ? `Current voice: *${voice.name}*\n\nUsage:\n/voice <name> - search and select\n/voice reset - use default`
-                : `Using default voice.\n\nUsage:\n/voice <name> - search and select\n/voice reset - use default`);
-            return;
-        }
-        if (query === 'reset') {
-            state.clearVoice();
-            await channel.sendText('Voice reset to default.');
-            return;
-        }
-        try {
-            await channel.sendTyping();
-            const voices = await searchVoices(voiceConfig.elevenlabsApiKey, query);
-            if (voices.length === 0) {
-                await channel.sendText(`No voices found for "${query}".`);
-                return;
-            }
-            const exactMatch = voices.find(v => v.name.toLowerCase() === query.toLowerCase());
-            if (exactMatch) {
-                state.setVoice(exactMatch.voice_id, exactMatch.name);
-                await channel.sendTextRaw(`Voice set to ${exactMatch.name}\nID: ${exactMatch.voice_id}`);
-                return;
-            }
-            if (channel.sendVoiceList) {
-                await channel.sendVoiceList(voices.slice(0, 8).map(v => ({
-                    id: v.voice_id,
-                    name: v.name,
-                    description: v.category,
-                })));
-            }
-            else {
-                const list = voices.slice(0, 8).map((v, i) => `${i + 1}. *${v.name}* (${v.category})`).join('\n');
-                await channel.sendText(`Found ${voices.length} voice(s):\n\n${list}\n\nSay the exact name to select.`);
-            }
-        }
-        catch (err) {
-            await channel.sendText(`Error searching voices: ${err.message}`);
-        }
-    });
-    // --- Voice Selection ---
+    // --- /voice --- (resolution and stale-list rules live in tts/telegram-voice.ts)
+    const voiceCommands = createVoiceCommands({ channel, tts, state });
+    channel.onCommand('voice', (args) => voiceCommands.onCommand(args));
     if (channel.onVoiceSelect) {
-        channel.onVoiceSelect(async (voiceId, voiceName) => {
-            state.setVoice(voiceId, voiceName);
-            await channel.sendTextRaw(`Voice set to ${voiceName}\nID: ${voiceId}`);
-        });
+        channel.onVoiceSelect((voiceId, voiceName, pick) => { void voiceCommands.onSelect(voiceId, voiceName, pick); });
     }
     // --- /mode ---
     channel.onCommand('mode', async () => {
@@ -1709,16 +1679,20 @@ async function main() {
     const { service: serviceConfig, voice: voiceConfig } = loadConfig(bridgeUrl);
     const state = new StateManager();
     const channel = createChannel(state);
-    await logConfigStatus(channel, voiceConfig, serviceConfig.bridgeUrl);
+    // One TTS runtime per process (feature 087): provider registry + shared render
+    // cache for /voice, /tts/generate and /tts/render.
+    const tts = new TtsRuntime(voiceConfig, state);
+    // Warm the WASM encoders when Gemini is usable, so health reports a load failure up front.
+    if (voiceConfig.geminiApiKey)
+        void loadEncoders().catch(() => { });
+    await logConfigStatus(channel, voiceConfig, serviceConfig.bridgeUrl, tts);
     const bridge = new BridgeClient(serviceConfig.bridgeUrl);
     const kanban = new KanbanClient(state.getProjects());
     const actionFilter = new SlyActionFilter();
-    // Shared render cache for /tts/generate and /tts/render (feature 086).
-    const speechRenderer = new SpeechRenderer(voiceConfig);
     console.log(`Projects loaded: ${state.getProjects().length}`);
     if (channel) {
         // Wire up the channel with core logic
-        setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig);
+        setupChannel(channel, bridge, state, kanban, actionFilter, voiceConfig, tts);
         // Start the channel
         await channel.start();
         // Queue context-aware persistent keyboard — sent on first user interaction
@@ -1813,7 +1787,8 @@ async function main() {
     // --- HTTP Server for Outbound Messages (called by CLI) ---
     const noChannelError = 'Messaging is not configured. Telegram bot token and user ID are not set. Tell the user they can configure messaging in .env or remove the messaging skill from this project.';
     const app = express();
-    app.use(express.json({ limit: '16kb' }));
+    // 16 KB JSON everywhere except the clone upload, which parses its own (#0376).
+    app.use(serviceJsonParser());
     app.post('/send', async (req, res) => {
         try {
             const { message, session } = req.body;
@@ -1839,60 +1814,6 @@ async function main() {
             else {
                 await channel.sendTextRaw(message);
             }
-            res.json({ success: true });
-        }
-        catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-    app.post('/voice', async (req, res) => {
-        try {
-            const { message, session } = req.body;
-            if (!message)
-                return res.status(400).json({ error: 'message is required' });
-            if (!channel)
-                return res.status(400).json({ error: noChannelError });
-            if (!voiceConfig.elevenlabsApiKey) {
-                return res.status(400).json({ error: 'Voice messaging (TTS) is not configured. ElevenLabs API key is missing. Tell the user to set ELEVENLABS_API_KEY in .env, or use text mode instead.' });
-            }
-            if (!channel.isReady())
-                return res.status(400).json({ error: 'No active chat. Send a message from the channel first.' });
-            await channel.sendChatAction('upload_voice');
-            // Resolve voice from the CALLER's session/project, not the ambient
-            // Telegram target. An automation for project X must render in X's voice
-            // even if the user last navigated the messaging UI to a different
-            // project. Falls back to the ambient voice when no session is supplied.
-            const runtimeVoice = state.getVoiceForSession(session || state.getSessionName());
-            // Render MP3 once, then transcode to OGG separately so the fallback
-            // path can reuse the MP3 buffer without re-hitting ElevenLabs.
-            const mp3Render = await renderTtsAudio(message, voiceConfig, {
-                format: 'mp3',
-                voiceIdOverride: runtimeVoice?.id,
-            });
-            let audioBuffer;
-            let archiveExt;
-            try {
-                const oggRender = await renderTtsAudio(message, voiceConfig, {
-                    format: 'ogg',
-                    voiceIdOverride: runtimeVoice?.id,
-                    sourceMp3: mp3Render.sourceMp3,
-                });
-                audioBuffer = oggRender.buffer;
-                archiveExt = '.ogg';
-            }
-            catch {
-                audioBuffer = mp3Render.buffer;
-                archiveExt = '.mp3';
-            }
-            const contextSlug = getSessionContextSlug(session || state.getSessionName());
-            audioArchive.save(audioBuffer, archiveExt, contextSlug);
-            await channel.sendVoice(audioBuffer);
-            // Switch button trails the audio (media can't carry an inline keyboard).
-            // Sent AFTER the voice so that in text+voice ("both") mode the standalone
-            // switch message never lands sandwiched right after the text reply — which
-            // already carries the button inline. It belongs to the media, so it
-            // follows the media.
-            await maybeSendSwitchMessage(session);
             res.json({ success: true });
         }
         catch (err) {
@@ -1976,326 +1897,30 @@ async function main() {
             res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
         }
     });
-    // POST /tts/generate — render TTS audio and write to disk. Never emits to
-    // any channel. Structural invariant: this handler must not reference
-    // `channel` anywhere.
-    app.post('/tts/generate', async (req, res) => {
-        try {
-            const { text, voiceId, format, outDir, filename, projectId, session } = req.body ?? {};
-            if (typeof text !== 'string' || text.length === 0) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'text must be a non-empty string' });
-            }
-            const maxText = parseInt(process.env.TTS_GENERATE_MAX_TEXT || '5000', 10);
-            if (text.length > maxText) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: `text exceeds ${maxText} characters` });
-            }
-            const fmt = format ?? 'ogg';
-            if (fmt !== 'ogg' && fmt !== 'mp3') {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: "format must be 'ogg' or 'mp3'" });
-            }
-            if (voiceId !== undefined && (typeof voiceId !== 'string' || voiceId.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'voiceId must be a non-empty string when provided' });
-            }
-            if (outDir !== undefined && typeof outDir !== 'string') {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'outDir must be a string' });
-            }
-            if (filename !== undefined && (typeof filename !== 'string' || filename.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'filename must be a non-empty string when provided' });
-            }
-            if (projectId !== undefined && (typeof projectId !== 'string' || projectId.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'projectId must be a non-empty string when provided' });
-            }
-            if (session !== undefined && (typeof session !== 'string' || session.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'session must be a non-empty string when provided' });
-            }
-            if (!voiceConfig.elevenlabsApiKey) {
-                return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
-            }
-            // An explicit projectId that matches no registry project is a caller
-            // error — fail loudly instead of silently rendering the default voice.
-            // Don't enumerate the registry in the error — defense-in-depth against a
-            // future scenario where this endpoint is reachable beyond localhost.
-            if (projectId !== undefined && !resolveCanonicalProjectId(projectId, state.getProjects())) {
-                return res.status(404).json({
-                    ok: false,
-                    error: 'unknown_project',
-                    message: `Unknown project: '${projectId}'. Pass a project id, name, or session key.`,
-                });
-            }
-            // Resolve the effective voice. Explicit voiceId always wins. Otherwise
-            // fall back to the per-project default for the given projectId/session
-            // (used for determining the default voice when none is supplied), and
-            // finally to the env default (handled inside renderTtsAudio when the
-            // override is undefined).
-            const effectiveVoiceId = voiceId ?? state.resolveContextVoice({ projectId, session })?.id;
-            const workspaceRoot = process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..');
-            const defaultDirRel = process.env.TTS_GENERATE_DEFAULT_DIR || path.join('data', 'generated-audio');
-            const dirInput = outDir ?? path.join(defaultDirRel, todayDateString());
-            const dirAbsolute = path.isAbsolute(dirInput) ? dirInput : path.resolve(workspaceRoot, dirInput);
-            const effectiveFilename = filename ?? buildGeneratedFilename({ text, voiceId: effectiveVoiceId ?? null, format: fmt });
-            const finalAbsolutePath = path.join(dirAbsolute, effectiveFilename);
-            // Sensitive-path guard runs before TTS to save ElevenLabs cost on a
-            // request that's going to be refused anyway.
-            try {
-                await preflightWritePath(finalAbsolutePath);
-            }
-            catch (err) {
-                if (err instanceof FileSendError) {
-                    return res.status(err.httpStatus).json({ ok: false, error: err.code, message: err.message });
-                }
-                throw err;
-            }
-            let buffer;
-            try {
-                const result = await speechRenderer.renderSpeech({ text, format: fmt, voiceId: effectiveVoiceId });
-                buffer = result.buffer;
-            }
-            catch (err) {
-                if (err instanceof RenderTimeoutError) {
-                    return res.status(504).json({ ok: false, error: 'render_timeout', message: err.message });
-                }
-                return res.status(502).json({ ok: false, error: 'tts_failed', message: err.message });
-            }
-            try {
-                await fs.promises.mkdir(dirAbsolute, { recursive: true });
-                const fh = await fs.promises.open(finalAbsolutePath, 'wx');
-                try {
-                    await fh.writeFile(buffer);
-                }
-                finally {
-                    await fh.close();
-                }
-            }
-            catch (err) {
-                const code = err.code;
-                if (code === 'EEXIST') {
-                    return res.status(409).json({ ok: false, error: 'file_exists', message: `File already exists: ${finalAbsolutePath}` });
-                }
-                return res.status(500).json({ ok: false, error: 'write_failed', message: err.message });
-            }
-            const relativePath = finalAbsolutePath.startsWith(workspaceRoot + path.sep)
-                ? path.relative(workspaceRoot, finalAbsolutePath)
-                : finalAbsolutePath;
-            return res.json({
-                ok: true,
-                path: relativePath,
-                absolutePath: finalAbsolutePath,
-                filename: path.basename(finalAbsolutePath),
-                format: fmt,
-                bytes: buffer.length,
-                durationMs: null,
-                voiceId: effectiveVoiceId ?? voiceConfig.elevenlabsVoiceId ?? null,
-            });
-        }
-        catch (err) {
-            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
-        }
-    });
-    // POST /tts/render — render TTS audio and return the bytes inline (feature
-    // 086, used by the bridge's speak orchestration). Never writes to disk and
-    // never emits to any channel. Structural invariant: this handler must not
-    // reference `channel` anywhere.
-    app.post('/tts/render', async (req, res) => {
-        try {
-            const { text, voiceId, format, projectId, session } = req.body ?? {};
-            if (typeof text !== 'string' || text.length === 0) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'text must be a non-empty string' });
-            }
-            const maxText = parseInt(process.env.TTS_GENERATE_MAX_TEXT || '5000', 10);
-            if (text.length > maxText) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: `text exceeds ${maxText} characters` });
-            }
-            const fmt = format ?? 'mp3';
-            if (fmt !== 'mp3') {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: "format must be 'mp3'" });
-            }
-            if (voiceId !== undefined && (typeof voiceId !== 'string' || voiceId.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'voiceId must be a non-empty string when provided' });
-            }
-            if (projectId !== undefined && (typeof projectId !== 'string' || projectId.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'projectId must be a non-empty string when provided' });
-            }
-            if (session !== undefined && (typeof session !== 'string' || session.length === 0)) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'session must be a non-empty string when provided' });
-            }
-            if (!voiceConfig.elevenlabsApiKey) {
-                return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
-            }
-            if (projectId !== undefined && !resolveCanonicalProjectId(projectId, state.getProjects())) {
-                return res.status(404).json({
-                    ok: false,
-                    error: 'unknown_project',
-                    message: `Unknown project: '${projectId}'. Pass a project id, name, or session key.`,
-                });
-            }
-            // Same voice resolution as /tts/generate: explicit → project/session → env.
-            const effectiveVoiceId = voiceId ?? state.resolveContextVoice({ projectId, session })?.id;
-            // A caller that hangs up (bridge timeout, killed CLI) must not keep a paid
-            // render queued: abort it so undispatched work is dropped from the queue.
-            const abort = new AbortController();
-            req.on('close', () => { if (!res.writableEnded)
-                abort.abort(); });
-            try {
-                const result = await speechRenderer.renderSpeech({ text, format: 'mp3', voiceId: effectiveVoiceId, signal: abort.signal });
-                return res.json({
-                    ok: true,
-                    voiceId: result.voiceId,
-                    format: 'mp3',
-                    bytes: result.buffer.length,
-                    cached: result.cached,
-                    dataBase64: result.buffer.toString('base64'),
-                });
-            }
-            catch (err) {
-                if (err instanceof RenderCancelledError) {
-                    if (res.writableEnded || res.destroyed)
-                        return;
-                    return res.status(499).json({ ok: false, error: 'render_cancelled', message: err.message });
-                }
-                if (err instanceof RenderTimeoutError) {
-                    return res.status(504).json({ ok: false, error: 'render_timeout', message: err.message });
-                }
-                return res.status(502).json({ ok: false, error: 'tts_failed', message: err.message });
-            }
-        }
-        catch (err) {
-            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
-        }
-    });
-    // --- Project voice (feature 086) ------------------------------------------
-    // GET/PUT/DELETE /projects/:id/voice — read, set or clear a project's own
-    // TTS voice without going through Telegram. `:id` accepts a project id,
-    // sessionKey, alias or display name; the literal `_session` resolves the
-    // project from `?session=` / body.session (the caller's SLYCODE_SESSION).
-    // Writes touch ONLY the project's entry (no top-level mirror) and persist
-    // strictly. Never references `channel`.
-    function resolveProjectParam(req) {
-        const raw = String(req.params.id);
-        const session = (typeof req.query.session === 'string' && req.query.session)
-            || (typeof req.body?.session === 'string' ? req.body.session : undefined);
-        if (raw === '_session')
-            return state.resolveProjectIdFrom({ session });
-        return state.resolveProjectIdFrom({ projectId: raw });
-    }
-    function projectVoicePayload(projectId) {
-        const v = state.getProjectVoice(projectId);
-        const envDefault = voiceConfig.elevenlabsVoiceId
-            ? { id: voiceConfig.elevenlabsVoiceId, name: 'env default' }
-            : null;
-        const effective = v.effective ?? envDefault;
-        const source = v.source ?? (envDefault ? 'env' : null);
-        return { ok: true, projectId, stored: v.stored, effective, source };
-    }
-    app.get('/projects/:id/voice', (req, res) => {
-        const projectId = resolveProjectParam(req);
-        if (!projectId) {
-            return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
-        }
-        res.json(projectVoicePayload(projectId));
-    });
-    app.put('/projects/:id/voice', async (req, res) => {
-        try {
-            const projectId = resolveProjectParam(req);
-            if (!projectId) {
-                return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
-            }
-            const { voiceId, voiceName } = req.body ?? {};
-            const hasId = typeof voiceId === 'string' && voiceId.length > 0;
-            const hasName = typeof voiceName === 'string' && voiceName.trim().length > 0;
-            if (hasId === hasName) {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'Provide exactly one of voiceId or voiceName' });
-            }
-            let chosen;
-            if (hasId) {
-                chosen = { id: voiceId, name: typeof voiceName === 'string' && voiceName ? voiceName : voiceId };
-            }
-            else {
-                if (!voiceConfig.elevenlabsApiKey) {
-                    return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
-                }
-                const wanted = String(voiceName).trim();
-                let candidates;
-                try {
-                    candidates = await searchVoicesStrict(voiceConfig.elevenlabsApiKey, wanted);
-                }
-                catch (err) {
-                    if (err instanceof VoicesUnavailableError) {
-                        return res.status(502).json({ ok: false, error: 'voices_unavailable', message: err.message });
-                    }
-                    throw err;
-                }
-                const exact = candidates.filter(v => v.name.trim().toLowerCase() === wanted.toLowerCase());
-                if (exact.length === 0) {
-                    return res.status(404).json({
-                        ok: false,
-                        error: 'voice_not_found',
-                        message: `No voice named exactly '${wanted}'. Use \`sly-messaging voices "${wanted}"\` to list candidates and set by id.`,
-                        candidates: candidates.slice(0, 10).map(v => ({ voice_id: v.voice_id, name: v.name, category: v.category })),
-                    });
-                }
-                if (exact.length > 1) {
-                    return res.status(409).json({
-                        ok: false,
-                        error: 'voice_ambiguous',
-                        message: `${exact.length} voices are named '${wanted}'; set by id instead.`,
-                        candidates: exact.map(v => ({ voice_id: v.voice_id, name: v.name, category: v.category })),
-                    });
-                }
-                chosen = { id: exact[0].voice_id, name: exact[0].name };
-            }
-            try {
-                state.setProjectVoice(projectId, chosen);
-            }
-            catch (err) {
-                return res.status(500).json({ ok: false, error: 'persist_failed', message: `Voice not saved: ${err.message}` });
-            }
-            res.json(projectVoicePayload(projectId));
-        }
-        catch (err) {
-            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
-        }
-    });
-    app.delete('/projects/:id/voice', (req, res) => {
-        const projectId = resolveProjectParam(req);
-        if (!projectId) {
-            return res.status(404).json({ ok: false, error: 'unknown_project', message: `Unknown project: '${req.params.id}'.` });
-        }
-        try {
-            state.clearProjectVoice(projectId);
-        }
-        catch (err) {
-            return res.status(500).json({ ok: false, error: 'persist_failed', message: `Voice not cleared: ${err.message}` });
-        }
-        res.json(projectVoicePayload(projectId));
-    });
-    // GET /voices/search — search ElevenLabs voices by name (personal + shared
-    // library) and return matches with their voice IDs. Never emits to any
-    // channel; exists so other services can resolve voice IDs without their own
-    // ElevenLabs integration.
-    app.get('/voices/search', async (req, res) => {
-        try {
-            const q = req.query.q;
-            if (q !== undefined && typeof q !== 'string') {
-                return res.status(400).json({ ok: false, error: 'bad_request', message: 'q must be a single string when provided' });
-            }
-            if (!voiceConfig.elevenlabsApiKey) {
-                return res.status(400).json({ ok: false, error: 'tts_unconfigured', message: 'ElevenLabs API key not configured' });
-            }
-            const voices = await searchVoices(voiceConfig.elevenlabsApiKey, q || undefined);
-            res.json({ ok: true, query: q || null, voices });
-        }
-        catch (err) {
-            res.status(500).json({ ok: false, error: 'internal_error', message: err.message });
-        }
-    });
+    // TTS routes (feature 087): /voice, /tts/generate, /tts/render,
+    // /projects/:id/voice, /voices/search, /tts/provider. See tts/routes.ts.
+    app.use(createTtsRouter({
+        tts,
+        state,
+        channel: () => channel,
+        noChannelError,
+        sessionName: () => state.getSessionName(),
+        contextSlug: (session) => getSessionContextSlug(session),
+        archive: (buffer, ext, slug) => { audioArchive.save(buffer, ext, slug); },
+        afterVoiceSent: (session) => maybeSendSwitchMessage(session),
+        workspaceRoot: () => process.env.SLYCODE_HOME || path.resolve(__dirname, '..', '..'),
+    }));
     app.get('/health', (_, res) => {
+        const speech = tts.health();
         res.json({
             status: 'ok',
             channel: channel?.name || null,
             ready: channel?.isReady() || false,
-            // TTS readiness (feature 086): the web speaker toggle and the bridge
-            // read this to report availability honestly.
-            tts: !!voiceConfig.elevenlabsApiKey,
+            // Legacy boolean (feature 086), kept for older readers: = speech.ready.
+            tts: speech.ready,
+            // The ONE speech-health DTO (feature 087): provider, readiness + reason,
+            // per-provider status, warnings. See tts/health.ts.
+            speech,
         });
     });
     const requestedHost = process.env.MESSAGING_LISTEN_HOST || '127.0.0.1';

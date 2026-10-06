@@ -300,15 +300,15 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-lg border border-void-700 bg-void-850 p-6 shadow-(--shadow-overlay)">
+      <div className="mx-4 max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-lg border border-line bg-surface-2 p-6 shadow-(--shadow-overlay)">
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-void-100">
+          <h2 className="text-lg font-semibold text-ink-1">
             {phase === 'summary' ? 'Project Created' : 'Add Project'}
           </h2>
           <button
             onClick={handleClose}
-            className="rounded p-1 text-void-400 hover:bg-void-800 hover:text-void-200"
+            className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
           >
             &times;
           </button>
@@ -322,21 +322,21 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 <div
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     idx <= currentPhaseIdx
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-void-700 text-void-500'
+                      ? 'bg-primary text-on-primary'
+                      : 'bg-surface-3 text-ink-3'
                   }`}
                 >
                   {idx + 1}
                 </div>
                 <span
                   className={`text-xs ${
-                    idx <= currentPhaseIdx ? 'text-void-200' : 'text-void-500'
+                    idx <= currentPhaseIdx ? 'text-ink-1' : 'text-ink-3'
                   }`}
                 >
                   {p.label}
                 </span>
                 {idx < phases.length - 1 && (
-                  <div className={`h-px w-4 ${idx < currentPhaseIdx ? 'bg-blue-600' : 'bg-void-700'}`} />
+                  <div className={`h-px w-4 ${idx < currentPhaseIdx ? 'bg-blue-600' : 'bg-surface-3'}`} />
                 )}
               </div>
             ))}
@@ -344,7 +344,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         )}
 
         {error && (
-          <div className="mb-4 rounded bg-red-900/50 p-3 text-sm text-red-300">
+          <div className="mb-4 rounded bg-red-900/50 p-3 text-sm text-danger-text">
             {error}
           </div>
         )}
@@ -355,20 +355,20 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {phase === 'details' && (
           <div className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-void-300">
-                Project Name <span className="text-red-400">*</span>
+              <label className="mb-1 block text-sm font-medium text-ink-2">
+                Project Name <span className="text-danger-text">*</span>
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="My Project"
-                className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 placeholder-void-500 focus:border-neon-blue-400 focus:outline-none"
+                className="w-full rounded border border-line bg-surface-1 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
                 data-voice-target
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-void-300">
+              <label className="mb-1 block text-sm font-medium text-ink-2">
                 Description
               </label>
               <textarea
@@ -376,28 +376,28 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What is this project about?"
                 rows={2}
-                className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 placeholder-void-500 focus:border-neon-blue-400 focus:outline-none"
+                className="w-full rounded border border-line bg-surface-1 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
                 data-voice-target
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-void-300">
-                Directory Path <span className="text-red-400">*</span>
+              <label className="mb-1 block text-sm font-medium text-ink-2">
+                Directory Path <span className="text-danger-text">*</span>
               </label>
               <input
                 type="text"
                 value={projectPath}
                 onChange={(e) => setProjectPath(e.target.value)}
                 placeholder="/home/user/projects/my-project"
-                className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 font-mono text-sm text-void-100 placeholder-void-500 focus:border-neon-blue-400 focus:outline-none"
+                className="w-full rounded border border-line bg-surface-1 px-3 py-2 font-mono text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
                 data-voice-target
               />
-              <p className="mt-1 text-xs text-void-500">
+              <p className="mt-1 text-xs text-ink-3">
                 Absolute path. Will be created if it doesn&apos;t exist.
               </p>
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-void-300">
+              <label className="mb-1 block text-sm font-medium text-ink-2">
                 Tags
               </label>
               <input
@@ -405,20 +405,20 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
                 placeholder="python, web, api (comma-separated)"
-                className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 placeholder-void-500 focus:border-neon-blue-400 focus:outline-none"
+                className="w-full rounded border border-line bg-surface-1 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent focus:outline-none"
                 data-voice-target
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={handleClose}
-                className="rounded px-4 py-2 text-sm text-void-400 hover:text-void-200"
+                className="rounded px-4 py-2 text-sm text-ink-3 hover:text-ink-1"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDetailsNext}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+                className="rounded bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary/90"
               >
                 Next
               </button>
@@ -431,7 +431,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {/* ================================================================ */}
         {phase === 'providers' && (
           <div className="space-y-4">
-            <p className="text-sm text-void-400">
+            <p className="text-sm text-ink-3">
               Which AI coding agents will you use with this project?
             </p>
             <div className="space-y-2">
@@ -443,15 +443,15 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                     onClick={() => toggleProvider(p.id)}
                     className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                       selected
-                        ? 'border-blue-500/50 bg-blue-600/10'
-                        : 'border-void-700 bg-void-800/50 hover:border-void-600'
+                        ? 'border-accent/50 bg-accent/10'
+                        : 'border-line bg-surface-2 hover:border-line-strong'
                     }`}
                   >
                     <div
                       className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
                         selected
-                          ? 'border-blue-500 bg-blue-600 text-white'
-                          : 'border-void-600 bg-void-800'
+                          ? 'border-accent bg-primary text-on-primary'
+                          : 'border-line-strong bg-surface-1'
                       }`}
                     >
                       {selected && (
@@ -462,31 +462,31 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-void-100">{p.name}</span>
-                        <span className="rounded bg-void-700 px-1.5 py-0.5 font-mono text-xs text-void-400">
+                        <span className="text-sm font-medium text-ink-1">{p.name}</span>
+                        <span className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-ink-3">
                           {p.filename}
                         </span>
                       </div>
-                      <span className="text-xs text-void-500">{p.description}</span>
+                      <span className="text-xs text-ink-3">{p.description}</span>
                     </div>
                   </button>
                 );
               })}
             </div>
-            <p className="text-xs text-void-500">
+            <p className="text-xs text-ink-3">
               Each selected provider gets its own instruction file with shared project conventions and provider-specific tips.
             </p>
             <div className="flex justify-between pt-2">
               <button
                 onClick={() => setPhase('details')}
-                className="rounded px-4 py-2 text-sm text-void-400 hover:text-void-200"
+                className="rounded px-4 py-2 text-sm text-ink-3 hover:text-ink-1"
               >
                 Back
               </button>
               <button
                 onClick={handleProvidersNext}
                 disabled={analyzing}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                className="rounded bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary/90 disabled:opacity-50"
               >
                 {analyzing ? 'Analyzing...' : 'Next'}
               </button>
@@ -500,15 +500,15 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {phase === 'review' && analysis && (
           <div className="space-y-4">
             {isNewDir ? (
-              <div className="rounded border border-void-700 bg-void-800/50 p-3">
-                <p className="text-sm text-void-300">
+              <div className="rounded border border-line bg-surface-2 p-3">
+                <p className="text-sm text-ink-2">
                   {!analysis.exists
                     ? 'Directory does not exist — it will be created with full scaffolding.'
                     : 'Directory is empty — full scaffolding will be applied.'}
                 </p>
               </div>
             ) : (
-              <p className="text-sm text-void-400">
+              <p className="text-sm text-ink-3">
                 Existing project detected. Review what will be added:
               </p>
             )}
@@ -530,7 +530,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 return (
                   <div
                     key={group.id}
-                    className="overflow-hidden rounded border border-void-700 bg-void-800/30"
+                    className="overflow-hidden rounded border border-line bg-surface-2"
                   >
                     {/* Group header */}
                     <div className="flex items-center justify-between px-3 py-2">
@@ -539,7 +539,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                         className="flex min-w-0 flex-1 items-center gap-2 text-left"
                       >
                         <svg
-                          className={`h-3 w-3 flex-shrink-0 text-void-500 transition-transform ${
+                          className={`h-3 w-3 flex-shrink-0 text-ink-3 transition-transform ${
                             expanded ? 'rotate-90' : ''
                           }`}
                           fill="currentColor"
@@ -552,10 +552,10 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                           />
                         </svg>
                         <div className="min-w-0">
-                          <span className="text-sm font-medium text-void-200">
+                          <span className="text-sm font-medium text-ink-1">
                             {group.name}
                           </span>
-                          <span className="ml-2 text-xs text-void-500">
+                          <span className="ml-2 text-xs text-ink-3">
                             {group.items.length} items
                           </span>
                         </div>
@@ -563,12 +563,12 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                       <div className="flex items-center gap-2">
                         {/* Status badges */}
                         {presentCount > 0 && (
-                          <span className="rounded-full bg-green-900/30 px-2 py-0.5 text-xs text-green-400">
+                          <span className="rounded-full bg-green-900/30 px-2 py-0.5 text-xs text-st-done">
                             {presentCount} ok
                           </span>
                         )}
                         {missingCount > 0 && (
-                          <span className="rounded-full bg-blue-900/30 px-2 py-0.5 text-xs text-blue-400">
+                          <span className="rounded-full bg-accent/30 px-2 py-0.5 text-xs text-accent">
                             {missingCount} new
                           </span>
                         )}
@@ -578,10 +578,10 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                             onClick={() => toggleGroupAction(group.id)}
                             className={`rounded px-2 py-0.5 text-xs font-medium ${
                               activeCount === actionableCount
-                                ? 'bg-blue-600/20 text-blue-400'
+                                ? 'bg-accent/20 text-accent'
                                 : activeCount === 0
-                                  ? 'bg-void-700 text-void-400'
-                                  : 'bg-blue-600/10 text-blue-400'
+                                  ? 'bg-surface-3 text-ink-3'
+                                  : 'bg-accent/10 text-accent'
                             }`}
                           >
                             {activeCount === actionableCount ? 'All' : activeCount === 0 ? 'None' : `${activeCount}/${actionableCount}`}
@@ -592,14 +592,14 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
 
                     {/* Group description */}
                     {expanded && (
-                      <div className="border-t border-void-700/50 px-3 py-1.5">
-                        <p className="text-xs text-void-500">{group.description}</p>
+                      <div className="border-t border-line px-3 py-1.5">
+                        <p className="text-xs text-ink-3">{group.description}</p>
                       </div>
                     )}
 
                     {/* Expanded items */}
                     {expanded && (
-                      <div className="border-t border-void-700/50">
+                      <div className="border-t border-line">
                         {[...group.items].sort((a, b) => (b.essential ? 1 : 0) - (a.essential ? 1 : 0)).map((item) => {
                           const action = itemActions[item.path] || 'skip';
                           const isMissing = item.status === 'missing';
@@ -610,34 +610,34 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                           return (
                             <div
                               key={item.path}
-                              className={`flex flex-col border-b border-void-700/30 px-3 py-1.5 last:border-0 ${item.essential ? 'bg-amber-900/10' : ''}`}
+                              className={`flex flex-col border-b border-line px-3 py-1.5 last:border-0 ${item.essential ? 'bg-amber-900/10' : ''}`}
                             >
                               <div className="flex items-center justify-between">
                                 <div className="flex min-w-0 items-center gap-2">
                                   {isMissing && (
                                     <Tooltip content="Will be created">
-                                      <span className="flex-shrink-0 text-blue-400">
+                                      <span className="flex-shrink-0 text-accent">
                                         +
                                       </span>
                                     </Tooltip>
                                   )}
                                   {isPresent && (
                                     <Tooltip content={hasDifferentVersion ? `Local: ${item.localVersion}, Store: ${item.masterVersion}` : 'Up to date'}>
-                                      <span className="flex-shrink-0 text-green-400">
+                                      <span className="flex-shrink-0 text-st-done">
                                         &#x2713;
                                       </span>
                                     </Tooltip>
                                   )}
-                                  <span className="truncate font-mono text-xs text-void-300">
+                                  <span className="truncate font-mono text-xs text-ink-2">
                                     {item.path}
                                   </span>
                                   {item.essential && (
-                                    <span className="flex-shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                                    <span className="flex-shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-warn-text">
                                       Required
                                     </span>
                                   )}
                                   {hasDifferentVersion && (
-                                    <span className="flex-shrink-0 text-xs text-void-600">
+                                    <span className="flex-shrink-0 text-xs text-ink-3">
                                       v{item.localVersion}
                                     </span>
                                   )}
@@ -647,8 +647,8 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                                     onClick={() => toggleAction(item.path)}
                                     className={`flex-shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
                                       action === 'skip'
-                                        ? 'bg-void-700 text-void-400'
-                                        : 'bg-blue-600/20 text-blue-400'
+                                        ? 'bg-surface-3 text-ink-3'
+                                        : 'bg-accent/20 text-accent'
                                     }`}
                                   >
                                     {action === 'skip' ? 'Skip' : 'Create'}
@@ -657,13 +657,13 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                               </div>
                               {/* Warning when essential skill is skipped */}
                               {item.essential && isMissing && action === 'skip' && (
-                                <p className="mt-1 text-[11px] text-amber-400/80">
+                                <p className="mt-1 text-[11px] text-warn-text/80">
                                   SlyCode requires this skill to function properly.
                                 </p>
                               )}
                               {/* Warning when essential skill already exists (may be overwritten by updates) */}
                               {item.essential && isPresent && (
-                                <p className="mt-1 text-[11px] text-void-500">
+                                <p className="mt-1 text-[11px] text-ink-3">
                                   Exists — will be kept. Updates are managed via CLI Assets.
                                 </p>
                               )}
@@ -680,10 +680,10 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
             {/* Warning if essential skills are being skipped */}
             {analysis.items.some(i => i.essential && i.status === 'missing' && itemActions[i.path] === 'skip') && (
               <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                <p className="text-xs font-medium text-amber-400">
+                <p className="text-xs font-medium text-warn-text">
                   Essential skills skipped
                 </p>
-                <p className="mt-0.5 text-[11px] text-amber-400/70">
+                <p className="mt-0.5 text-[11px] text-warn-text/70">
                   Kanban and messaging skills are required for SlyCode&apos;s core functionality (card management, Telegram integration). The project will scaffold but some features won&apos;t work.
                 </p>
               </div>
@@ -692,7 +692,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
             <div className="flex justify-between pt-2">
               <button
                 onClick={() => setPhase('providers')}
-                className="rounded px-4 py-2 text-sm text-void-400 hover:text-void-200"
+                className="rounded px-4 py-2 text-sm text-ink-3 hover:text-ink-1"
               >
                 Back
               </button>
@@ -711,8 +711,8 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {/* ================================================================ */}
         {phase === 'creating' && (
           <div className="py-8 text-center">
-            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-void-600 border-t-neon-blue-400" />
-            <p className="text-sm text-void-400">Scaffolding project...</p>
+            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-line-strong border-t-neon-blue-400" />
+            <p className="text-sm text-ink-3">Scaffolding project...</p>
           </div>
         )}
 
@@ -722,7 +722,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
         {phase === 'summary' && createResult && (
           <div className="space-y-4">
             <div className="rounded border border-green-800 bg-green-900/30 p-4">
-              <p className="font-medium text-green-300">
+              <p className="font-medium text-st-done">
                 Project &quot;{name}&quot; created successfully!
               </p>
             </div>
@@ -739,25 +739,25 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
                 <div className="space-y-3">
                   {created.length > 0 && (
                     <div>
-                      <p className="mb-1 text-xs font-medium text-green-400">
+                      <p className="mb-1 text-xs font-medium text-st-done">
                         Created ({created.length})
                       </p>
-                      <div className="rounded border border-void-700 bg-void-800/30">
+                      <div className="rounded border border-line bg-surface-2">
                         {created.map((r: ScaffoldResult, i: number) => (
                           <div
                             key={i}
-                            className="border-b border-void-700/30 px-3 py-1 last:border-0"
+                            className="border-b border-line px-3 py-1 last:border-0"
                           >
-                            <span className="font-mono text-xs text-void-300">
+                            <span className="font-mono text-xs text-ink-2">
                               {r.path}
                             </span>
                             {r.count != null && (
-                              <span className="ml-2 text-xs text-void-500">
+                              <span className="ml-2 text-xs text-ink-3">
                                 ({r.count} items)
                               </span>
                             )}
                             {r.seedCards != null && (
-                              <span className="ml-2 text-xs text-void-500">
+                              <span className="ml-2 text-xs text-ink-3">
                                 ({r.seedCards} seed cards)
                               </span>
                             )}
@@ -769,16 +769,16 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
 
                   {skipped.length > 0 && (
                     <div>
-                      <p className="mb-1 text-xs font-medium text-void-500">
+                      <p className="mb-1 text-xs font-medium text-ink-3">
                         Skipped ({skipped.length})
                       </p>
-                      <div className="rounded border border-void-700/50 bg-void-800/20">
+                      <div className="rounded border border-line bg-surface-2">
                         {skipped.map((r: ScaffoldResult, i: number) => (
                           <div
                             key={i}
-                            className="border-b border-void-700/30 px-3 py-1 last:border-0"
+                            className="border-b border-line px-3 py-1 last:border-0"
                           >
-                            <span className="font-mono text-xs text-void-500">
+                            <span className="font-mono text-xs text-ink-3">
                               {r.path}
                             </span>
                           </div>
@@ -791,9 +791,9 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
             })()}
 
             {/* Next steps */}
-            <div className="rounded border border-void-700 bg-void-800/30 p-3">
-              <p className="mb-2 text-xs font-medium text-void-300">Next steps:</p>
-              <ul className="space-y-1 text-xs text-void-400">
+            <div className="rounded border border-line bg-surface-2 p-3">
+              <p className="mb-2 text-xs font-medium text-ink-2">Next steps:</p>
+              <ul className="space-y-1 text-xs text-ink-3">
                 <li>&#8226; Navigate to the project to pick up your setup cards</li>
                 <li>
                   &#8226; Customize your{' '}
@@ -810,7 +810,7 @@ export function AddProjectModal({ open, onClose, onCreated }: AddProjectModalPro
             <div className="flex justify-end">
               <button
                 onClick={handleClose}
-                className="rounded bg-void-700 px-4 py-2 text-sm font-medium text-void-200 hover:bg-void-600"
+                className="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-ink-1 hover:bg-surface-3"
               >
                 Close
               </button>

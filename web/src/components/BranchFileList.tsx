@@ -63,7 +63,7 @@ export function BranchFileList({ files, hue, dark }: BranchFileListProps) {
             <div className="mx-2 my-1" style={{ borderTop: `1px solid ${sectionBorder}` }} />
           )}
           <div className="px-3 pt-1.5 pb-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+            <span className="text-[10px] font-semibold text-white/40">
               {group.label}
               <span className="ml-1 text-white/25">{group.items.length}</span>
             </span>

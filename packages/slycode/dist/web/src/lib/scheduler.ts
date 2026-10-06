@@ -19,6 +19,7 @@ import { loadRegistry } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
 import { probeBridge, waitForBridgeReady } from './bridge-readiness';
+import { isSchedulerDisabled } from './scheduler-switch';
 import { computeSessionKey } from './session-keys';
 import { readStatus, formatStatusForPrompt } from './status';
 import { fetchSpeakerState, formatSpeakerLine, type SpeakerSnapshot } from './speaker-line';
@@ -29,6 +30,7 @@ import { appendEvent } from './event-log';
 import type { ScheduledPrompt } from './types';
 import { SCHEDULED_PROMPT_LIMITS, buildScheduledPromptBody, classifyScheduledPrompt } from './scheduled-prompts';
 import { mutateCardScheduledPrompts } from './scheduled-prompts-store';
+import { formatSessionHeaderLine, planAutomationSession, rankSessionStatus, type SessionProbe } from './automation-freshness';
 
 /**
  * Load env vars from the project root .env file if not already set.
@@ -470,6 +472,7 @@ function buildRunHeader(
   config: AutomationConfig,
   trigger: 'scheduled' | 'manual',
   speakerState: SpeakerSnapshot = 'unknown',
+  sessionLine: string | null = null,
 ): string {
   const now = new Date();
   const lines: string[] = ['=== AUTOMATION RUN ==='];
@@ -493,6 +496,9 @@ function buildRunHeader(
   } else {
     lines.push('Last run: never');
   }
+
+  // Fresh or resumed, and the conversation's age (card #0373).
+  if (sessionLine) lines.push(sessionLine);
 
   // Status line — quoted as untrusted card metadata to mitigate prompt-injection-via-status.
   // Skipped entirely when no status is set.
@@ -731,59 +737,64 @@ export async function triggerAutomation(
   const cwd = config.workingDirectory || projectPath;
   const isFreshConfig = config.freshSession || false;
 
-  // Probe bridge for any existing session under canonical OR legacy alias and
-  // pick the one we should re-attach to. Rules:
-  //   1. freshSession=true → always use canonical (we're going to stop+restart
-  //      anyway, and writing under alias would perpetuate legacy naming).
-  //   2. canonical exists → prefer canonical (converge to canonical going
-  //      forward, even if alias also exists from earlier duplicate state).
-  //   3. only alias exists → re-attach to alias to avoid creating a parallel
-  //      canonical session.
+  // Probe bridge for any existing session under canonical OR legacy alias;
+  // planAutomationSession (lib/automation-freshness.ts — the CLI's
+  // `automation run` mirrors it) picks the record and decides fresh or resume
+  // on that record's conversation (card #0373). Rules:
+  //   1. freshSession=true → no probe, always canonical (we're going to
+  //      stop+restart anyway, and writing under alias would perpetuate legacy
+  //      naming).
+  //   2. canonical exists → prefer canonical unless the alias ranks strictly
+  //      higher by status (converge to canonical going forward).
+  //   3. only alias exists / alias is the live one → work on the alias. A due
+  //      every-N-days fresh start rolls the alias over in place rather than
+  //      creating a canonical conversation beside a still-running alias.
   const aliasName = projectId !== sessionKey
     ? `${projectId}:${provider}:card:${card.id}`
     : null;
-  let sessionName = canonicalName;
-  if (!isFreshConfig && aliasName) {
-    const probe = async (name: string): Promise<unknown | null> => {
+  let canonicalProbe: SessionProbe | null = null;
+  let aliasProbe: SessionProbe | null = null;
+  if (!isFreshConfig) {
+    const probe = async (name: string): Promise<SessionProbe> => {
       try {
         const res = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(name)}`);
-        if (!res.ok) return null;
-        return await res.json(); // bridge returns 200/null for missing
+        if (!res.ok) return { ok: false, info: null };
+        return { ok: true, info: await res.json() }; // bridge returns 200/null for missing
       } catch {
-        return null;
+        return { ok: false, info: null };
       }
     };
-    const [canonicalInfo, aliasInfo] = await Promise.all([
+    [canonicalProbe, aliasProbe] = await Promise.all([
       probe(canonicalName),
-      probe(aliasName),
+      aliasName ? probe(aliasName) : Promise.resolve(null),
     ]);
-    // Rank candidates by status — operating on the actual live session is
-    // more important than converging to canonical naming. Use canonical only
-    // when it ranks at least as high as alias, so the canonical-running case
-    // wins the tie and we drift toward canonical going forward.
-    const rank = (info: unknown): number => {
-      if (!info || typeof info !== 'object') return 0;
-      const status = (info as { status?: string }).status;
-      if (status === 'running' || status === 'detached') return 3;
-      if (status === 'creating') return 2;
-      if (status === 'stopped') return 1;
-      return 0;
-    };
-    const cRank = rank(canonicalInfo);
-    const aRank = rank(aliasInfo);
-    const cStatus = (canonicalInfo as { status?: string } | null)?.status ?? 'missing';
-    const aStatus = (aliasInfo as { status?: string } | null)?.status ?? 'missing';
-    if (aRank > cRank) {
-      sessionName = aliasName;
-      slog(`Re-attaching to alias ${aliasName} (alias=${aStatus} > canonical=${cStatus})`);
-    } else if (cRank > 0 && aRank > 0) {
+  }
+
+  const plan = planAutomationSession({
+    config, canonicalName, aliasName, canonical: canonicalProbe, alias: aliasProbe,
+    now: new Date(), timeZone: CONFIGURED_TIMEZONE,
+  });
+  const sessionName = plan.sessionName;
+  const freshness = plan.freshness;
+  if (aliasName && aliasProbe) {
+    const cStatus = canonicalProbe?.info?.status ?? 'missing';
+    const aStatus = aliasProbe.info?.status ?? 'missing';
+    if (plan.selected === 'alias') {
+      slog(`Re-attaching to alias ${aliasName} (alias=${aStatus} > canonical=${cStatus})${freshness.fresh ? ' — fresh start rolls the alias over' : ''}`);
+    } else if (rankSessionStatus(canonicalProbe?.info ?? null) > 0 && rankSessionStatus(aliasProbe.info) > 0) {
       slog(`Both canonical and alias exist for ${card.id}; preferring canonical (canonical=${cStatus}, alias=${aStatus})`);
     }
+  }
+  if (freshness.reason === 'age' || freshness.reason === 'age-unknown') {
+    slog(`Fresh start for ${card.id}: conversation ${freshness.reason === 'age' ? `${freshness.ageDays}d old` : 'start unknown'} (limit ${config.freshSessionDays}d)`);
+  } else if (freshness.reason === 'probe-failed') {
+    swarn(`Session probe failed for ${card.id}; resuming (fresh-session age not checked)`);
   }
 
   // Build prompt with run header + card context + description as instruction
   const contextLines: string[] = [
-    buildRunHeader(card, config, options.trigger, await fetchSpeakerState(BRIDGE_URL)),
+    buildRunHeader(card, config, options.trigger, await fetchSpeakerState(BRIDGE_URL),
+      formatSessionHeaderLine(freshness, config, CONFIGURED_TIMEZONE)),
     '',
   ];
   if (card.areas.length > 0) {
@@ -805,7 +816,7 @@ export async function triggerAutomation(
     fullPrompt += '\n\nAfter completing the task, send a summary of the results using the messaging skill: sly-messaging send "<your summary>"';
   }
 
-  const isFresh = isFreshConfig;
+  const isFresh = freshness.fresh;
   const startTime = Date.now();
 
   // Tracking for automation log
@@ -823,6 +834,8 @@ export async function triggerAutomation(
       provider,
       sessionName,
       fresh: isFresh,
+      freshReason: freshness.reason,
+      ...(freshness.conversationStartedAt ? { conversationStartedAt: freshness.conversationStartedAt } : {}),
       bridgeRequest: bridgeRequestInfo,
       livenessCheck: livenessInfo,
       delivery: deliveryInfo,
@@ -1511,6 +1524,10 @@ async function runTickBody(): Promise<void> {
  * Start the scheduler
  */
 export function startScheduler(): void {
+  // SLYCODE_SCHEDULER=off: this instance never runs automations. Guarded here
+  // (not only in instrumentation.ts) because getSchedulerStatus() auto-starts
+  // the scheduler whenever the Automations screen polls status.
+  if (isSchedulerDisabled()) return;
   // Clean up any existing interval (e.g. from a previous HMR version)
   const existing = getCheckTimer();
   if (existing) {
@@ -1583,7 +1600,7 @@ export function getSchedulerStatus(): {
   lastCheck: string | null;
   activeKickoffs: string[];
 } {
-  if (!state.running) {
+  if (!state.running && !isSchedulerDisabled()) {
     slog('Auto-starting on status check');
     startScheduler();
   }

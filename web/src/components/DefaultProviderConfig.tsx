@@ -226,8 +226,8 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
           aria-label="Default provider & model"
           className={`relative flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border p-2 transition-all ${
             open
-              ? 'border-neon-blue-400/50 bg-neon-blue-400/10 text-neon-blue-400'
-              : 'border-void-200/40 bg-transparent text-void-500 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400'
+              ? 'border-transparent bg-surface-3 text-ink-1'
+              : 'border-transparent text-ink-3 hover:bg-surface-3 hover:text-ink-1'
           }`}
         >
           {/* CPU/chip icon — the session engine */}
@@ -247,17 +247,17 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
       {open && def && (
         <div
           ref={popoverRef}
-          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-void-200/60 bg-void-50 p-3 shadow-(--shadow-overlay) dark:border-void-600 dark:bg-void-800"
+          className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-line bg-surface-1 p-3 shadow-(--shadow-overlay)"
         >
           <div className="mb-2 flex items-baseline justify-between">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">
+            <span className="text-[10px] font-medium text-ink-3">
               Project default{inherited ? ' · inherited' : ''}
             </span>
             <span
               aria-live="polite"
               className={`text-[10px] transition-opacity ${
-                saveState === 'saved' ? 'text-emerald-400 opacity-100'
-                : saveState === 'error' ? 'text-red-400 opacity-100'
+                saveState === 'saved' ? 'text-st-done opacity-100'
+                : saveState === 'error' ? 'text-danger-text opacity-100'
                 : 'opacity-0'
               }`}
             >
@@ -294,7 +294,7 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
           {/* Model — known list + free-text custom entry (+ on-demand Refresh for providers that enumerate) */}
           <div className="mt-3">
             <div className="mb-1 flex items-baseline justify-between">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-void-500">Model</span>
+              <span className="text-[10px] font-medium text-ink-3">Model</span>
               {canRefresh && (
                 <Tooltip content={currentProvider?.model?.refreshedAt ? `Last refreshed ${relativeTime(currentProvider.model.refreshedAt)}` : `Ask ${shortName} which models are available here`}>
                   <span className="inline-flex">
@@ -302,7 +302,7 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
                       type="button"
                       onClick={refreshModels}
                       disabled={refreshing}
-                      className="flex items-center gap-1 text-[10px] font-medium text-void-500 transition-colors hover:text-neon-blue-400 disabled:cursor-progress disabled:text-void-500"
+                      className="flex items-center gap-1 text-[10px] font-medium text-ink-3 transition-colors hover:text-accent disabled:cursor-progress disabled:text-void-500"
                     >
                       <svg className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15.4A7 7 0 0018.4 12M18.4 8.6A7 7 0 005.6 12" />
@@ -325,7 +325,7 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
                 }}
                 placeholder="model id, e.g. claude-fable-5"
                 spellCheck={false}
-                className="w-full rounded border border-neon-blue-400/40 bg-void-100 px-2 py-1.5 font-mono text-xs text-void-900 outline-none placeholder:text-void-500 dark:bg-void-900 dark:text-void-200"
+                className="w-full rounded border border-accent/40 bg-surface-2 px-2 py-1.5 font-mono text-xs text-ink-1 outline-none placeholder:text-void-500"
               />
             ) : (
               <select
@@ -340,7 +340,7 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
                   }
                   persist({ ...def, model: v || undefined });
                 }}
-                className="w-full rounded border border-void-300 bg-void-100 px-2 py-1.5 text-xs text-void-900 dark:border-void-600 dark:bg-void-900 dark:text-void-300"
+                className="w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 text-xs text-ink-1"
               >
                 <option value="">{shortName} default</option>
                 {groups.map((g, i) => g.label
@@ -360,19 +360,19 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
               </p>
             )}
             {canRefresh && models.length === 0 && !refreshNote && !customMode && (
-              <p className="mt-1 text-[10px] leading-snug text-void-500">
+              <p className="mt-1 text-[10px] leading-snug text-ink-3">
                 No models listed yet. Refresh asks {shortName} what it can reach from this machine; until then it uses its own default.
               </p>
             )}
             {isCustomModel && !customMode && (
-              <p className="mt-1 text-[10px] leading-snug text-void-500">
+              <p className="mt-1 text-[10px] leading-snug text-ink-3">
                 Custom id — edit via Custom… (clear to delete), or pick Provider default.
               </p>
             )}
           </div>
 
           {/* Permissions */}
-          <label className="mt-3 flex cursor-pointer items-center gap-1.5 text-xs text-void-500">
+          <label className="mt-3 flex cursor-pointer items-center gap-1.5 text-xs text-ink-3">
             <input
               type="checkbox"
               checked={def.skipPermissions}
@@ -382,7 +382,7 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
             {currentProvider?.permissions.label || 'Skip permissions'}
           </label>
 
-          <p className="mt-2 border-t border-void-200/60 pt-2 text-[10px] leading-snug text-void-500 dark:border-void-700/60">
+          <p className="mt-2 border-t border-line pt-2 text-[10px] leading-snug text-ink-3">
             {inherited
               ? 'Showing the last-set default — saving any change pins it to this project.'
               : 'Used by every new session in this project. Pick a different provider at start time without changing this.'}
@@ -391,8 +391,8 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
           {/* Cross-project prompts (feature #0350) — a policy this project owns, not a session default.
               Kept visually apart from the provider defaults above: its own rule, its own save state. */}
           {crossProject !== null && (
-            <div className="mt-3 border-t border-void-200/60 pt-2 dark:border-void-700/60">
-              <label className="flex cursor-pointer items-start gap-1.5 text-xs text-void-500">
+            <div className="mt-3 border-t border-line pt-2">
+              <label className="flex cursor-pointer items-start gap-1.5 text-xs text-ink-3">
                 <input
                   type="checkbox"
                   checked={crossProject}
@@ -401,14 +401,14 @@ export function DefaultProviderConfig({ projectId }: { projectId: string }) {
                   className="mt-0.5 rounded border-void-600"
                 />
                 <span className="flex-1">
-                  <span className={crossProject ? 'text-void-700 dark:text-void-200' : ''}>Accept cross-project prompts</span>
-                  <span className="mt-0.5 block text-[10px] leading-snug text-void-500">
+                  <span className={crossProject ? 'text-ink-2' : ''}>Accept cross-project prompts</span>
+                  <span className="mt-0.5 block text-[10px] leading-snug text-ink-3">
                     Agents in other projects can send prompts to this project&apos;s cards. Off by default.
                   </span>
                 </span>
               </label>
               {crossSaveState === 'error' && (
-                <p role="alert" className="mt-1 text-[10px] leading-snug text-red-400">
+                <p role="alert" className="mt-1 text-[10px] leading-snug text-danger-text">
                   Couldn&apos;t save. The setting is back to what&apos;s on disk.
                 </p>
               )}

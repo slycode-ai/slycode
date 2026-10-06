@@ -11,15 +11,20 @@ import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 import { AddProjectModal } from './AddProjectModal';
 import { GlobalClaudePanel } from './GlobalClaudePanel';
 import { SearchBar } from './SearchBar';
+import { DashboardAttention } from './DashboardAttention';
+import { NewOutputList, type NewOutputItem } from './NewOutputList';
 import { CliAssetsTab } from './CliAssetsTab';
 import { AtlasRollup } from './AtlasRollup';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
+import { VoiceSettingsButton } from './VoiceSettingsButton';
 import { LogoutButton } from './LogoutButton';
 import { ProviderConfigModal } from './ProviderConfigModal';
 import { VersionUpdateToast } from './VersionUpdateToast';
 import { sumProjectActivityCounts } from '@/lib/session-keys';
 import { ChangelogModal } from './ChangelogModal';
+import { fetchWhatsNew, openWhatsNew, WHATS_NEW_SEEN_EVENT } from '@/lib/whats-new-client';
+import { DISCORD_INVITE_URL } from '@/lib/community-links';
 import { useVoice } from '@/contexts/VoiceContext';
 import { formatDateTime } from '@/lib/date-format';
 import Tooltip from './Tooltip';
@@ -38,12 +43,17 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const voice = useVoice();
   const [bridgeCounts, setBridgeCounts] = useState<Record<string, number> | null>(null);
   const [unseenCounts, setUnseenCounts] = useState<Record<string, number>>({});
+  const [unseenCards, setUnseenCards] = useState<Record<string, { id: string; number?: number; title: string }[]>>({});
+  // Open "new output" list: anchored to the chip that opened it; projectId null = all projects.
+  const [newOutputOpen, setNewOutputOpen] = useState<{ anchor: HTMLElement; projectId: string | null } | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('projects');
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const [slycodeVersion, setSlycodeVersion] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
+  // What's new (#0379): footer reopen link, with a dot until this release's splash is dismissed.
+  const [whatsNew, setWhatsNew] = useState<{ available: boolean; unseen: boolean }>({ available: false, unseen: false });
   const [showProviderConfig, setShowProviderConfig] = useState(false);
 
   // Auto-open the global terminal when arriving via /global or /?openGlobal=1.
@@ -69,6 +79,16 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       setActiveTab('cli-assets');
     }
   }, [requestedTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWhatsNew().then(status => {
+      if (!cancelled && status) setWhatsNew({ available: !!status.latest, unseen: status.unseen });
+    });
+    const onSeen = () => setWhatsNew(w => ({ ...w, unseen: false }));
+    window.addEventListener(WHATS_NEW_SEEN_EVENT, onSeen);
+    return () => { cancelled = true; window.removeEventListener(WHATS_NEW_SEEN_EVENT, onSeen); };
+  }, []);
 
   // Fetch SlyCode version on mount
   useEffect(() => {
@@ -158,6 +178,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       if (res.ok) {
         const body = await res.json();
         if (body?.counts) setUnseenCounts(body.counts as Record<string, number>);
+        if (body?.cards) setUnseenCards(body.cards as Record<string, { id: string; number?: number; title: string }[]>);
       }
     } catch {
       // Leave the last known counts alone rather than flashing them to zero.
@@ -314,181 +335,167 @@ export function Dashboard({ data: initialData }: DashboardProps) {
     }
   }, [dropIndex, accessibleProjects, inaccessibleProjects, data.projects]);
 
-  // Stat badge helper
-  function statBadge(value: number | undefined, threshold: number) {
-    if (value === undefined) return 'text-void-950 dark:text-void-100';
-    return value > threshold
-      ? 'text-neon-orange-500 dark:text-neon-orange-400'
-      : 'text-void-950 dark:text-void-100';
-  }
+  const workingNow = data.projects.reduce((n, p) => n + (p.activeSessions ?? 0), 0);
+  const newOutput = Object.values(unseenCounts).reduce((n, c) => n + c, 0);
+
+  // Unseen output is a nice-to-know, not the headline: a quiet chip in the
+  // subline and on each tile, each opening a short list of the cards.
+  const newOutputItems = (projectId: string | null): NewOutputItem[] =>
+    data.projects
+      .filter((p) => projectId === null || p.id === projectId)
+      .flatMap((p) => (unseenCards[p.id] ?? []).map((c) => ({ projectId: p.id, projectName: p.name, cardId: c.id, number: c.number, title: c.title })));
+  const openNewOutput = (anchor: HTMLElement, projectId: string | null) => {
+    if (newOutputOpen?.anchor === anchor) { setNewOutputOpen(null); return; }
+    const items = newOutputItems(projectId);
+    // A tile with exactly one new card goes straight to it.
+    if (projectId !== null && items.length === 1) {
+      router.push(`/project/${items[0].projectId}?card=${items[0].cardId}`);
+      return;
+    }
+    setNewOutputOpen({ anchor, projectId });
+  };
+  const closeNewOutput = useCallback(() => setNewOutputOpen(null), []);
 
   return (
-    <div className="relative min-h-screen bg-void-50 dark:bg-void-950">
-      {/* Subtle radial gradient overlay (dark mode only) */}
-      <div
-        className="pointer-events-none fixed inset-0 hidden dark:block"
-        style={{
-          background: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,191,255,0.04) 0%, rgba(255,140,0,0.02) 30%, transparent 70%)',
-        }}
-      />
-
-      {/* Connection status + theme toggle + version update toast */}
+    <div className="relative min-h-screen bg-page">
+      {/* Connection status + version update toast */}
       <ConnectionStatusIndicator position="top-right" />
       <VersionUpdateToast />
-      <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-        <Tooltip content="Provider config" placement="bottom">
-          <button
-            onClick={() => setShowProviderConfig(true)}
-            aria-label="Provider config"
-            className="rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400"
-          >
-            {/* Sliders icon — ordering + toggles */}
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m2 0h1M13 4v4M7 10v4M17 16v4" />
-            </svg>
-          </button>
-        </Tooltip>
-        <ThemeToggle />
-        <LogoutButton />
-      </div>
       {showProviderConfig && <ProviderConfigModal onClose={() => setShowProviderConfig(false)} />}
 
-      {/* Hero Section */}
-      <div className="relative flex flex-col items-center pb-2 pt-10">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/slycode_light.webp"
-          alt="SlyCode"
-          className="logo-breathe h-auto w-[200px] mix-blend-multiply dark:hidden"
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/slycode.webp"
-          alt="SlyCode"
-          className="logo-breathe hidden h-auto w-[200px] mix-blend-lighten dark:block"
-        />
-        <p
-          className="mt-1 text-xs font-medium uppercase tracking-[0.3em] text-neon-blue-500 dark:text-neon-blue-400/70"
-          style={{ textShadow: '0 0 8px rgba(0,191,255,0.3)' }}
-        >
-          Code Den
-        </p>
-
-        {/* Search bar */}
-        <div className="mx-auto mt-6 flex w-full max-w-lg items-center gap-3">
-          <SearchBar
-            onResultClick={(result) => {
-              // Archived hits need the board in archived mode or the card isn't
-              // loaded and the deep-link silently finds nothing (feature 082).
-              const archived = result.isArchived ? '&archived=1' : '';
-              window.location.href = `/project/${result.projectId}?card=${result.cardId}${archived}`;
-            }}
-          />
-          {isLive && (
-            <span className="flex shrink-0 items-center gap-1.5 text-xs text-neon-blue-500 dark:text-neon-blue-400">
-              <span
-                className="h-2 w-2 rounded-full bg-neon-blue-400 animate-pulse"
-                style={{ boxShadow: '0 0 6px rgba(0,191,255,0.6)' }}
-              />
-              Live
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Stats Bar */}
-      <div className="border-b border-void-100 dark:border-void-700">
-        <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {/* Top bar: brand, tabs, search, settings */}
+      <header className="fox-rule sticky top-0 z-20 bg-surface-1">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-5 sm:px-6">
+          <span className="flex shrink-0 items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/slycode_logo_light.webp" alt="" className="h-8 w-8 object-contain mix-blend-multiply dark:hidden" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/slycode_logo.webp" alt="" className="hidden h-8 w-8 object-contain mix-blend-lighten dark:block" />
+            <span className="hidden text-[15px] font-semibold tracking-tight text-ink-1 sm:inline">SlyCode</span>
+          </span>
+          <nav className="flex h-full min-w-0 items-stretch gap-0.5 sm:gap-2" aria-label="Dashboard sections">
             <button
               onClick={() => setActiveTab('projects')}
-              className="rounded-xl border border-void-200 bg-white p-4 text-left shadow-(--shadow-card) transition-all hover:border-neon-blue-400/30 hover:shadow-[0_8px_30px_rgba(0,0,0,0.18)] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.7)] dark:border-void-700 dark:bg-void-850 dark:hover:border-neon-blue-400/25"
-            >
-              <p className="text-sm text-void-400">Code Den</p>
-              <p className="text-2xl font-bold text-void-950 dark:text-void-100">
-                {data.projects.length}
-              </p>
-            </button>
-            <div className="rounded-xl border border-void-200 bg-white p-4 shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
-              <p className="text-sm text-void-400">Backlog Items</p>
-              <p className={`text-2xl font-bold ${statBadge(data.totalBacklogItems, 20)}`}>
-                {data.totalBacklogItems}
-              </p>
-            </div>
-            <button
-              onClick={() => setActiveTab('cli-assets')}
-              className="rounded-xl border border-void-200 bg-white p-4 text-left shadow-(--shadow-card) transition-all hover:border-neon-blue-400/30 hover:shadow-[0_8px_30px_rgba(0,0,0,0.18)] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.7)] dark:border-void-700 dark:bg-void-850 dark:hover:border-neon-blue-400/25"
-            >
-              <p className="text-sm text-void-400">Outdated Assets</p>
-              <p className={`text-2xl font-bold ${statBadge(data.totalOutdatedAssets, 0)}`}>
-                {data.totalOutdatedAssets ?? 0}
-              </p>
-            </button>
-            <div className="rounded-xl border border-void-200 bg-white p-4 shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
-              <p className="text-sm text-void-400">Uncommitted</p>
-              <p className={`text-2xl font-bold ${statBadge(data.totalUncommitted, 0)}`}>
-                {data.totalUncommitted ?? 0}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="border-b border-void-100 dark:border-void-700">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <nav className="flex gap-6">
-            <button
-              onClick={() => setActiveTab('projects')}
-              className={`border-b-2 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'projects'
-                  ? 'border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
-                  : 'border-transparent text-void-500 hover:text-void-300 dark:text-void-400 dark:hover:text-void-300'
+              className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 text-[13px] font-medium transition-colors sm:gap-2 sm:px-2 ${
+                activeTab === 'projects' ? 'border-accent text-ink-1' : 'border-transparent text-ink-3 hover:text-ink-1'
               }`}
             >
               Code Den
             </button>
             <button
               onClick={() => setActiveTab('cli-assets')}
-              className={`flex items-center gap-2 border-b-2 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'cli-assets'
-                  ? 'border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
-                  : 'border-transparent text-void-500 hover:text-void-300 dark:text-void-400 dark:hover:text-void-300'
+              className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 text-[13px] font-medium transition-colors sm:gap-2 sm:px-2 ${
+                activeTab === 'cli-assets' ? 'border-accent text-ink-1' : 'border-transparent text-ink-3 hover:text-ink-1'
               }`}
             >
               CLI Assets
               {(data.totalOutdatedAssets ?? 0) > 0 && (
-                <span className="rounded-full border border-neon-orange-400/20 bg-neon-orange-400/10 px-2 py-0.5 text-xs font-medium text-neon-orange-500 dark:text-neon-orange-400">
+                <span className="rounded bg-warn/10 px-1.5 font-mono text-[11px] leading-[18px] text-warn-text">
                   {data.totalOutdatedAssets}
                 </span>
               )}
             </button>
             <button
               onClick={() => setActiveTab('atlas')}
-              className={`border-b-2 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'atlas'
-                  ? 'border-neon-blue-400 text-neon-blue-500 dark:text-neon-blue-400'
-                  : 'border-transparent text-void-500 hover:text-void-300 dark:text-void-400 dark:hover:text-void-300'
+              className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-1 text-[13px] font-medium transition-colors sm:gap-2 sm:px-2 ${
+                activeTab === 'atlas' ? 'border-accent text-ink-1' : 'border-transparent text-ink-3 hover:text-ink-1'
               }`}
             >
               Atlas
             </button>
           </nav>
+          <div className="ml-auto hidden w-72 sm:block">
+            <SearchBar
+              onResultClick={(result) => {
+                // Archived hits need the board in archived mode or the card isn't
+                // loaded and the deep-link silently finds nothing (feature 082).
+                const archived = result.isArchived ? '&archived=1' : '';
+                window.location.href = `/project/${result.projectId}?card=${result.cardId}${archived}`;
+              }}
+            />
+          </div>
+          {isLive && (
+            <Tooltip content="Live updates connected" placement="bottom">
+              <span className="hidden items-center gap-1.5 text-[11px] text-ink-3 sm:flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-live" />
+                Live
+              </span>
+            </Tooltip>
+          )}
+          <div className="ml-auto flex shrink-0 items-center sm:ml-0 sm:gap-1">
+            <Tooltip content="Provider config" placement="bottom">
+              <button
+                onClick={() => setShowProviderConfig(true)}
+                aria-label="Provider config"
+                className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-1"
+              >
+                {/* Sliders icon — ordering + toggles */}
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h13m2 0h1M13 4v4M7 10v4M17 16v4" />
+                </svg>
+              </button>
+            </Tooltip>
+            <VoiceSettingsButton />
+            <ThemeToggle />
+            <LogoutButton />
+          </div>
         </div>
+      </header>
+
+      {/* Mobile search */}
+      <div className="px-4 pt-4 sm:hidden">
+        <SearchBar
+          onResultClick={(result) => {
+            const archived = result.isArchived ? '&archived=1' : '';
+            window.location.href = `/project/${result.projectId}?card=${result.cardId}${archived}`;
+          }}
+        />
       </div>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {activeTab === 'projects' ? (
           <>
-            <p className="mb-6 text-sm text-void-400 dark:text-void-500">
-              Your registered projects and their kanban boards
-            </p>
+            {/* What's happening now — built from data the dashboard already has */}
+            <section className="mb-6">
+              <h1 className="text-[26px] font-semibold leading-8 tracking-tight text-ink-1">
+                {workingNow > 0 ? (
+                  <span className="border-b-2 border-live">
+                    {workingNow} agent{workingNow !== 1 ? 's' : ''} working.
+                  </span>
+                ) : (
+                  <span>The den is quiet.</span>
+                )}
+              </h1>
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] leading-5 text-ink-2">
+                <span>
+                  {data.projects.length} project{data.projects.length !== 1 ? 's' : ''}, {data.totalBacklogItems} card{data.totalBacklogItems !== 1 ? 's' : ''} in backlog
+                  {(data.totalUncommitted ?? 0) > 0 && `, ${data.totalUncommitted} uncommitted file${data.totalUncommitted !== 1 ? 's' : ''}`}.
+                </span>
+                {newOutput > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => openNewOutput(e.currentTarget, null)}
+                    aria-haspopup="dialog"
+                    aria-expanded={newOutputOpen?.projectId === null}
+                    className="flex items-center gap-1.5 rounded-md border border-line px-2 text-[12px] leading-6 text-ink-2 transition-colors hover:border-line-strong hover:bg-surface-2 hover:text-ink-1"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+                    {newOutput} new output
+                  </button>
+                )}
+              </p>
+            </section>
+
+            {/* What's waiting on the owner, and what runs next */}
+            <DashboardAttention needsYou={data.needsYou ?? []} upcoming={data.upcoming ?? []} />
+
             {/* Projects */}
-            <section className="mb-8">
-              <h2 className="mb-4 text-lg font-semibold text-void-950 dark:text-void-100">
-                Projects
-              </h2>
+            <section className="mb-10">
+              <div className="mb-4 flex items-center gap-3">
+                <h2 className="text-base font-semibold text-ink-1">Projects</h2>
+                <span className="font-mono text-[12px] text-ink-3">{accessibleProjects.length}</span>
+              </div>
               <div
                 ref={gridRef}
                 className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
@@ -499,12 +506,13 @@ export function Dashboard({ data: initialData }: DashboardProps) {
                 {accessibleProjects.map((project, i) => (
                   <div key={project.id} data-project-card className="relative">
                     {draggedId && dropIndex === i && (
-                      <div className="pointer-events-none absolute -left-1 top-0 bottom-0 w-1 rounded-full bg-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.5)]" />
+                      <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
                     )}
                     <ProjectCard
                       project={project}
                       onDeleted={refreshData}
                       unseenCount={unseenCounts[project.id] ?? 0}
+                      onUnseenClick={(anchor) => openNewOutput(anchor, project.id)}
                       shortcutKey={i < 10 ? (i === 9 ? 0 : i + 1) : undefined}
                       onDragStart={() => setDraggedId(project.id)}
                       onDragEnd={() => { setDraggedId(null); setDropIndex(null); }}
@@ -513,16 +521,16 @@ export function Dashboard({ data: initialData }: DashboardProps) {
                 ))}
                 <div className="relative">
                   {draggedId && dropIndex === accessibleProjects.length && (
-                    <div className="pointer-events-none absolute -left-1 top-0 bottom-0 w-1 rounded-full bg-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.5)]" />
+                    <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
                   )}
                   <button
                     onClick={() => setShowAddModal(true)}
-                    className="flex min-h-[120px] w-full items-center justify-center rounded-xl border-2 border-dashed border-void-200 p-4 transition-all hover:border-neon-blue-400/30 dark:border-void-700 dark:hover:border-neon-blue-400/30"
+                    className="flex h-full min-h-[140px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong p-4 text-[13px] text-ink-3 transition-colors hover:border-ink-3 hover:text-ink-1"
                   >
-                    <div className="text-center">
-                      <span className="text-3xl text-void-400 dark:text-void-500">+</span>
-                      <p className="mt-1 text-sm text-void-500 dark:text-void-400">Add Project</p>
-                    </div>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
+                    </svg>
+                    Add a project
                   </button>
                 </div>
               </div>
@@ -531,12 +539,12 @@ export function Dashboard({ data: initialData }: DashboardProps) {
             {/* Inaccessible Projects */}
             {inaccessibleProjects.length > 0 && (
               <section className="mb-8">
-                <h2 className="mb-4 text-lg font-semibold text-void-500 dark:text-void-400">
+                <h2 className="mb-4 text-base font-semibold text-ink-3">
                   Unavailable
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {inaccessibleProjects.map((project) => (
-                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} unseenCount={unseenCounts[project.id] ?? 0} />
+                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} unseenCount={unseenCounts[project.id] ?? 0} onUnseenClick={(anchor) => openNewOutput(anchor, project.id)} />
                   ))}
                 </div>
               </section>
@@ -551,14 +559,14 @@ export function Dashboard({ data: initialData }: DashboardProps) {
           </>
         ) : activeTab === 'atlas' ? (
           <>
-            <p className="mb-6 text-sm text-void-400 dark:text-void-500">
+            <p className="mb-6 text-sm text-ink-3">
               Codebase atlases across the workspace — one map per project
             </p>
             <AtlasRollup />
           </>
         ) : (
           <>
-            <p className="mb-6 text-sm text-void-400 dark:text-void-500">
+            <p className="mb-6 text-sm text-ink-3">
               Reusable skills, agents, and configs — manage and deploy across projects
             </p>
             <CliAssetsTab />
@@ -566,18 +574,38 @@ export function Dashboard({ data: initialData }: DashboardProps) {
         )}
 
         {/* Last Refresh + Copyright */}
-        <footer className="mt-8 text-center text-sm text-void-400 dark:text-void-600">
+        <footer className="mt-12 border-t border-line pt-6 text-center text-[12px] text-ink-3">
           <p>Last refresh: {formatDateTime(data.lastRefresh)}</p>
-          <p className="mt-2 text-xs text-void-500 dark:text-void-400">
-            &copy; 2026 SlyCode (<a href="https://slycode.ai" target="_blank" rel="noopener noreferrer" className="hover:text-neon-blue-500 dark:hover:text-neon-blue-400 transition-colors">slycode.ai</a>). All rights reserved.
-            {slycodeVersion && <span className="ml-2 text-void-400 dark:text-void-500">v{slycodeVersion}</span>}
+          <p className="mt-1.5">
+            &copy; 2026 SlyCode (<a href="https://slycode.ai" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors">slycode.ai</a>). All rights reserved.
+            {slycodeVersion && <span className="ml-2 text-ink-3">v{slycodeVersion}</span>}
+            {whatsNew.available && (
+              <button
+                type="button"
+                onClick={openWhatsNew}
+                className="relative ml-2 text-ink-3 hover:text-accent transition-colors underline-offset-2 hover:underline"
+              >
+                What&apos;s new
+                {whatsNew.unseen && (
+                  <span aria-label="(unread)" className="absolute -right-2 -top-px h-1.5 w-1.5 rounded-full bg-accent" />
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowChangelog(true)}
-              className="ml-2 text-void-400 hover:text-neon-blue-500 dark:text-void-500 dark:hover:text-neon-blue-400 transition-colors underline-offset-2 hover:underline"
+              className={`${whatsNew.unseen ? 'ml-4' : 'ml-2'} text-ink-3 hover:text-accent transition-colors underline-offset-2 hover:underline`}
             >
               Changelog
             </button>
+            <a
+              href={DISCORD_INVITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 text-ink-3 hover:text-accent transition-colors underline-offset-2 hover:underline"
+            >
+              Discord
+            </a>
           </p>
         </footer>
       </main>
@@ -589,6 +617,18 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       />
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+
+      {newOutputOpen && (
+        <NewOutputList
+          anchor={newOutputOpen.anchor}
+          items={newOutputItems(newOutputOpen.projectId)}
+          heading={newOutputOpen.projectId === null
+            ? 'New output'
+            : `New output in ${data.projects.find((p) => p.id === newOutputOpen.projectId)?.name ?? 'project'}`}
+          showProject={newOutputOpen.projectId === null}
+          onClose={closeNewOutput}
+        />
+      )}
 
       {/* Global Terminal */}
       <GlobalClaudePanel

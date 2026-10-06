@@ -4,6 +4,8 @@ import type { WebSocket } from 'ws';
 import type { Response } from 'express';
 import { broadcastSse } from './sse.js';
 import { bufferText } from './terminal-snapshot.js';
+import { recoverJsonPrefix } from './json-prefix-recovery.js';
+import { sanitizePersistedState } from './persisted-state-validation.js';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import { isCommandAllowed } from './provider-registry.js';
 import { getTransport } from './transport/index.js';
@@ -119,6 +121,26 @@ const ACTIVITY_DEBOUNCE_MS = 1000;
 // Max activity transitions to keep per session
 const ACTIVITY_TRANSITIONS_MAX = 50;
 
+// bridge-sessions.json.tmp.* files older than this are debris from a crashed writer
+const STALE_TEMP_FILE_AGE_MS = 60 * 1000;
+
+// How long shutdown waits for killed PTYs to report their exit and for the
+// exit handlers' saves to be queued, before the final save + drain.
+const SHUTDOWN_EXIT_WAIT_MS = 3000;
+
+/** true = running, false = confirmed gone, null = could not tell. */
+function isProcessAlive(pid: number): boolean | null {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true; // exists, owned by someone else
+    return null;
+  }
+}
+
 // Strip ANSI escape codes and control characters for readable log snippets
 function stripAnsi(str: string): string {
   return str
@@ -148,6 +170,13 @@ export class SessionManager {
   // must claim sequentially so the live claimed-set check stays accurate.
   // Never rejects: each link swallows its own error inside detectSessionIdAtExit.
   private exitDetectionChain: Promise<void> = Promise.resolve();
+  // Save serialization (card #0366): one write in flight, at most one queued.
+  private activeSave: Promise<void> | null = null;
+  private queuedSave: Promise<void> | null = null;
+  // Exit handling in progress / seen, so shutdown can wait for the saves that
+  // PTY exits trigger instead of losing them at process.exit.
+  private exitHandlers: Set<Promise<void>> = new Set();
+  private exitObserved: WeakSet<Session> = new WeakSet();
 
   constructor(config: Partial<BridgeConfig> = {}, runtimeConfig?: BridgeRuntimeConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -155,6 +184,7 @@ export class SessionManager {
   }
 
   async init(): Promise<void> {
+    await this.sweepStaleTempFiles();
     await this.loadPersistedState();
     this.startIdleChecker();
     this.startSSEHeartbeat();
@@ -177,11 +207,13 @@ export class SessionManager {
     }
 
     // Kill all running PTYs and dispose headless terminals
+    const killed: Session[] = [];
     for (const [name, session] of this.sessions) {
       if (session.pty) {
         console.log(`Stopping session: ${name}`);
         try {
           killPty(session.pty);
+          killed.push(session);
         } catch (err) {
           console.error(`Error stopping ${name}:`, err);
         }
@@ -192,11 +224,23 @@ export class SessionManager {
         } catch (err) {
           console.error(`Error disposing headless terminal for ${name}:`, err);
         }
+        // The exit handler we now wait for would otherwise dispose it again
+        session.headlessTerminal = null;
+        session.serializeAddon = null;
       }
     }
 
-    // Save final state
-    await this.savePersistedState();
+    // PTY exits arrive asynchronously and each one saves (exit code, pid,
+    // last-chance session-id detection). Let them land before the final save,
+    // or they are lost when the process exits.
+    await this.waitForExitHandling(killed, SHUTDOWN_EXIT_WAIT_MS);
+
+    // Save final state, then drain anything queued behind it
+    try {
+      await this.savePersistedState();
+    } finally {
+      await this.flushSaves();
+    }
     console.log('Session manager shutdown complete');
   }
 
@@ -291,29 +335,197 @@ export class SessionManager {
   }
 
   private async loadPersistedState(): Promise<void> {
+    let data: string;
     try {
-      const data = await fs.readFile(this.config.sessionFile, 'utf-8');
-      this.persistedState = JSON.parse(data);
-      console.log(`Loaded ${Object.keys(this.persistedState.sessions).length} persisted session references`);
+      data = await fs.readFile(this.config.sessionFile, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         // File doesn't exist yet — first run, start fresh
         this.persistedState = { sessions: {} };
         return;
       }
-      // Any other error (corrupt JSON, permissions, disk) — refuse to start
-      // rather than risk overwriting valid session data with empty state
+      // Unreadable (permissions, disk, not a file) — refuse to start rather
+      // than risk overwriting valid session data with empty state
       console.error('FATAL: Could not read bridge-sessions.json:', err);
       throw new Error(`Cannot load session state: ${(err as Error).message}. Fix or remove the file manually.`);
     }
+
+    let reason: string;
+    try {
+      const clean = sanitizePersistedState(JSON.parse(data));
+      if (clean && clean.dropped.length === 0) {
+        this.persistedState = clean.state;
+        console.log(`Loaded ${Object.keys(this.persistedState.sessions).length} persisted session references`);
+        return;
+      }
+      reason = clean
+        ? `${clean.dropped.length} invalid session record(s)`
+        : 'not a { sessions: {...} } document';
+    } catch (err) {
+      reason = (err as Error).message;
+    }
+
+    await this.recoverCorruptState(data, reason);
   }
 
-  private async savePersistedState(): Promise<void> {
-    // Write to temp file first, then rename — atomic on POSIX.
-    // Use unique suffix to avoid races when concurrent saves happen
-    // (e.g. stopSession's handlePtyExit + createSession both saving).
-    const suffix = `${process.pid}.${Date.now()}`;
-    const tmpFile = `${this.config.sessionFile}.tmp.${suffix}`;
+  /**
+   * bridge-sessions.json is not loadable as-is (card #0366: overlapping writes
+   * left a valid document plus trailing garbage, and a fatal load turned that
+   * into a launchd/systemd crash loop). Keep the bad file, salvage the longest
+   * valid prefix, keep every session record that validates and drop the rest by
+   * name, carry on. The corrupt copy is the precondition for everything else:
+   * if it can't be kept we stay fatal rather than overwrite the only evidence.
+   */
+  private async recoverCorruptState(data: string, reason: string): Promise<void> {
+    const file = this.config.sessionFile;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const corruptCopy = `${file}.corrupt-${stamp}-${randomUUID().slice(0, 8)}`;
+    console.error(`ERROR: bridge-sessions.json is corrupt: ${reason}`);
+    try {
+      await fs.copyFile(file, corruptCopy, fsConstants.COPYFILE_EXCL);
+    } catch (err) {
+      console.error('FATAL: Could not keep a copy of the corrupt bridge-sessions.json:', err);
+      throw new Error(`Cannot load session state: ${reason}; and could not preserve the corrupt file: ${(err as Error).message}. Fix or remove the file manually.`);
+    }
+
+    let value: unknown;
+    let usedChars = data.length;
+    try {
+      value = JSON.parse(data);
+    } catch {
+      const recovered = recoverJsonPrefix(data);
+      value = recovered?.value;
+      usedChars = recovered?.end ?? 0;
+    }
+
+    const clean = sanitizePersistedState(value);
+    if (clean) {
+      this.persistedState = clean.state;
+      console.error(
+        `ERROR: recovered ${Object.keys(clean.state.sessions).length} persisted session references from the first ${usedChars} of ${data.length} chars ` +
+        `(${data.length - usedChars} trailing chars discarded). Original kept at ${corruptCopy}`
+      );
+      if (clean.dropped.length > 0) {
+        console.error(`ERROR: dropped ${clean.dropped.length} invalid session record(s): ${clean.dropped.join(', ')}`);
+      }
+    } else {
+      this.persistedState = { sessions: {} };
+      console.error(`ERROR: nothing recoverable in bridge-sessions.json — starting with EMPTY session state. Original kept at ${corruptCopy}`);
+    }
+
+    // Publish the repaired state now so the next start is clean even if this
+    // run never saves again.
+    await this.savePersistedState();
+  }
+
+  /**
+   * Remove bridge-sessions.json.tmp.<pid>.<id> files left by writers that died
+   * between writeFile and rename. A file is unlinked only when BOTH hold: it is
+   * older than STALE_TEMP_FILE_AGE_MS, and the pid in its name is ours (nothing
+   * of ours is in flight this early in init) or is confirmed not running.
+   * Anything uncertain is kept — unparseable name, liveness check inconclusive.
+   * What this does NOT guarantee: a dead writer whose pid has since been reused
+   * by an unrelated process looks alive, so its debris stays until that process
+   * ends. Leaking a file is the safe direction; deleting a live writer's temp
+   * would fail its rename.
+   */
+  private async sweepStaleTempFiles(): Promise<void> {
+    const dir = path.dirname(this.config.sessionFile);
+    const prefix = `${path.basename(this.config.sessionFile)}.tmp.`;
+    let entries: string[];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.startsWith(prefix)) continue;
+      const full = path.join(dir, entry);
+      try {
+        const stat = await fs.stat(full);
+        if (!stat.isFile() || Date.now() - stat.mtimeMs < STALE_TEMP_FILE_AGE_MS) continue;
+        const pid = Number(/^(\d+)\./.exec(entry.slice(prefix.length))?.[1]);
+        if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+        if (pid !== process.pid && isProcessAlive(pid) !== false) continue;
+        await fs.unlink(full);
+        console.log(`Removed stale session temp file: ${entry}`);
+      } catch (err) {
+        console.warn(`Could not remove stale session temp file ${entry}:`, (err as Error).message);
+      }
+    }
+  }
+
+  /**
+   * Persist session state. Saves are serialized: at most one write in flight
+   * and one queued. The state object is shared and is serialized when a write
+   * STARTS, so a caller arriving while a save is still queued joins it — that
+   * write carries their mutation. Overlapping saves used to race on the temp
+   * file and publish a corrupt document (card #0366).
+   *
+   * A failed write rejects for the callers that were waiting on it; it never
+   * blocks the saves behind it.
+   */
+  private savePersistedState(): Promise<void> {
+    if (this.queuedSave) return this.queuedSave;
+
+    const prior = this.activeSave ?? Promise.resolve();
+    const run: Promise<void> = prior.catch(() => {}).then(async () => {
+      this.queuedSave = null;
+      this.activeSave = run;
+      try {
+        await this.writeStateAtomic();
+      } finally {
+        if (this.activeSave === run) this.activeSave = null;
+      }
+    });
+    this.queuedSave = run;
+    return run;
+  }
+
+  /**
+   * Bounded wait for the killed sessions' exit handlers and the exit-detection
+   * chain they feed. Never rejects; gives up at the deadline with a warning.
+   */
+  private async waitForExitHandling(killed: Session[], timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    const handlersSettled = () =>
+      this.exitHandlers.size === 0 && killed.every((s) => this.exitObserved.has(s));
+
+    let chain: Promise<void> | null = null;
+    while (Date.now() < deadline) {
+      if (handlersSettled() && chain === this.exitDetectionChain) return;
+      if (handlersSettled()) {
+        // Links can be appended while we wait — re-check identity after each pass.
+        const current = this.exitDetectionChain;
+        let timer: NodeJS.Timeout | undefined;
+        const timedOut = new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); });
+        await Promise.race([current.catch(() => {}), timedOut]);
+        clearTimeout(timer);
+        chain = current;
+      } else {
+        await pause(25);
+      }
+    }
+    const unseen = killed.filter((s) => !this.exitObserved.has(s)).map((s) => s.name);
+    console.warn(
+      `Shutdown: gave up waiting for exit handling after ${timeoutMs}ms` +
+      (unseen.length ? ` (no exit seen from: ${unseen.join(', ')})` : '')
+    );
+  }
+
+  /** Wait until no save is queued or in flight. Never rejects. */
+  private async flushSaves(): Promise<void> {
+    let pending: Promise<void> | null;
+    while ((pending = this.queuedSave ?? this.activeSave)) {
+      await pending.catch(() => {});
+    }
+  }
+
+  private async writeStateAtomic(): Promise<void> {
+    // Write to temp file first, then rename — atomic on POSIX. The UUID keeps
+    // the temp path unique even if two writers ever did run at once.
+    const tmpFile = `${this.config.sessionFile}.tmp.${process.pid}.${randomUUID()}`;
     try {
       await fs.writeFile(tmpFile, JSON.stringify(this.persistedState, null, 2));
       await fs.rename(tmpFile, this.config.sessionFile);
@@ -581,6 +793,10 @@ export class SessionManager {
         connectedClients: 0,
         claudeSessionId: doResume ? storedSessionId : assignedSessionId,
         createdAt: doResume ? (persisted?.createdAt || now) : now,
+        // Card #0373: only a genuinely new conversation moves this; resume keeps
+        // it (older records backfill from createdAt).
+        conversationStartedAt: doResume ? (persisted?.conversationStartedAt || persisted?.createdAt || now) : now,
+        spawnedAt: now,
         lastActive: persisted?.lastActive || now,
         lastOutputAt: now,
         activityStartedAt: now,
@@ -608,6 +824,7 @@ export class SessionManager {
         claudeSessionId: session.claudeSessionId,
         cwd: session.cwd,
         createdAt: session.createdAt,
+        conversationStartedAt: session.conversationStartedAt,
         lastActive: session.lastActive,
         provider: providerId,
         skipPermissions,
@@ -625,7 +842,7 @@ export class SessionManager {
         rows: DEFAULT_PTY_ROWS,
         extraEnv: { SLYCODE_SESSION: name, SLYCODE_BRIDGE_URL: `http://127.0.0.1:${this.config.port}`, ...plan.env },
         onData: (data) => this.handlePtyOutput(name, data),
-        onExit: (code) => this.handlePtyExit(name, code, session.createdAt),
+        onExit: (code) => this.onPtyExit(session, code),
       });
 
       session.pid = session.pty.pid;
@@ -918,9 +1135,16 @@ export class SessionManager {
     }
   }
 
-  private async handlePtyExit(name: string, code: number, exitingCreatedAt?: string): Promise<void> {
+  private onPtyExit(session: Session, code: number): void {
+    this.exitObserved.add(session);
+    const handled: Promise<void> = this.handlePtyExit(session.name, code, session)
+      .catch((err) => console.error(`[PTY] Exit handling failed for ${session.name}:`, err))
+      .finally(() => this.exitHandlers.delete(handled));
+    this.exitHandlers.add(handled);
+  }
+
+  private async handlePtyExit(name: string, code: number, exiting?: Session): Promise<void> {
     const session = this.sessions.get(name);
-    if (!session) return;
 
     // Guard: if this exit is from a previous session that was replaced (fresh restart),
     // don't stomp on the replacement. This prevents a race where stopSession() times out,
@@ -929,18 +1153,28 @@ export class SessionManager {
     // Note on bridge restart scenario: when the bridge process itself dies, child PTY processes
     // are killed too (SIGHUP from parent death). So there are no orphaned exit handlers —
     // this guard only needs to cover the in-process race (stop timeout → new session → old exit).
-    if (exitingCreatedAt && session.createdAt !== exitingCreatedAt) {
-      console.log(`[PTY] Ignoring stale exit for ${name} (old session created ${exitingCreatedAt}, current created ${session.createdAt})`);
-      // Still resolve the exit promise if pending (for stopSession's await)
-      if (session.exitResolver) {
-        session.exitResolver();
-        session.exitResolver = undefined;
+    //
+    // Compared by Session object (one per spawn), not createdAt: a resumed
+    // session inherits createdAt from its record, so a stale exit from the
+    // PTY it replaced would match and stop it (card #0373).
+    if (exiting && session !== exiting) {
+      if (session) {
+        console.log(`[PTY] Ignoring stale exit for ${name} (exiting PTY spawned ${exiting.spawnedAt ?? 'unknown'}, current spawned ${session.spawnedAt ?? 'unknown'})`);
+      }
+      // Settle only the exiting spawn's own stopSession wait. The replacement's
+      // resolver belongs to a stop of the NEW PTY — resolving it here would
+      // report that stop complete while its PTY is still running.
+      if (exiting.exitResolver) {
+        exiting.exitResolver();
+        exiting.exitResolver = undefined;
       }
       return;
     }
+    if (!session) return;
 
     const exitedAt = new Date().toISOString();
-    const aliveMs = session.createdAt ? Date.now() - new Date(session.createdAt).getTime() : null;
+    const spawnedAt = session.spawnedAt || session.createdAt;
+    const aliveMs = spawnedAt ? Date.now() - new Date(spawnedAt).getTime() : null;
     console.log(`Session exited: ${name} (code: ${code}, alive: ${aliveMs !== null ? `${(aliveMs / 1000).toFixed(1)}s` : 'unknown'})`);
 
     session.status = 'stopped';
@@ -1065,6 +1299,7 @@ export class SessionManager {
           exitCode: persisted.exitCode,
           exitedAt: persisted.exitedAt,
           createdAt: persisted.createdAt,
+          conversationStartedAt: persisted.conversationStartedAt || persisted.createdAt,
         };
       }
       return null;
@@ -1087,6 +1322,7 @@ export class SessionManager {
       exitCode: session.exitCode,
       exitedAt: session.exitedAt,
       createdAt: session.createdAt,
+      conversationStartedAt: session.conversationStartedAt || session.createdAt,
     };
   }
 
@@ -1382,16 +1618,23 @@ export class SessionManager {
       } catch { /* advisory only */ }
     }
 
+    // A different conversation starts the age clock over (card #0373).
+    // Binding an id to a record that had none recovers the conversation the
+    // spawn began, so its start time stands.
+    const conversationStartedAt = previous && previous !== sessionId ? new Date().toISOString() : undefined;
     if (session) {
       session.claudeSessionId = sessionId;
+      if (conversationStartedAt) session.conversationStartedAt = conversationStartedAt;
     }
     if (persisted) {
       persisted.claudeSessionId = sessionId;
+      if (conversationStartedAt) persisted.conversationStartedAt = conversationStartedAt;
     } else if (cwd) {
       this.persistedState.sessions[resolvedName] = {
         claudeSessionId: sessionId,
         cwd,
         createdAt: session?.createdAt || new Date().toISOString(),
+        conversationStartedAt: conversationStartedAt || session?.conversationStartedAt || new Date().toISOString(),
         lastActive: session?.lastActive || new Date().toISOString(),
         provider,
         skipPermissions: session?.skipPermissions ?? true,
@@ -1442,19 +1685,25 @@ export class SessionManager {
       throw new Error('No session files found for this provider');
     }
 
+    // Same conversation-start rule as linkSession (card #0373).
+    const conversationStartedAt = previous && previous !== newId ? new Date().toISOString() : undefined;
+
     // Update in-memory session
     if (session) {
       session.claudeSessionId = newId;
+      if (conversationStartedAt) session.conversationStartedAt = conversationStartedAt;
     }
 
     // Update persisted state
     if (persisted) {
       persisted.claudeSessionId = newId;
+      if (conversationStartedAt) persisted.conversationStartedAt = conversationStartedAt;
     } else {
       this.persistedState.sessions[resolvedName] = {
         claudeSessionId: newId,
         cwd,
         createdAt: session?.createdAt || new Date().toISOString(),
+        conversationStartedAt: conversationStartedAt || session?.conversationStartedAt || new Date().toISOString(),
         lastActive: session?.lastActive || new Date().toISOString(),
         provider,
         skipPermissions: session?.skipPermissions ?? true,

@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { usePolling } from '@/hooks/usePolling';
@@ -297,7 +298,7 @@ export function CliAssetsTab() {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-void-300 border-t-neon-blue-400" />
-        <p className="text-sm text-void-400 dark:text-void-500">Scanning assets across projects, this can take a few seconds...</p>
+        <p className="text-sm text-ink-3">Scanning assets across projects, this can take a few seconds...</p>
       </div>
     );
   }
@@ -318,15 +319,15 @@ export function CliAssetsTab() {
   return (
     <div className="space-y-4">
       {/* Sticky header: view toggle + provider tabs + refresh */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 pb-2 pt-2 bg-void-50 dark:bg-void-950 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="sticky top-0 z-30 -mx-4 px-4 pb-2 pt-2 bg-surface-2 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <div className="flex items-center gap-4">
-          <div className="flex gap-1 rounded-lg border border-void-200 bg-void-50 p-1 dark:border-void-700 dark:bg-void-900">
+          <div className="flex gap-1 rounded-lg border border-line bg-surface-2 p-1">
             <button
               onClick={() => setActiveView('projects')}
               className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
                 activeView === 'projects'
-                  ? 'bg-white text-void-900 shadow-sm dark:bg-void-800 dark:text-void-100'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200'
+                  ? 'bg-surface-1 text-ink-1 shadow-sm'
+                  : 'text-ink-3 hover:text-ink-2'
               }`}
             >
               Project Assignment
@@ -340,15 +341,15 @@ export function CliAssetsTab() {
               onClick={() => setActiveView('store')}
               className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
                 activeView === 'store'
-                  ? 'bg-white text-void-900 shadow-sm dark:bg-void-800 dark:text-void-100'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200'
+                  ? 'bg-surface-1 text-ink-1 shadow-sm'
+                  : 'text-ink-3 hover:text-ink-2'
               }`}
             >
               Asset Store
               <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
                 activeView === 'store'
-                  ? 'bg-void-100 text-void-600 dark:bg-void-700 dark:text-void-300'
-                  : 'bg-void-200/50 text-void-400 dark:bg-void-800 dark:text-void-500'
+                  ? 'bg-surface-2 text-ink-2'
+                  : 'bg-surface-3 text-ink-3'
               }`}>
                 {storeAssetCount}
               </span>
@@ -357,8 +358,8 @@ export function CliAssetsTab() {
               onClick={() => setActiveView('updates')}
               className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
                 activeView === 'updates'
-                  ? 'bg-white text-void-900 shadow-sm dark:bg-void-800 dark:text-void-100'
-                  : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200'
+                  ? 'bg-surface-1 text-ink-1 shadow-sm'
+                  : 'text-ink-3 hover:text-ink-2'
               }`}
             >
               Updates
@@ -376,15 +377,15 @@ export function CliAssetsTab() {
 
           {/* Provider sub-tabs (Project Assignment only — Store and Updates are provider-agnostic) */}
           {activeView === 'projects' && (
-            <div className="flex gap-1 rounded-lg border border-void-200 bg-void-50 p-1 dark:border-void-700 dark:bg-void-900">
+            <div className="flex gap-1 rounded-lg border border-line bg-surface-2 p-1">
               {providerTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveProvider(tab.id)}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     activeProvider === tab.id
-                      ? 'bg-white text-void-900 shadow-sm dark:bg-void-800 dark:text-void-100'
-                      : 'text-void-500 hover:text-void-700 dark:text-void-400 dark:hover:text-void-200'
+                      ? 'bg-surface-1 text-ink-1 shadow-sm'
+                      : 'text-ink-3 hover:text-ink-2'
                   }`}
                 >
                   {tab.label}
@@ -397,7 +398,7 @@ export function CliAssetsTab() {
           {activeView === 'store' && (
             <button
               onClick={() => handleAssistant('create')}
-              className="flex items-center gap-1.5 rounded-md border border-neon-blue-400/40 bg-neon-blue-400/15 px-3 py-1.5 text-sm font-medium text-neon-blue-400 hover:bg-neon-blue-400/25 whitespace-nowrap"
+              className="flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/15 px-3 py-1.5 text-sm font-medium text-accent hover:bg-accent/25 whitespace-nowrap"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -412,7 +413,7 @@ export function CliAssetsTab() {
             onClick={refreshCliAssets}
             disabled={refreshing}
             aria-label="Refresh assets"
-            className="rounded-md border border-void-200 bg-void-50 p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-700 dark:border-void-700 dark:bg-void-900 dark:hover:bg-void-800 dark:hover:text-void-200 disabled:opacity-50"
+            className="rounded-md border border-line bg-surface-2 p-1.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2 disabled:opacity-50"
           >
             <svg
               className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
@@ -433,7 +434,7 @@ export function CliAssetsTab() {
       <div className="min-h-[70vh]">
 
       {/* Sub-view description */}
-      <p className="mb-3 text-xs text-void-400 dark:text-void-500">
+      <p className="mb-3 text-xs text-ink-3">
         {activeView === 'projects' && 'Assign assets from the store to individual projects and keep them in sync.'}
         {activeView === 'store' && 'The canonical source for each asset. Deploy to projects across providers like Claude Code, Codex, and OpenCode.'}
         {activeView === 'updates' && 'SlyCode updates land here. Review what changed and choose to accept or skip each one.'}
@@ -441,8 +442,8 @@ export function CliAssetsTab() {
 
       {/* Agents provider info */}
       {activeProvider === 'agents' && (
-        <div className="mx-1 rounded-md border border-void-200 bg-void-50 px-3 py-2 text-xs text-void-500 dark:border-void-700 dark:bg-void-900 dark:text-void-400">
-          <strong className="text-void-700 dark:text-void-300">Agents</strong> deploys to <code className="rounded bg-void-200 px-1 dark:bg-void-800">.agents/skills/</code> — the universal cross-tool directory read natively by Codex CLI and OpenCode. Use this for skills that should work across tools without provider-specific overrides.
+        <div className="mx-1 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-3">
+          <strong className="text-ink-2">Agents</strong> deploys to <code className="rounded bg-surface-3 px-1">.agents/skills/</code> — the universal cross-tool directory read natively by Codex CLI and OpenCode. Use this for skills that should work across tools without provider-specific overrides.
         </div>
       )}
 
@@ -547,21 +548,21 @@ export function CliAssetsTab() {
         <div className="space-y-4">
 
           {sections.map(({ key, label, rows }) => (
-            <div key={key} className="rounded-lg border border-void-200 bg-white shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
+            <div key={key} className="rounded-lg border border-line bg-surface-1 shadow-(--shadow-card)">
               <button
                 onClick={() => toggleSection(key)}
                 className="flex w-full items-center justify-between px-4 py-3"
               >
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-void-900 dark:text-void-100">
+                  <h3 className="text-sm font-semibold text-ink-1">
                     {label}
                   </h3>
-                  <span className="rounded-full bg-void-100 px-2 py-0.5 text-xs text-void-600 dark:bg-void-700 dark:text-void-300">
+                  <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
                     {rows.length}
                   </span>
                 </div>
                 <svg
-                  className={`h-4 w-4 text-void-400 transition-transform ${expandedSections[key] ? 'rotate-180' : ''}`}
+                  className={`h-4 w-4 text-ink-3 transition-transform ${expandedSections[key] ? 'rotate-180' : ''}`}
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -571,7 +572,7 @@ export function CliAssetsTab() {
                 </svg>
               </button>
               {expandedSections[key] && (
-                <div className="border-t border-void-100 dark:border-void-700">
+                <div className="border-t border-line">
                   <AssetMatrix
                     rows={rows}
                     projects={projects}
@@ -608,7 +609,7 @@ export function CliAssetsTab() {
                   </span>
                   <div className="flex-1" />
                   {ignoredRows.length > 0 && (
-                    <label className="flex items-center gap-1.5 text-xs text-void-500 dark:text-void-400 cursor-pointer">
+                    <label className="flex items-center gap-1.5 text-xs text-ink-3 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={showIgnored}
@@ -647,21 +648,21 @@ export function CliAssetsTab() {
           BranchTab git tag, which is fixed at right-[280px] and grows leftward
           with the branch name (both are bottom-0 z-40; the tag renders on top) */}
       {pendingChanges.length > 0 && (
-        <div className="fixed bottom-0 left-4 right-[480px] z-40 flex h-12 items-center justify-between rounded-t-lg border border-neon-blue-400/30 bg-neon-blue-50 px-4 shadow-(--shadow-card) dark:border-neon-blue-400/30 dark:bg-void-850">
-          <span className="text-sm font-medium text-neon-blue-700 dark:text-neon-blue-300">
+        <div className="fixed bottom-0 left-4 right-[480px] z-40 flex h-12 items-center justify-between rounded-t-lg border border-accent/30 bg-accent px-4 shadow-(--shadow-card) dark:bg-void-850">
+          <span className="text-sm font-medium text-accent">
             {pendingChanges.length} pending change{pendingChanges.length !== 1 ? 's' : ''}
           </span>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setPendingChanges([])}
-              className="rounded px-4 py-1.5 text-sm text-void-600 hover:text-void-900 dark:text-void-400 dark:hover:text-void-200"
+              className="rounded px-4 py-1.5 text-sm text-ink-2 hover:text-ink-1"
             >
               Cancel
             </button>
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="rounded bg-neon-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500 disabled:opacity-50"
+              className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:opacity-50"
             >
               {syncing ? 'Applying...' : 'Review & apply'}
             </button>
@@ -770,7 +771,7 @@ function ComplianceFixModal({
   async function handleCopy() {
     if (!prompt) return;
     try {
-      await navigator.clipboard.writeText(prompt);
+      await copyText(prompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* fallback */ }
@@ -789,15 +790,15 @@ function ComplianceFixModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-void-700 bg-void-850 shadow-(--shadow-overlay)">
-        <div className="flex items-center justify-between border-b border-void-700 px-5 py-4">
+      <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-line bg-surface-2 shadow-(--shadow-overlay)">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
-            <h3 className="text-lg font-semibold text-void-100">Fix Asset Compliance</h3>
-            <p className="mt-0.5 text-sm text-void-400">
+            <h3 className="text-lg font-semibold text-ink-1">Fix Asset Compliance</h3>
+            <p className="mt-0.5 text-sm text-ink-3">
               {assetName} ({assetType}) — missing or invalid frontmatter
             </p>
           </div>
-          <button onClick={onClose} className="rounded p-1 text-void-400 hover:bg-void-800 hover:text-void-200">
+          <button onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -807,13 +808,13 @@ function ComplianceFixModal({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {!prompt && !loading && !error && (
             <div className="space-y-4">
-              <p className="text-sm text-void-300">
+              <p className="text-sm text-ink-2">
                 Generate a prompt that instructs an LLM to add proper frontmatter fields
                 (name, version, updated, description, provider) to this asset.
               </p>
               <button
                 onClick={generateFixPrompt}
-                className="rounded-md border border-amber-400/40 bg-amber-400/15 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-400/25"
+                className="rounded-md border border-amber-400/40 bg-amber-400/15 px-4 py-2 text-sm font-medium text-warn-text hover:bg-amber-400/25"
               >
                 Generate Fix Prompt
               </button>
@@ -821,26 +822,26 @@ function ComplianceFixModal({
           )}
           {loading && (
             <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-void-600 border-t-amber-400" />
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-line-strong border-t-amber-400" />
             </div>
           )}
           {error && (
-            <div className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-400">{error}</div>
+            <div className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-danger-text">{error}</div>
           )}
           {prompt && (
             <div className="space-y-3">
-              <p className="text-sm text-void-300">Fix prompt ready:</p>
+              <p className="text-sm text-ink-2">Fix prompt ready:</p>
               <textarea
                 readOnly
                 value={prompt}
-                className="h-48 w-full rounded-md border border-void-700 bg-void-900 p-3 font-mono text-xs text-void-300 focus:outline-none"
+                className="h-48 w-full rounded-md border border-line bg-surface-2 p-3 font-mono text-xs text-ink-2 focus:outline-none"
               />
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-void-700 px-5 py-3">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-sm text-void-400 hover:text-void-200">
+        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
+          <button onClick={onClose} className="rounded px-4 py-1.5 text-sm text-ink-3 hover:text-ink-1">
             Close
           </button>
           {prompt && (
@@ -848,14 +849,14 @@ function ComplianceFixModal({
               <button
                 onClick={handleCopy}
                 className={`rounded px-3 py-1.5 text-sm font-medium ${
-                  copied ? 'bg-green-400/20 text-green-400' : 'bg-void-800 text-void-300 hover:bg-void-700'
+                  copied ? 'bg-green-400/20 text-st-done' : 'bg-surface-1 text-ink-2 hover:bg-surface-3'
                 }`}
               >
                 {copied ? 'Copied!' : 'Copy'}
               </button>
               <button
                 onClick={handleRunInTerminal}
-                className="rounded bg-neon-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500"
+                className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent"
               >
                 Run in Terminal
               </button>

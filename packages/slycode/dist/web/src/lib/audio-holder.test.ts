@@ -354,3 +354,15 @@ test('relayed state can carry availability so followers converge on ON and on TT
   assert.equal(b.states[0].enabled, true);
   assert.deepEqual(b.states[0].availability, { messagingRunning: true, tts: true });
 });
+
+test('relayed availability carries the speech-health reason text to followers (feature 087)', () => {
+  const bus = makeBus();
+  const clock = { t: 1000 };
+  const a = makeTab(bus, 'a', clock);
+  const b = makeTab(bus, 'b', clock);
+  a.holder.start();
+  b.holder.start();
+  const ttsReason = 'TTS provider (ElevenLabs): ELEVENLABS_API_KEY is not set. Add it to .env and restart the messaging service.';
+  a.holder.publishState({ enabled: true, revision: 5, playing: false, blocked: false, caption: null, queueLength: 0, availability: { messagingRunning: true, tts: false, ttsReason } });
+  assert.deepEqual(b.states[0].availability, { messagingRunning: true, tts: false, ttsReason });
+});

@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
-import path from 'path';
-import { getSlycodeRoot } from '@/lib/paths';
+import { readWorkspaceEnvKey } from '@/lib/workspace-env';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,21 +17,6 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   const key = process.env.NODE_ENV === 'production' ? 'HTTPS_PROD_URL' : 'HTTPS_DEV_URL';
-  const url = process.env[key] || readEnvKey(key);
+  const url = process.env[key] || readWorkspaceEnvKey(key);
   return NextResponse.json({ url: url && /^https:\/\/[^\s"']+$/i.test(url) ? url : null });
-}
-
-function readEnvKey(key: string): string | null {
-  try {
-    const content = readFileSync(path.join(getSlycodeRoot(), '.env'), 'utf-8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq < 0) continue;
-      if (trimmed.slice(0, eq).trim() !== key) continue;
-      return trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '') || null;
-    }
-  } catch { /* no .env */ }
-  return null;
 }

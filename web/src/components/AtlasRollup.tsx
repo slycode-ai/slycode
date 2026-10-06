@@ -64,7 +64,7 @@ export function AtlasRollup() {
     return <p className="py-12 text-center text-sm text-red-500 dark:text-red-400">{error}</p>;
   }
   if (!projects) {
-    return <p className="animate-pulse py-12 text-center text-sm text-void-400">Reading atlases across the workspace…</p>;
+    return <p className="animate-pulse py-12 text-center text-sm text-ink-3">Reading atlases across the workspace…</p>;
   }
 
   const scanned = projects.filter(p => p.hasAtlas);
@@ -77,26 +77,26 @@ export function AtlasRollup() {
           <a
             key={p.projectId}
             href={`/project/${p.projectId}?view=code`}
-            className="group rounded-xl border border-void-200 bg-white p-4 shadow-(--shadow-card) transition-all hover:-translate-y-0.5 hover:border-neon-blue-400/40 hover:shadow-[0_8px_30px_rgba(0,0,0,0.18)] dark:border-void-700 dark:bg-void-850 dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.7)]"
+            className="group rounded-xl border border-line bg-surface-1 p-4 shadow-(--shadow-card) transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-[0_8px_30px_rgba(0,0,0,0.18)] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.7)]"
           >
             <div className="flex items-baseline gap-2">
-              <h3 className="text-base font-semibold text-void-950 transition-colors group-hover:text-neon-blue-500 dark:text-void-100 dark:group-hover:text-neon-blue-400">
+              <h3 className="text-base font-semibold text-ink-1 transition-colors group-hover:text-accent">
                 {p.name}
               </h3>
-              <span className="ml-auto shrink-0 font-mono text-[11px] text-void-400">
+              <span className="ml-auto shrink-0 font-mono text-[11px] text-ink-3">
                 {p.areas.length} areas{relAge(p.updatedAt) ? ` · ${relAge(p.updatedAt)}` : ''}
               </span>
             </div>
 
             {p.digestHeadline && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-[13px] text-neon-blue-500 dark:text-neon-blue-400">
+              <p className="mt-1.5 flex items-start gap-1.5 text-[13px] text-accent">
                 <span className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-current" />
                 <span className="line-clamp-1">{p.digestHeadline}</span>
               </p>
             )}
 
             {p.overview && (
-              <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-void-500 dark:text-void-400">
+              <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-ink-3">
                 {p.overview}
               </p>
             )}
@@ -111,7 +111,7 @@ export function AtlasRollup() {
                     className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-void-600 dark:text-void-300 ${
                       a.stale
                         ? 'border-amber-400/50 bg-amber-400/10'
-                        : 'border-void-200 dark:border-void-700'
+                        : 'border-line'
                     }`}
                   >
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: a.color ?? '#4cb8f0' }} />
@@ -121,7 +121,7 @@ export function AtlasRollup() {
               ))}
             </div>
 
-            <div className="mt-3 flex items-center gap-3 font-mono text-[11px] text-void-400">
+            <div className="mt-3 flex items-center gap-3 font-mono text-[11px] text-ink-3">
               {p.staleCount > 0
                 ? <span className="text-amber-500 dark:text-amber-400">{p.staleCount} stale</span>
                 : <span className="text-emerald-500 dark:text-emerald-400">all fresh</span>}
@@ -134,16 +134,16 @@ export function AtlasRollup() {
 
       {unscanned.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold text-void-500 dark:text-void-400">Not scanned yet</h2>
+          <h2 className="mb-3 text-sm font-semibold text-ink-3">Not scanned yet</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {unscanned.map(p => (
               <a
                 key={p.projectId}
                 href={`/project/${p.projectId}?view=code`}
-                className="rounded-xl border border-dashed border-void-300 p-3.5 transition-colors hover:border-neon-blue-400/40 dark:border-void-700"
+                className="rounded-xl border border-dashed border-line-strong p-3.5 transition-colors hover:border-accent/40"
               >
-                <h3 className="text-sm font-medium text-void-700 dark:text-void-300">{p.name}</h3>
-                <p className="mt-1 text-[12px] text-void-400 dark:text-void-500">
+                <h3 className="text-sm font-medium text-ink-2">{p.name}</h3>
+                <p className="mt-1 text-[12px] text-ink-3">
                   {p.error ? p.error : 'No atlas — open Code Mode and run the first scan.'}
                 </p>
               </a>

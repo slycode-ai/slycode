@@ -16,6 +16,10 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { syncStoreToUpdates, checkContextPrimingTemplate } from './sync-updates';
 import { assertProvidersParity } from './providers-parity';
+import { assertRuntimeDeps, MESSAGING_OPTIONAL_DYNAMIC_IMPORTS } from './lib/runtime-deps';
+import { copyWhatsNew } from './lib/whats-new-copy';
+// @ts-ignore — plain ESM helper shared with build/smoke/tts-encode-smoke.mjs
+import { writeEsmBoundary } from './lib/esm-boundary.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -162,6 +166,8 @@ function buildBridge(): void {
   if (fs.existsSync(bridgeDist)) {
     copyDirRecursive(bridgeDist, destDir);
   }
+  // bridge/dist is ES-module .js; the package root is CommonJS (no "type").
+  writeEsmBoundary(destDir);
 }
 
 function buildMessaging(): void {
@@ -173,6 +179,26 @@ function buildMessaging(): void {
   const messagingDist = path.join(ROOT, 'messaging', 'dist');
   if (fs.existsSync(messagingDist)) {
     copyDirRecursive(messagingDist, destDir);
+  }
+  // messaging/dist is ES-module .js; the package root is CommonJS (no "type").
+  // Without this, plain `node dist/messaging/index.js` depends on Node's
+  // automatic module detection (missing in older Node 20/22). Feature 087, P1.
+  writeEsmBoundary(destDir);
+}
+
+// Installed copies resolve messaging's imports from packages/slycode/package.json,
+// not messaging/node_modules — fail if dist imports a package not declared there.
+function checkMessagingRuntimeDeps(): void {
+  const report = assertRuntimeDeps({
+    label: 'messaging/dist',
+    distDir: path.join(ROOT, 'messaging', 'dist'),
+    packageJsonPath: path.join(PKG_DIR, 'package.json'),
+    optionalDynamicImports: MESSAGING_OPTIONAL_DYNAMIC_IMPORTS,
+  });
+  const excused = report.allowlisted.length ? `; optional, not shipped: ${report.allowlisted.map(a => a.pkg).join(', ')}` : '';
+  console.log(`  \u2713 messaging runtime deps declared (${report.used.length} packages, ${report.scannedFiles} files${excused})`);
+  for (const pkg of report.staleAllowlist) {
+    console.warn(`  ! optional-import allowlist entry "${pkg}" is unused or now declared — remove it from build/lib/runtime-deps.ts`);
   }
 }
 
@@ -331,6 +357,11 @@ function copyTemplates(): void {
       fs.copyFileSync(srcPath, path.join(TEMPLATES_DIR, t.dest));
     }
   }
+
+  // What's new release splash content (#0379): read by the web app from
+  // node_modules/@slycode/slycode/templates/whats-new/ in installs.
+  const whatsNew = copyWhatsNew(path.join(ROOT, 'data', 'whats-new'), path.join(TEMPLATES_DIR, 'whats-new'));
+  console.log(`  ✓ whats-new: ${whatsNew.length ? whatsNew.join(', ') : 'no release content'}`);
 
   // Kanban seed (empty/minimal template)
   const kanbanSeed = {
@@ -515,6 +546,7 @@ async function main(): Promise<void> {
     buildCreateSlycode();
     buildBridge();
     buildMessaging();
+    checkMessagingRuntimeDeps();
     buildWeb();
 
     console.log('');

@@ -64,17 +64,17 @@ function parseDiffLines(patch: string): DiffLine[] {
 }
 
 const lineStyles: Record<string, string> = {
-  add: 'bg-emerald-950/40 text-emerald-300',
-  remove: 'bg-red-950/40 text-red-300',
-  context: 'text-void-300',
-  header: 'bg-neon-blue-950/30 text-neon-blue-300 font-medium',
+  add: 'bg-emerald-950/40 text-st-done',
+  remove: 'bg-red-950/40 text-danger-text',
+  context: 'text-ink-2',
+  header: 'bg-accent/30 text-accent font-medium',
 };
 
 const lineNoStyles: Record<string, string> = {
   add: 'text-emerald-600',
   remove: 'text-red-600',
-  context: 'text-void-600',
-  header: 'text-neon-blue-600',
+  context: 'text-ink-3',
+  header: 'text-accent',
 };
 
 const prefixChars: Record<string, string> = {
@@ -136,35 +136,35 @@ function ActionDiffViewer({
       className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-void-700 bg-void-850 shadow-(--shadow-overlay)">
+      <div className="mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-line bg-surface-2 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-void-700 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-void-100">{entry.name}</h3>
+            <h3 className="text-lg font-semibold text-ink-1">{entry.name}</h3>
             {isNew ? (
-              <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs font-medium text-emerald-300">
+              <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs font-medium text-st-done">
                 New action
               </span>
             ) : (
-              <span className="rounded bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-300">
+              <span className="rounded bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-warn-text">
                 v{entry.currentVersion} &rarr; v{entry.upstreamVersion}
               </span>
             )}
-            <span className="text-xs text-void-500">
-              <span className="text-emerald-400">+{stats.additions}</span>
+            <span className="text-xs text-ink-3">
+              <span className="text-st-done">+{stats.additions}</span>
               {' '}
-              <span className="text-red-400">-{stats.deletions}</span>
+              <span className="text-danger-text">-{stats.deletions}</span>
             </span>
           </div>
           <div className="flex items-center gap-2">
             {!isNew && (
-              <div className="flex gap-1 rounded-md border border-void-700 bg-void-900 p-0.5">
+              <div className="flex gap-1 rounded-md border border-line bg-surface-2 p-0.5">
                 <button
                   onClick={() => setViewMode('diff')}
                   className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     viewMode === 'diff'
-                      ? 'bg-void-800 text-void-100 shadow-sm'
-                      : 'text-void-400 hover:text-void-200'
+                      ? 'bg-surface-1 text-ink-1 shadow-sm'
+                      : 'text-ink-3 hover:text-ink-1'
                   }`}
                 >
                   Diff
@@ -173,8 +173,8 @@ function ActionDiffViewer({
                   onClick={() => setViewMode('new')}
                   className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     viewMode === 'new'
-                      ? 'bg-void-800 text-void-100 shadow-sm'
-                      : 'text-void-400 hover:text-void-200'
+                      ? 'bg-surface-1 text-ink-1 shadow-sm'
+                      : 'text-ink-3 hover:text-ink-1'
                   }`}
                 >
                   Full
@@ -183,7 +183,7 @@ function ActionDiffViewer({
             )}
             <button
               onClick={onClose}
-              className="rounded p-1 text-void-400 hover:bg-void-800 hover:text-void-200"
+              className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -194,14 +194,14 @@ function ActionDiffViewer({
 
         {/* Metadata chips */}
         {(entry.changedFields?.length || entry.newClasses?.length) && (
-          <div className="flex flex-wrap gap-2 border-b border-void-700 px-5 py-3">
+          <div className="flex flex-wrap gap-2 border-b border-line px-5 py-3">
             {entry.changedFields?.map(field => (
-              <span key={field} className="rounded bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+              <span key={field} className="rounded bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-warn-text">
                 {field} changed
               </span>
             ))}
             {entry.newClasses?.length ? (
-              <span className="rounded bg-neon-blue-900/40 px-2 py-0.5 text-[10px] font-medium text-neon-blue-300">
+              <span className="rounded bg-accent/40 px-2 py-0.5 text-[10px] font-medium text-accent">
                 New classes: {entry.newClasses.join(', ')}
               </span>
             ) : null}
@@ -230,8 +230,8 @@ function ActionDiffViewer({
               ))
             ) : (
               newContent.split('\n').map((line, i) => (
-                <div key={i} className="flex text-void-300">
-                  <span className="w-10 flex-shrink-0 select-none px-2 text-right text-void-600">
+                <div key={i} className="flex text-ink-2">
+                  <span className="w-10 flex-shrink-0 select-none px-2 text-right text-ink-3">
                     {i + 1}
                   </span>
                   <span className="flex-1 whitespace-pre-wrap break-all px-2">{line}</span>
@@ -358,16 +358,16 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
-        <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-void-200 bg-white shadow-(--shadow-overlay) dark:border-void-700 dark:bg-void-850">
+        <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-line bg-surface-1 shadow-(--shadow-overlay)">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-void-200 px-5 py-4 dark:border-void-700">
+          <div className="flex items-center justify-between border-b border-line px-5 py-4">
             <div className="flex items-center gap-3">
-              <svg className="h-5 w-5 text-neon-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="h-5 w-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
               </svg>
-              <h3 className="text-lg font-semibold text-void-900 dark:text-void-100">Action Updates</h3>
+              <h3 className="text-lg font-semibold text-ink-1">Action Updates</h3>
               {pendingEntries.length > 0 && (
-                <span className="rounded-full bg-neon-blue-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-white">
                   {pendingEntries.length}
                 </span>
               )}
@@ -391,7 +391,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
               )}
               <button
                 onClick={onClose}
-                className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-700 dark:hover:bg-void-800 dark:hover:text-void-200"
+                className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
               >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -404,15 +404,15 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
           <div className="flex-1 overflow-y-auto p-4">
             {loading ? (
               <div className="flex items-center justify-center py-16">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-neon-blue-400 border-t-transparent" />
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
               </div>
             ) : pendingEntries.length === 0 && acceptedEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16">
-                <svg className="mb-3 h-10 w-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="mb-3 h-10 w-10 text-st-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-sm font-medium text-void-500 dark:text-void-400">All actions are up to date</p>
-                <p className="mt-1 text-xs text-void-400 dark:text-void-500">No updates available</p>
+                <p className="text-sm font-medium text-ink-3">All actions are up to date</p>
+                <p className="mt-1 text-xs text-ink-3">No updates available</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -441,13 +441,13 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                   return (
                     <div
                       key={entry.name}
-                      className="rounded-lg border border-void-200 bg-white p-4 dark:border-void-700 dark:bg-void-850"
+                      className="rounded-lg border border-line bg-surface-1 p-4"
                     >
                       <div className="flex items-start justify-between gap-4">
                         {/* Info */}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-void-900 dark:text-void-100">
+                            <span className="text-sm font-semibold text-ink-1">
                               {entry.name}
                             </span>
                             {entry.status === 'update' ? (
@@ -462,7 +462,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                           </div>
 
                           {/* Version info */}
-                          <div className="mt-1 flex items-center gap-2 text-xs text-void-500 dark:text-void-400">
+                          <div className="mt-1 flex items-center gap-2 text-xs text-ink-3">
                             {entry.status === 'update' ? (
                               <span>v{entry.currentVersion} &rarr; v{entry.upstreamVersion}</span>
                             ) : (
@@ -472,7 +472,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
 
                           {/* Description */}
                           {entry.description && (
-                            <p className="mt-1.5 text-xs text-void-500 line-clamp-2 dark:text-void-400">
+                            <p className="mt-1.5 text-xs text-ink-3 line-clamp-2">
                               {entry.description}
                             </p>
                           )}
@@ -486,7 +486,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                                 </span>
                               ))}
                               {entry.newClasses?.length ? (
-                                <span className="rounded bg-neon-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-neon-blue-700 dark:bg-neon-blue-900/40 dark:text-neon-blue-300">
+                                <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent">
                                   +{entry.newClasses.length} class{entry.newClasses.length !== 1 ? 'es' : ''}
                                 </span>
                               ) : null}
@@ -501,7 +501,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                           <button
                             onClick={() => handlePreview(entry)}
                             aria-label="Preview changes"
-                            className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-700 dark:border-void-600 dark:bg-void-800 dark:hover:bg-void-700 dark:hover:text-void-200"
+                            className="rounded-md border border-line-strong bg-surface-2 p-1.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -535,7 +535,7 @@ export function ActionUpdatesModal({ onClose }: ActionUpdatesModalProps) {
                           <button
                             onClick={() => handleDismiss(entry)}
                             aria-label="Dismiss this version"
-                            className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:border-void-600 dark:bg-void-800 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                            className="rounded-md border border-line-strong bg-surface-2 p-1.5 text-ink-3 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

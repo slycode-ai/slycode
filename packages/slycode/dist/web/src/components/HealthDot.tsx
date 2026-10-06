@@ -27,7 +27,7 @@ export function HealthDot({ health, size = 'sm' }: HealthDotProps) {
             Health: {health.score}/100 ({health.level})
           </div>
           {health.factors.map((f) => (
-            <div key={f.name} className="text-void-500 dark:text-void-400">
+            <div key={f.name} className="text-ink-3">
               {f.name}: {f.value}/{f.maxValue}
             </div>
           ))}

@@ -11,7 +11,7 @@
  * Spending boundary (design doc, "Codex round 3"): OFF before dispatch to
  * messaging = no render; OFF after dispatch = delivery cancelled via the
  * revision check, credit already spent. The setEnabled chain is never held
- * across a render call, so OFF never waits on ElevenLabs.
+ * across a render call, so OFF never waits on the TTS provider.
  */
 import fs from 'fs/promises';
 import path from 'path';

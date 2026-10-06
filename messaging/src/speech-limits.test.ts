@@ -54,3 +54,17 @@ test('boundary is inclusive; chars guard bites independently', () => {
   assert.equal(exceedsLimits(countSpeech('x'.repeat(25)), limits), true);
   assert.equal(exceedsLimits(countSpeech('[tag] [tag] [tag] [tag] [tag]'), { maxWords: 3, maxChars: 20 }), true);
 });
+
+test('multi-word square tags and known angle tags are direction, not words (feature 087)', () => {
+  assert.equal(countSpeech('[short pause]').words, 0);
+  assert.equal(countSpeech('[short pause] all good').words, 2);
+  assert.equal(countSpeech('[continues after a beat] the migration failed').words, 3);
+  assert.equal(countSpeech('<laugh>').words, 0);
+  assert.equal(countSpeech('<laugh> ok <short pause> done').words, 2);
+  assert.equal(countSpeech('<LAUGH> ok').words, 1);
+  assert.equal(countSpeech('x < 5').words, 3);
+  assert.equal(countSpeech('a <b> c').words, 3);
+  assert.equal(countSpeech('[short pause] <sigh> ok').effectiveText, 'ok');
+  assert.equal(isEmptySpeech('[short pause] <laugh> [long pause]'), true);
+  assert.equal(countSpeech('[short pause] ok').chars, '[short pause] ok'.length);
+});

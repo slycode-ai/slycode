@@ -52,13 +52,13 @@ export function FileAtlas({ projectId, path, areaId, snapshot, onOpenAt }: FileA
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-[1100px]">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">Codebase Atlas · file atlas</p>
+        <p className="font-mono text-[11px] text-(--cm-faint)">Codebase Atlas · file atlas</p>
         <h1 className="mb-5 text-balance text-lg font-semibold text-(--cm-text)">
           {path.split('/').pop()}
           <span className="ml-3 font-mono text-[11px] font-normal text-(--cm-muted)">{path} · {symbols.length} symbols</span>
           <button
             onClick={() => onOpenAt(path, 1)}
-            className="ml-4 rounded border border-(--cm-line2) px-2 py-0.5 align-middle font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+            className="ml-4 rounded border border-(--cm-line2) px-2 py-0.5 align-middle font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
           >
             Open whole file
           </button>
@@ -71,17 +71,17 @@ export function FileAtlas({ projectId, path, areaId, snapshot, onOpenAt }: FileA
               onClick={() => onOpenAt(path, s.line)}
               className="cm-card rounded-[9px] border border-(--cm-line2) bg-(--cm-panel2) p-3 text-left transition-all hover:-translate-y-0.5 hover:border-(--cm-atlas)"
             >
-              <h4 className="flex items-baseline gap-2 font-mono text-[12.5px] font-bold text-(--cm-text)">
-                <span className="rounded bg-(--cm-atlas-dim) px-1 py-px font-sans text-[9px] font-semibold uppercase tracking-wide text-(--cm-atlas)">
+              <h4 className="flex items-baseline gap-2 font-mono text-[13px] font-bold text-(--cm-text)">
+                <span className="rounded bg-(--cm-atlas-dim) px-1 py-px font-sans text-[11px] font-semibold text-(--cm-atlas)">
                   {s.kind}
                 </span>
                 <span className="truncate">
                   {s.container ? <span className="font-normal text-(--cm-faint)">{s.container}.</span> : null}
                   {s.name}
                 </span>
-                <span className="ml-auto shrink-0 text-[9.5px] font-normal text-(--cm-faint)">:{s.line}</span>
+                <span className="ml-auto shrink-0 text-[11px] font-normal text-(--cm-faint)">:{s.line}</span>
               </h4>
-              <p className="mt-1.5 text-[11.5px] leading-relaxed text-(--cm-muted)">
+              <p className="mt-1.5 text-[12px] leading-relaxed text-(--cm-muted)">
                 {summaries[s.name] ?? <span className="text-(--cm-faint) italic">no AI summary yet — the coverage crawl fills these in over successive refreshes</span>}
               </p>
             </button>

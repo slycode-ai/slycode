@@ -44,23 +44,24 @@ const eventLabels: Record<EventType, string> = {
   session_stopped: 'Session',
 };
 
+// Event labels are ink; only events that carry state get a state colour.
 const eventColors: Record<EventType, string> = {
-  card_created: 'text-green-500',
-  card_moved: 'text-neon-blue-500 dark:text-neon-blue-400',
-  card_updated: 'text-void-500',
-  card_reordered: 'text-void-500',
-  card_prompt: 'text-purple-500',
-  problem_added: 'text-red-500',
-  problem_resolved: 'text-green-500',
-  skill_deployed: 'text-neon-blue-500 dark:text-neon-blue-400',
-  skill_removed: 'text-amber-500',
-  skill_imported: 'text-purple-500',
-  session_started: 'text-green-500',
-  session_stopped: 'text-void-500',
+  card_created: 'text-ink-2',
+  card_moved: 'text-ink-2',
+  card_updated: 'text-ink-3',
+  card_reordered: 'text-ink-3',
+  card_prompt: 'text-ink-2',
+  problem_added: 'text-danger-text',
+  problem_resolved: 'text-live-text',
+  skill_deployed: 'text-ink-2',
+  skill_removed: 'text-ink-3',
+  skill_imported: 'text-ink-2',
+  session_started: 'text-live-text',
+  session_stopped: 'text-ink-3',
 };
 
 const FALLBACK_LABEL = 'Event';
-const FALLBACK_COLOR = 'text-void-500';
+const FALLBACK_COLOR = 'text-ink-3';
 
 function eventLabel(type: string): string {
   return eventLabels[type as EventType] ?? FALLBACK_LABEL;
@@ -83,11 +84,11 @@ function relativeTime(timestamp: string): string {
 }
 
 const stageColors: Record<string, string> = {
-  backlog: 'text-void-500 dark:text-void-400',
-  design: 'text-neon-blue-600 dark:text-neon-blue-400',
-  implementation: 'text-neon-blue-500 dark:text-neon-blue-400',
-  testing: 'text-neon-orange-500 dark:text-neon-orange-400',
-  done: 'text-green-500 dark:text-green-400',
+  backlog: 'text-st-backlog',
+  design: 'text-st-design',
+  implementation: 'text-st-impl',
+  testing: 'text-st-test',
+  done: 'text-st-done',
 };
 
 /**
@@ -99,16 +100,16 @@ function renderMovedDetail(detail: string): React.ReactNode {
   if (!match) return detail;
 
   const [, title, fromStage, toStage] = match;
-  const fromColor = stageColors[fromStage] || 'text-void-500';
-  const toColor = stageColors[toStage] || 'text-void-500';
+  const fromColor = stageColors[fromStage] || 'text-ink-3';
+  const toColor = stageColors[toStage] || 'text-ink-3';
 
   return (
     <>
-      <span className="text-void-500 dark:text-void-400">Card </span>
-      <span className="font-medium text-void-700 dark:text-void-300">{title}</span>
-      <span className="text-void-500 dark:text-void-400"> moved from </span>
+      <span className="text-ink-3">Card </span>
+      <span className="font-medium text-ink-2">{title}</span>
+      <span className="text-ink-3"> moved from </span>
       <span className={`font-medium ${fromColor}`}>{fromStage}</span>
-      <span className="text-void-500 dark:text-void-400"> to </span>
+      <span className="text-ink-3"> to </span>
       <span className={`font-medium ${toColor}`}>{toStage}</span>
     </>
   );
@@ -165,16 +166,16 @@ export function ActivityFeed({ projectFilter, projectNames }: ActivityFeedProps)
   }, {});
 
   return (
-    <div className="rounded-lg border border-void-200 bg-white shadow-(--shadow-surface) dark:border-void-700 dark:bg-void-850">
+    <div className="rounded-xl border border-line bg-surface-1">
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
-        <h3 className="text-sm font-semibold text-void-900 dark:text-void-100">
+        <h3 className="text-[13px] font-semibold text-ink-1">
           Activity
         </h3>
         <svg
-          className={`h-4 w-4 text-void-400 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+          className={`h-4 w-4 text-ink-3 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -185,15 +186,15 @@ export function ActivityFeed({ projectFilter, projectNames }: ActivityFeedProps)
       </button>
 
       {!isCollapsed && (
-        <div className="max-h-64 overflow-y-auto border-t border-void-100 dark:border-void-700">
+        <div className="max-h-80 overflow-y-auto border-t border-line">
           {events.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-void-500 dark:text-void-400">
+            <div className="px-4 py-6 text-center text-sm text-ink-3">
               No recent activity
             </div>
           ) : (
             Object.entries(grouped).map(([day, dayEvents]) => (
               <div key={day}>
-                <div className="sticky top-0 bg-void-50 px-4 py-1 text-xs font-medium text-void-500 dark:bg-void-800 dark:text-void-400">
+                <div className="sticky top-0 bg-surface-2 px-4 py-1 text-[11px] font-medium text-ink-3">
                   {day}
                 </div>
                 {dayEvents.map((event) => {
@@ -210,14 +211,14 @@ export function ActivityFeed({ projectFilter, projectNames }: ActivityFeedProps)
                         {eventLabel(event.type)}
                       </span>
                       {badge && (
-                        <span className="mt-0.5 max-w-[7rem] flex-shrink-0 truncate rounded border border-void-200 px-1 font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500 dark:border-void-700 dark:text-void-400">
+                        <span className="mt-0.5 max-w-[7rem] flex-shrink-0 truncate rounded border border-line px-1 font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-ink-3">
                           {badge}
                         </span>
                       )}
-                      <span className="flex-1 text-left text-void-600 dark:text-void-400">
+                      <span className="flex-1 text-left text-ink-2">
                         {renderDetail(event)}
                       </span>
-                      <span className="flex-shrink-0 text-void-400 dark:text-void-500">
+                      <span className="flex-shrink-0 text-ink-3">
                         {relativeTime(event.timestamp)}
                       </span>
                     </>
@@ -236,7 +237,7 @@ export function ActivityFeed({ projectFilter, projectNames }: ActivityFeedProps)
                       key={event.id}
                       type="button"
                       onClick={() => router.push(href)}
-                      className="flex w-full items-start gap-2 px-4 py-2 text-xs hover:bg-void-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-neon-blue-400 dark:hover:bg-void-800"
+                      className="flex w-full items-start gap-2 px-4 py-2 text-xs hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
                     >
                       {row}
                     </button>

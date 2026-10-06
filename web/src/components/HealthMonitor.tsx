@@ -18,19 +18,19 @@ const REFRESH_INTERVAL = 5000;
 function getThresholdStyles(value: number): { background: string; glow: string } {
   if (value >= THRESHOLDS.critical) {
     return {
-      background: 'linear-gradient(90deg, #ff3b5c, #ff6b81)',
-      glow: '0 0 8px rgba(255, 59, 92, 0.5)',
+      background: 'var(--danger)',
+      glow: 'none',
     };
   }
   if (value >= THRESHOLDS.warning) {
     return {
-      background: 'linear-gradient(90deg, #ff8c00, #ffaa00)',
-      glow: '0 0 8px rgba(255, 140, 0, 0.5)',
+      background: 'var(--warn)',
+      glow: 'none',
     };
   }
   return {
-    background: 'linear-gradient(90deg, #00e676, #00bfff)',
-    glow: '0 0 8px rgba(0, 191, 255, 0.4)',
+    background: 'var(--ink-3)',
+    glow: 'none',
   };
 }
 
@@ -57,15 +57,13 @@ function MiniBar({ value, label }: MiniBarProps) {
 
   return (
     <Tooltip content={`${label}: ${value.toFixed(1)}%`} placement="bottom">
-      <div
-        className="relative h-3.5 w-10 overflow-hidden rounded bg-void-200 dark:bg-void-700"
-      >
-        <div
-          className="h-full rounded transition-all duration-300"
-          style={{ width: `${percentage}%`, background: styles.background, boxShadow: styles.glow }}
-        />
-        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white mix-blend-difference">
-          {shortLabel}
+      <div className="flex items-center gap-1 font-mono text-[10px] leading-4 text-ink-3">
+        <span>{shortLabel}</span>
+        <span className="relative h-1 w-6 overflow-hidden rounded-full bg-line-strong">
+          <span
+            className="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
+            style={{ width: `${percentage}%`, background: styles.background }}
+          />
         </span>
       </div>
     </Tooltip>
@@ -85,12 +83,12 @@ function ExpandedBar({ value, label, detail }: ExpandedBarProps) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-void-600 dark:text-void-400">{label}</span>
-        <span className="font-mono text-void-800 dark:text-void-200">
+        <span className="text-ink-2">{label}</span>
+        <span className="font-mono text-ink-1">
           {detail || `${value.toFixed(1)}%`}
         </span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-void-200 dark:bg-void-700">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
         <div
           className="h-full rounded-full transition-all duration-300"
           style={{ width: `${percentage}%`, background: styles.background, boxShadow: styles.glow }}
@@ -114,11 +112,11 @@ function StopAllModal({ isOpen, terminalCount, nonResumableCount, onConfirm, onC
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="mx-4 w-full max-w-sm rounded-lg bg-void-50 p-6 shadow-(--shadow-overlay) dark:bg-void-800">
-        <h3 className="mb-2 text-lg font-semibold text-void-900 dark:text-void-100">
+      <div className="mx-4 w-full max-w-sm rounded-lg bg-surface-2 p-6 shadow-(--shadow-overlay)">
+        <h3 className="mb-2 text-lg font-semibold text-ink-1">
           Stop All Terminals?
         </h3>
-        <p className="mb-4 text-sm text-void-600 dark:text-void-400">
+        <p className="mb-4 text-sm text-ink-2">
           This will stop all {terminalCount} running terminal{terminalCount !== 1 ? 's' : ''}.
           Any active sessions will be terminated.
         </p>
@@ -132,7 +130,7 @@ function StopAllModal({ isOpen, terminalCount, nonResumableCount, onConfirm, onC
           <button
             onClick={onCancel}
             disabled={isLoading}
-            className="rounded-lg border border-void-300 px-4 py-2 text-sm font-medium text-void-700 hover:bg-void-50 dark:border-void-600 dark:text-void-300 dark:hover:bg-void-700"
+            className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink-2 hover:bg-surface-3"
           >
             Cancel
           </button>
@@ -262,7 +260,7 @@ export function HealthMonitor() {
         onClick={() => setIsExpanded(prev => !prev)}
       >
         {/* Compact View */}
-        <div className="flex items-center gap-2 rounded-lg border border-void-200 bg-void-50 px-2 py-1 dark:border-void-700 dark:bg-void-800">
+        <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-2 py-1">
           {/* Mobile: compact status dot + terminal count */}
           <div className="flex items-center gap-1.5 sm:hidden">
             <Tooltip content={`CPU: ${cpuPercent.toFixed(0)}% | Mem: ${memoryPercent.toFixed(0)}%${hasSwap ? ` | Swap: ${swapPercent.toFixed(0)}%` : ''}`} placement="bottom">
@@ -271,13 +269,13 @@ export function HealthMonitor() {
                 style={{ background: worstStyles.background }}
               />
             </Tooltip>
-            <span className="text-[10px] font-mono text-void-600 dark:text-void-400">
+            <span className="text-[10px] font-mono text-ink-2">
               {bridgeError ? '--' : bridgeTerminals}
             </span>
             {activelyWorking > 0 && (
               <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500"></span>
+                <span className="live-dot absolute inset-0 m-auto !h-full !w-full"></span>
+                
               </span>
             )}
           </div>
@@ -296,7 +294,7 @@ export function HealthMonitor() {
             {/* Terminal count */}
             <Tooltip content={`${bridgeTerminals} terminal${bridgeTerminals !== 1 ? 's' : ''} running`} placement="bottom">
               <div
-                className="flex items-center gap-0.5 text-xs text-void-600 dark:text-void-400"
+                className="flex items-center gap-0.5 text-xs text-ink-2"
               >
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -314,10 +312,10 @@ export function HealthMonitor() {
                   className="flex items-center gap-0.5"
                 >
                   <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                    <span className="live-dot absolute inset-0 m-auto !h-full !w-full"></span>
+                    
                   </span>
-                  <span className="text-xs font-mono text-green-600 dark:text-green-400">
+                  <span className="text-xs font-mono text-live-text">
                     {activelyWorking}
                   </span>
                 </div>
@@ -328,8 +326,8 @@ export function HealthMonitor() {
 
         {/* Expanded View */}
         {isExpanded && (
-          <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-void-200 bg-white p-3 shadow-(--shadow-overlay) dark:border-void-700 dark:bg-void-800">
-            <h4 className="mb-3 text-sm font-semibold text-void-900 dark:text-void-100">
+          <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-line bg-surface-1 p-3 shadow-(--shadow-overlay)">
+            <h4 className="mb-3 text-sm font-semibold text-ink-1">
               System Health
             </h4>
 
@@ -363,18 +361,18 @@ export function HealthMonitor() {
             </div>
 
             {/* Separator */}
-            <div className="my-3 border-t border-void-200 dark:border-void-700" />
+            <div className="my-3 border-t border-line" />
 
             {/* Terminal Stats */}
             <div className="mb-3 space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-void-600 dark:text-void-400">Terminals running</span>
-                <span className="font-mono text-void-800 dark:text-void-200">
+                <span className="text-ink-2">Terminals running</span>
+                <span className="font-mono text-ink-1">
                   {bridgeError ? '--' : bridgeTerminals}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-void-600 dark:text-void-400">Actively working</span>
+                <span className="text-ink-2">Actively working</span>
                 <span className={`font-mono ${activelyWorking > 0 ? 'text-green-600 dark:text-green-400' : 'text-void-800 dark:text-void-200'}`}>
                   {bridgeError ? '--' : activelyWorking}
                 </span>
@@ -384,7 +382,7 @@ export function HealthMonitor() {
             {/* Stop All Button */}
             {bridgeTerminals > 0 && !bridgeError && (
               <>
-                <div className="my-3 border-t border-void-200 dark:border-void-700" />
+                <div className="my-3 border-t border-line" />
                 <button
                   onClick={() => setShowStopModal(true)}
                   className="w-full rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"

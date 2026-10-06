@@ -71,14 +71,14 @@ export function SymbolsRail({ projectId, onOpenFile }: SymbolsRailProps) {
             onClick={() => onOpenFile({ path: s.file, line: s.line })}
             className="flex w-full items-center gap-2 rounded px-2 py-1 text-left font-mono text-[12px] text-(--cm-muted) hover:bg-(--cm-panel3) hover:text-(--cm-text)"
           >
-            <span className={`rounded px-1 py-px font-sans text-[9px] font-semibold uppercase tracking-wide ${KIND_STYLES[s.kind]}`}>
+            <span className={`rounded px-1 py-px font-sans text-[11px] font-semibold ${KIND_STYLES[s.kind]}`}>
               {s.kind}
             </span>
             <span className="truncate">
               {s.container ? <span className="text-(--cm-faint)">{s.container}.</span> : null}
               {s.name}
             </span>
-            <span className="ml-auto shrink-0 text-[9.5px] text-(--cm-faint)">{s.line}</span>
+            <span className="ml-auto shrink-0 text-[11px] text-(--cm-faint)">{s.line}</span>
           </button>
           </Tooltip>
         ))}

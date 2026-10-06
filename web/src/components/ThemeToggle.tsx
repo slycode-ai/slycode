@@ -44,7 +44,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
       <button
         onClick={toggle}
         aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-        className={`rounded-lg border border-void-200/40 bg-transparent p-2 text-void-500 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/5 hover:text-neon-blue-400 dark:border-void-700/40 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/5 dark:hover:text-neon-blue-400 ${className}`}
+        className={`rounded-lg p-2 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-1 ${className}`}
       >
         {theme === 'dark' ? (
           // Sun icon

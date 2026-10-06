@@ -1,175 +1,222 @@
+/**
+ * TTS plumbing shared by every speech path (feature 086, provider-aware since 087):
+ * per-provider semaphores, caller deadlines, the legacy ElevenLabs entry point
+ * and source-audio encoding. Rendering itself goes through SpeechRenderer
+ * (tts-render.ts) and the provider adapters in ./tts/.
+ */
 import type { VoiceConfig } from './types.js';
+import { ElevenLabsProvider, ELEVENLABS_MODEL_ID, ELEVENLABS_CONCURRENCY } from './tts/elevenlabs.js';
+import { RenderTimeoutError, RenderCancelledError, TtsProviderError } from './tts/errors.js';
+import type { AudioFormat, SourceAudio, TtsProvider, TtsProviderId } from './tts/provider.js';
+import { parseSpeech, singleChunk } from './tts/speech-markup.js';
+import { encodePcm, writeWav } from './tts/audio-encode.js';
 
-export const TTS_MODEL_ID = 'eleven_v3';
+export { RenderTimeoutError, RenderCancelledError } from './tts/errors.js';
 
-/** Per-request ElevenLabs timeout (feature 086). */
+/** ElevenLabs model id (kept for callers that predate the provider interface). */
+export const TTS_MODEL_ID = ELEVENLABS_MODEL_ID;
+
+// --- Caller deadlines (feature 087): each covers queue wait + render + encode ---
+
+/** `speak` (POST /tts/render) and the legacy direct entry point. */
 export const TTS_RENDER_TIMEOUT_MS = parseInt(process.env.TTS_RENDER_TIMEOUT_MS || '20000', 10);
+/** Telegram voice replies (POST /voice): a long reply is several Gemini chunks. */
+export const TTS_VOICE_TIMEOUT_MS = parseInt(process.env.TTS_VOICE_TIMEOUT_MS || '60000', 10);
+/** Web voice-picker previews (POST /voices/preview): one short sentence, someone waiting. */
+export const TTS_PREVIEW_TIMEOUT_MS = parseInt(process.env.TTS_PREVIEW_TIMEOUT_MS || '30000', 10);
+/** `generate` (POST /tts/generate): long narration. */
+export const TTS_GENERATE_TIMEOUT_MS = parseInt(process.env.TTS_GENERATE_TIMEOUT_MS || '120000', 10);
+
+/** Speaking-speed range (ElevenLabs' accepted range; Gemini is time-stretched within it). */
+export const SPEED_MIN = 0.7;
+export const SPEED_MAX = 1.2;
+
+/**
+ * Provider-neutral speaking speed (feature 087): TTS_SPEED, else
+ * ELEVENLABS_SPEED, else 1. ElevenLabs keeps receiving exactly
+ * ELEVENLABS_SPEED unless TTS_SPEED is set (byte-identical requests for
+ * existing installs); out-of-range values are clamped with a warning.
+ */
+export function speedFromEnv(env: Record<string, string | undefined>): { ttsSpeed: number; elevenlabsSpeed: number; warning: string | null } {
+  const raw = env.TTS_SPEED?.trim() || env.ELEVENLABS_SPEED?.trim() || '1.0';
+  const parsed = parseFloat(raw);
+  const valid = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  const ttsSpeed = Math.min(SPEED_MAX, Math.max(SPEED_MIN, valid));
+  const source = env.TTS_SPEED?.trim() ? 'TTS_SPEED' : env.ELEVENLABS_SPEED?.trim() ? 'ELEVENLABS_SPEED' : null;
+  const warning = source && ttsSpeed !== parsed ? `${source}=${raw} is outside ${SPEED_MIN}–${SPEED_MAX} (or not a number); using ${ttsSpeed}.` : null;
+  const elevenlabsSpeed = env.TTS_SPEED?.trim() ? ttsSpeed : parseFloat(env.ELEVENLABS_SPEED || '1.0');
+  return { ttsSpeed, elevenlabsSpeed, warning };
+}
+
+/** Character cap shared by /voice, /tts/generate and /tts/render (TTS_GENERATE_MAX_TEXT, default 5000). */
+export function maxSpeechText(): number {
+  return parseInt(process.env.TTS_GENERATE_MAX_TEXT || '5000', 10);
+}
+
+/** The /voice refusal for an over-long Telegram reply (feature 087), or null when it fits. */
+export function voiceTextLimitError(message: unknown, max = maxSpeechText()): string | null {
+  if (typeof message !== 'string' || message.length <= max) return null;
+  return `Telegram voice reply too long: ${message.length} characters (fixed limit ${max}; the browser word limit in Voice Settings does not apply here). Shorten it, or send it as text.`;
+}
+
 /** Max concurrent ElevenLabs requests; extra callers queue (never rejected). */
-export const TTS_RENDER_CONCURRENCY = 2;
+export const TTS_RENDER_CONCURRENCY = ELEVENLABS_CONCURRENCY;
 
-/** Thrown when a render (queue wait + ElevenLabs call) exceeds its deadline. */
-export class RenderTimeoutError extends Error {
-  constructor(ms: number) {
-    super(`ElevenLabs render timed out after ${ms}ms`);
-    this.name = 'RenderTimeoutError';
+// --- Per-provider FIFO semaphores ---------------------------------------------
+//
+// A burst of speak/generate calls cannot fan out an unbounded number of paid
+// requests at once. Queue residence is bounded by the caller's abort signal
+// (which fires at the caller's deadline or on cancel): work whose signal has
+// fired is removed from the queue and never dispatched (feature 086 review
+// finding 8).
+
+interface Waiter { grant: () => void; cancel: (err: Error) => void }
+
+class Semaphore {
+  private active = 0;
+  private readonly waiters: Waiter[] = [];
+  constructor(readonly limit: number) {}
+
+  state(): { active: number; waiting: number } {
+    return { active: this.active, waiting: this.waiters.length };
   }
-}
 
-/** Thrown when the caller abandoned the request (client disconnected) before or during the render. */
-export class RenderCancelledError extends Error {
-  constructor() {
-    super('render cancelled by caller');
-    this.name = 'RenderCancelledError';
-  }
-}
-
-// Tiny FIFO semaphore so a burst of speak/generate calls cannot fan out an
-// unbounded number of paid requests at once. Queue residence is BOUNDED by the
-// caller's deadline and cancellable by its AbortSignal: work whose deadline or
-// request has expired is removed from the queue and never dispatched (review
-// finding 8 — the per-request timeout used to start only after an unbounded
-// wait).
-interface TtsWaiter { grant: () => void; cancel: (err: Error) => void }
-let ttsActive = 0;
-const ttsWaiters: TtsWaiter[] = [];
-
-function releaseTtsSlot(): void {
-  ttsActive--;
-  const next = ttsWaiters.shift();
-  if (next) next.grant();
-}
-
-async function acquireTtsSlot(opts: { deadline: number; signal?: AbortSignal; timeoutMs: number }): Promise<() => void> {
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    releaseTtsSlot();
-  };
-  if (opts.signal?.aborted) throw new RenderCancelledError();
-  if (ttsActive < TTS_RENDER_CONCURRENCY) {
-    ttsActive++;
+  /** Resolves with a release function; rejects with the signal's reason if it fires first. */
+  async acquire(signal: AbortSignal): Promise<() => void> {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.active--;
+      const next = this.waiters.shift();
+      if (next) next.grant();
+    };
+    if (signal.aborted) throw abortReason(signal);
+    if (this.active < this.limit) {
+      this.active++;
+      return release;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const waiter: Waiter = {
+        grant: () => { cleanup(); this.active++; resolve(); },
+        cancel: (err) => { cleanup(); reject(err); },
+      };
+      const onAbort = () => {
+        const i = this.waiters.indexOf(waiter);
+        if (i >= 0) this.waiters.splice(i, 1);
+        waiter.cancel(abortReason(signal));
+      };
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.waiters.push(waiter);
+    });
     return release;
   }
-  await new Promise<void>((resolve, reject) => {
-    const waiter: TtsWaiter = {
-      grant: () => { cleanup(); ttsActive++; resolve(); },
-      cancel: (err) => { cleanup(); reject(err); },
-    };
-    const remaining = Math.max(0, opts.deadline - Date.now());
-    const timer = setTimeout(() => dropWaiter(new RenderTimeoutError(opts.timeoutMs)), remaining);
-    const onAbort = () => dropWaiter(new RenderCancelledError());
-    function cleanup() {
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new RenderCancelledError();
+}
+
+const GEMINI_TTS_CONCURRENCY = parseInt(process.env.GEMINI_TTS_CONCURRENCY || '3', 10);
+const semaphores = new Map<TtsProviderId, Semaphore>();
+
+function semaphoreFor(provider: Pick<TtsProvider, 'id' | 'concurrency'>): Semaphore {
+  let s = semaphores.get(provider.id);
+  if (!s) {
+    s = new Semaphore(provider.id === 'gemini' ? GEMINI_TTS_CONCURRENCY : provider.concurrency);
+    semaphores.set(provider.id, s);
+  }
+  return s;
+}
+
+/** Run `fn` holding one of the provider's slots; queue wait ends when `signal` fires. */
+export async function withProviderSlot<T>(provider: Pick<TtsProvider, 'id' | 'concurrency'>, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  const release = await semaphoreFor(provider).acquire(signal);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+/** Test-only visibility into the ElevenLabs semaphore. */
+export function ttsSemaphoreState(provider: TtsProviderId = 'elevenlabs'): { active: number; waiting: number } {
+  return semaphores.get(provider)?.state() ?? { active: 0, waiting: 0 };
+}
+
+/**
+ * A controller that aborts at `deadline` (RenderTimeoutError) or when the
+ * caller's own signal fires (RenderCancelledError). `dispose()` clears both.
+ */
+export function deadlineController(timeoutMs: number, deadline: number, signal?: AbortSignal): { controller: AbortController; dispose: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new RenderTimeoutError(timeoutMs)), Math.max(0, deadline - Date.now()));
+  const onAbort = () => controller.abort(new RenderCancelledError());
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  return {
+    controller,
+    dispose: () => {
       clearTimeout(timer);
-      opts.signal?.removeEventListener('abort', onAbort);
-    }
-    function dropWaiter(err: Error) {
-      const i = ttsWaiters.indexOf(waiter);
-      if (i >= 0) ttsWaiters.splice(i, 1);
-      waiter.cancel(err);
-    }
-    opts.signal?.addEventListener('abort', onAbort, { once: true });
-    ttsWaiters.push(waiter);
-  });
-  return release;
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
 }
 
-/** Test-only visibility into the semaphore. */
-export function ttsSemaphoreState(): { active: number; waiting: number } {
-  return { active: ttsActive, waiting: ttsWaiters.length };
-}
-
+/**
+ * Legacy direct ElevenLabs render (pre-087 entry point, kept for callers and
+ * tests): one deadline covers queue residence AND the ElevenLabs call.
+ */
 export async function textToSpeech(
   text: string,
   config: VoiceConfig,
   voiceIdOverride?: string,
   opts: { timeoutMs?: number; fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
 ): Promise<Buffer> {
+  const provider = new ElevenLabsProvider(config, opts.fetchImpl);
   const voiceId = voiceIdOverride || config.elevenlabsVoiceId;
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
   const timeoutMs = opts.timeoutMs ?? TTS_RENDER_TIMEOUT_MS;
-  const doFetch = opts.fetchImpl ?? fetch;
-
-  // One deadline covers queue residence AND the ElevenLabs call.
-  const deadline = Date.now() + timeoutMs;
-  const release = await acquireTtsSlot({ deadline, signal: opts.signal, timeoutMs });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
-  const onAbort = () => controller.abort();
-  opts.signal?.addEventListener('abort', onAbort, { once: true });
-  const abortError = () => (opts.signal?.aborted ? new RenderCancelledError() : new RenderTimeoutError(timeoutMs));
+  const { controller, dispose } = deadlineController(timeoutMs, Date.now() + timeoutMs, opts.signal);
   try {
-    let response: Response;
-    try {
-      response = await doFetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': config.elevenlabsApiKey,
-          'Accept': 'audio/mpeg',
-        },
-        body: JSON.stringify({
-          text,
-          model_id: TTS_MODEL_ID,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            speed: config.elevenlabsSpeed,
-          },
-          output_format: 'mp3_44100_128',
-        }),
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (controller.signal.aborted) throw abortError();
-      throw err;
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`ElevenLabs API error (${response.status}): ${errorText}`);
-    }
-
-    let arrayBuffer: ArrayBuffer;
-    try {
-      arrayBuffer = await response.arrayBuffer();
-    } catch (err) {
-      if (controller.signal.aborted) throw abortError();
-      throw err;
-    }
-    return Buffer.from(arrayBuffer);
+    const source = await withProviderSlot(provider, controller.signal, () =>
+      provider.render({ chunk: singleChunk(parseSpeech(text)), voiceId, signal: controller.signal }));
+    return source.data;
   } finally {
-    clearTimeout(timer);
-    opts.signal?.removeEventListener('abort', onAbort);
-    release();
+    dispose();
   }
 }
 
 /**
- * Render TTS audio in the requested format.
- *
- * Always calls ElevenLabs once (returns MP3) unless `sourceMp3` is supplied,
- * in which case it reuses that buffer (used by /voice's OGG-fail fallback to
- * avoid re-hitting the API).
- *
- * - format='mp3': zero transcode, returns the ElevenLabs buffer directly.
- * - format='ogg': runs convertToOgg(); throws on failure (caller decides
- *   fallback policy — /voice falls back to MP3, /tts/generate returns 502).
- *
- * Returns the source MP3 alongside the final buffer so callers can implement
- * format fallbacks without a second API call.
+ * Encode provider source audio into the format the caller asked for.
+ * - MP3 source → mp3: zero transcode, the provider's bytes untouched.
+ * - MP3 source → ogg: ffmpeg (Telegram voice bubble); throws on failure so the
+ *   caller decides fallback policy (/voice falls back to MP3, generate → 502).
+ * - PCM source (Gemini): bundled WASM encoders, phase 2.
  */
-export async function renderTtsAudio(
-  text: string,
-  config: VoiceConfig,
-  opts: { format: 'ogg' | 'mp3'; voiceIdOverride?: string; sourceMp3?: Buffer; signal?: AbortSignal },
-): Promise<{ buffer: Buffer; format: 'ogg' | 'mp3'; sourceMp3: Buffer }> {
-  const sourceMp3 = opts.sourceMp3 ?? await textToSpeech(text, config, opts.voiceIdOverride, { signal: opts.signal });
-  if (opts.format === 'mp3') {
-    return { buffer: sourceMp3, format: 'mp3', sourceMp3 };
+export async function encodeSource(source: SourceAudio, format: AudioFormat): Promise<Buffer> {
+  if (source.kind === 'mp3') {
+    if (format === 'mp3') return source.data;
+    if (format === 'ogg') return convertToOgg(source.data);
+    // WAV from an MP3 provider: decode to raw samples, then a fresh header (no metadata carried over).
+    return writeWav({ data: await decodeMp3ToPcm(source.data), sampleRate: 24000 });
   }
-  const ogg = await convertToOgg(sourceMp3);
-  return { buffer: ogg, format: 'ogg', sourceMp3 };
+  return encodePcm({ data: source.data, sampleRate: source.sampleRate }, format);
+}
+
+/** ffmpeg decode of an MP3 to s16le mono 24 kHz (ElevenLabs → WAV only). */
+async function decodeMp3ToPcm(mp3: Buffer): Promise<Buffer> {
+  const { spawn } = await import('child_process');
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', ['-i', 'pipe:0', '-f', 's16le', '-ac', '1', '-ar', '24000', 'pipe:1'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const chunks: Buffer[] = [];
+    ffmpeg.stdout.on('data', (c: Buffer) => chunks.push(c));
+    ffmpeg.stderr.on('data', () => {});
+    ffmpeg.on('close', (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new TtsProviderError('format_unavailable', `WAV from ElevenLabs needs ffmpeg to decode the MP3 (exit ${code}); use mp3 or ogg`, 500))));
+    ffmpeg.on('error', () => reject(new TtsProviderError('format_unavailable', 'WAV from ElevenLabs needs ffmpeg, which is not installed; use mp3 or ogg', 500)));
+    ffmpeg.stdin.on('error', () => {});
+    ffmpeg.stdin.end(mp3);
+  });
 }
 
 export async function convertToOgg(mp3Buffer: Buffer): Promise<Buffer> {

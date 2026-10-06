@@ -34,7 +34,7 @@ function CheckIcon() {
 
 function ChevronIcon() {
   return (
-    <svg className="h-3 w-3 text-void-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className="h-3 w-3 text-ink-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
     </svg>
   );
@@ -133,7 +133,7 @@ function SubMenu({ items, parentRect, onClose, onAction }: SubMenuProps) {
       tabIndex={-1}
       onKeyDown={handleKeyDown}
       data-context-submenu
-      className="context-menu-no-ring fixed z-[52] min-w-[140px] rounded-lg border border-void-200 bg-white py-1 shadow-(--shadow-overlay) dark:border-void-600 dark:bg-void-800"
+      className="context-menu-no-ring fixed z-[52] min-w-[140px] rounded-lg border border-line bg-surface-1 py-1 shadow-(--shadow-overlay)"
       style={{ top: position.top, left: position.left }}
     >
       {items.map((item, i) => (
@@ -149,11 +149,11 @@ function SubMenu({ items, parentRect, onClose, onAction }: SubMenuProps) {
           }}
           className={`flex w-full cursor-default items-center gap-2 px-3 py-1.5 text-left text-xs outline-none transition-colors ${
             item.disabled
-              ? 'text-void-400 dark:text-void-500'
+              ? 'text-ink-3'
               : item.danger
                 ? 'cursor-pointer text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
-                : 'cursor-pointer text-void-700 hover:bg-void-100 dark:text-void-300 dark:hover:bg-void-700'
-          } ${focusIndex === i && !item.disabled ? 'bg-void-100 dark:bg-void-700' : ''}`}
+                : 'cursor-pointer text-ink-2 hover:bg-surface-3'
+          } ${focusIndex === i && !item.disabled ? 'bg-surface-2' : ''}`}
         >
           <span className="w-3.5 shrink-0">
             {item.checked && <CheckIcon />}
@@ -325,7 +325,7 @@ export function ContextMenu({ open, position, groups, accentColor, onClose }: Co
       tabIndex={-1}
       role="menu"
       onKeyDown={handleKeyDown}
-      className="context-menu-no-ring fixed z-[51] min-w-[180px] overflow-hidden rounded-lg border border-void-200 bg-white shadow-(--shadow-overlay) dark:border-void-600 dark:bg-void-800"
+      className="context-menu-no-ring fixed z-[51] min-w-[180px] overflow-hidden rounded-lg border border-line bg-surface-1 shadow-(--shadow-overlay)"
       style={{ top: menuPos.y, left: menuPos.x }}
     >
       {/* Accent color bar */}
@@ -339,7 +339,7 @@ export function ContextMenu({ open, position, groups, accentColor, onClose }: Co
       <div className="py-1">
         {flatItems.map((entry, fi) => {
           if (entry.type === 'separator') {
-            return <div key={`sep-${fi}`} className="my-1 border-t border-void-200 dark:border-void-700" />;
+            return <div key={`sep-${fi}`} className="my-1 border-t border-line" />;
           }
 
           const { item } = entry;
@@ -363,11 +363,11 @@ export function ContextMenu({ open, position, groups, accentColor, onClose }: Co
               }}
               className={`flex w-full cursor-default items-center gap-2 px-3 py-1.5 text-left text-xs outline-none transition-colors select-none ${
                 isDisabledLeaf
-                  ? 'text-void-400 dark:text-void-500'
+                  ? 'text-ink-3'
                   : item.danger
                     ? 'cursor-pointer text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
-                    : 'cursor-pointer text-void-700 hover:bg-void-100 dark:text-void-300 dark:hover:bg-void-700'
-              } ${focusIndex === fi && !isDisabledLeaf ? 'bg-void-100 dark:bg-void-700' : ''}`}
+                    : 'cursor-pointer text-ink-2 hover:bg-surface-3'
+              } ${focusIndex === fi && !isDisabledLeaf ? 'bg-surface-2' : ''}`}
             >
               <span className="w-3.5 shrink-0">
                 {item.checked && <CheckIcon />}

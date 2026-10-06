@@ -6,8 +6,12 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f0f1f4;
-  --foreground: #08090b;
+  /* Visual elevation: light = "Instrument" skin (flat, neutral, restrained). */
+  --vd-50:#fafafa; --vd-100:#f4f4f5; --vd-200:#e4e4e7; --vd-300:#d4d4d8; --vd-400:#71717a; --vd-500:#52525b; --vd-600:#3f3f46; --vd-700:#27272a; --vd-800:#1c1c1f; --vd-850:#141416; --vd-900:#0f0f11; --vd-950:#09090b;
+  --nb-50:#eff6fb; --nb-100:#dbeaf5; --nb-200:#b5d4ea; --nb-300:#7fb3d9; --nb-400:#2f7fbf; --nb-500:#1d6aa8; --nb-600:#155a91; --nb-700:#124a77; --nb-800:#103c60; --nb-900:#0d2f4a; --nb-950:#081c2d;
+  --no-50:#fdf5ec; --no-100:#f8e3c8; --no-200:#efc48f; --no-300:#df9a4f; --no-400:#c46200; --no-500:#a35200; --no-600:#8a4500; --no-700:#6e3700; --no-800:#552a00; --no-900:#3f1f00; --no-950:#241200;
+  --background: #fafafa;
+  --foreground: #09090b;
   --neon-blue: #00bfff;
   --neon-orange: #ff8c00;
   --shadow-surface: 0 1px 4px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1);
@@ -16,55 +20,85 @@
 }
 
 @theme inline {
+  /* Visual elevation semantic tokens (values per theme at the end of this file) */
+  --color-page: var(--page);
+  --color-surface-1: var(--s1);
+  --color-surface-2: var(--s2);
+  --color-surface-3: var(--s3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-primary: var(--primary-bg);
+  --color-on-primary: var(--primary-ink);
+  --color-live: var(--live);
+  --color-live-text: var(--live-text);
+  --color-agent: var(--agent);
+  --color-agent-text: var(--agent-text);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-warn: var(--warn);
+  --color-warn-text: var(--warn-text);
+  --color-st-backlog: var(--st-backlog);
+  --color-st-design: var(--st-design);
+  --color-st-impl: var(--st-impl);
+  --color-st-test: var(--st-test);
+  --color-st-done: var(--st-done);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-jetbrains-mono);
 
   /* Neon Blue scale */
-  --color-neon-blue-50: #e6f9ff;
-  --color-neon-blue-100: #b3edff;
-  --color-neon-blue-200: #66daff;
-  --color-neon-blue-300: #33cdff;
-  --color-neon-blue-400: #00bfff;
-  --color-neon-blue-500: #00a3d9;
-  --color-neon-blue-600: #0088b3;
-  --color-neon-blue-700: #006d8f;
-  --color-neon-blue-800: #00526b;
-  --color-neon-blue-900: #003d52;
-  --color-neon-blue-950: #001f2b;
+  --color-neon-blue-50: var(--nb-50);
+  --color-neon-blue-100: var(--nb-100);
+  --color-neon-blue-200: var(--nb-200);
+  --color-neon-blue-300: var(--nb-300);
+  --color-neon-blue-400: var(--nb-400);
+  --color-neon-blue-500: var(--nb-500);
+  --color-neon-blue-600: var(--nb-600);
+  --color-neon-blue-700: var(--nb-700);
+  --color-neon-blue-800: var(--nb-800);
+  --color-neon-blue-900: var(--nb-900);
+  --color-neon-blue-950: var(--nb-950);
 
   /* Neon Orange scale */
-  --color-neon-orange-50: #fff4e6;
-  --color-neon-orange-100: #ffddb3;
-  --color-neon-orange-200: #ffbe66;
-  --color-neon-orange-300: #ffa533;
-  --color-neon-orange-400: #ff8c00;
-  --color-neon-orange-500: #d97700;
-  --color-neon-orange-600: #b36200;
-  --color-neon-orange-700: #8f4e00;
-  --color-neon-orange-800: #6b3a00;
-  --color-neon-orange-900: #522d00;
-  --color-neon-orange-950: #2b1700;
+  --color-neon-orange-50: var(--no-50);
+  --color-neon-orange-100: var(--no-100);
+  --color-neon-orange-200: var(--no-200);
+  --color-neon-orange-300: var(--no-300);
+  --color-neon-orange-400: var(--no-400);
+  --color-neon-orange-500: var(--no-500);
+  --color-neon-orange-600: var(--no-600);
+  --color-neon-orange-700: var(--no-700);
+  --color-neon-orange-800: var(--no-800);
+  --color-neon-orange-900: var(--no-900);
+  --color-neon-orange-950: var(--no-950);
 
   /* Void neutral scale (cool blue bias) */
-  --color-void-50: #f0f1f4;
-  --color-void-100: #dfe1e7;
-  --color-void-200: #b8bcc6;
-  --color-void-300: #9096a3;
-  --color-void-400: #6b7080;
-  --color-void-500: #4a4f5c;
-  --color-void-600: #363a45;
-  --color-void-700: #252830;
-  --color-void-800: #1a1d24;
-  --color-void-850: #12151a;
-  --color-void-900: #0d0f13;
-  --color-void-950: #08090b;
+  --color-void-50: var(--vd-50);
+  --color-void-100: var(--vd-100);
+  --color-void-200: var(--vd-200);
+  --color-void-300: var(--vd-300);
+  --color-void-400: var(--vd-400);
+  --color-void-500: var(--vd-500);
+  --color-void-600: var(--vd-600);
+  --color-void-700: var(--vd-700);
+  --color-void-800: var(--vd-800);
+  --color-void-850: var(--vd-850);
+  --color-void-900: var(--vd-900);
+  --color-void-950: var(--vd-950);
 }
 
 .dark {
-  --background: #08090b;
-  --foreground: #dfe1e7;
+  /* Visual elevation: dark = "Signal Den" skin (matte graphite, light means live). */
+  --vd-50:#f0f1f4; --vd-100:#e3e5ea; --vd-200:#c3c7d0; --vd-300:#a3a9b6; --vd-400:#8c93a4; --vd-500:#5f6676; --vd-600:#3a404c; --vd-700:#282d36; --vd-800:#1b1f26; --vd-850:#14171c; --vd-900:#0f1115; --vd-950:#0a0b0e;
+  --nb-50:#e8f8ff; --nb-100:#c7efff; --nb-200:#8fe0ff; --nb-300:#4cd0ff; --nb-400:#22c0ff; --nb-500:#10a8e6; --nb-600:#0b8bc0; --nb-700:#0a6f99; --nb-800:#0b5675; --nb-900:#0b3f56; --nb-950:#072431;
+  --no-50:#fff4e6; --no-100:#ffddb3; --no-200:#ffbe66; --no-300:#ffa533; --no-400:#ff9a1f; --no-500:#e07f00; --no-600:#b36200; --no-700:#8f4e00; --no-800:#6b3a00; --no-900:#522d00; --no-950:#2b1700;
+  --background: #0a0b0e;
+  --foreground: #e3e5ea;
   --shadow-surface: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
   --shadow-card: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 30px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,191,255,0.06);
   --shadow-overlay: 0 32px 80px rgba(0,0,0,0.9), 0 12px 32px rgba(0,0,0,0.6), 0 0 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,191,255,0.1);
@@ -73,7 +107,8 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* No font-family here: an unlayered rule beats Tailwind's layered .font-sans
+     (Geist) on <body>, which is how the whole app ended up in Arial. */
 }
 
 /* ========== Neon Selection & Focus ========== */
@@ -1046,4 +1081,304 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .conn-budget-breathe { animation: none; }
+}
+
+
+/* =====================================================================
+   VISUAL ELEVATION RESKIN (branch visual-elevation, card #0374)
+   One structure, two skins:
+     light = "Instrument"  — flat, neutral, hairline borders, squarer corners
+     dark  = "Signal Den"  — matte graphite, light means an agent is working
+   Everything below overrides the original neon theme above it, so the
+   whole reskin can be reviewed (or rolled back) from this one block.
+   ===================================================================== */
+:root {
+  --page:#fafafa; --s1:#ffffff; --s2:#f4f4f5; --s3:#ececee;
+  --line:#e4e4e7; --line-strong:#d4d4d8;
+  --ink-1:#18181b; --ink-2:#52525b; --ink-3:#6b6b73;
+  --accent:#1d6aa8; --primary-bg:#18181b; --primary-ink:#ffffff;
+  --live:#0b9466; --live-text:#06704c;
+  --agent:#c46200; --agent-text:#9a4a00;
+  --danger:#d92d4a; --danger-text:#b81d3a;
+  --warn:#a87400; --warn-text:#7f5800;
+  --st-backlog:#71717a; --st-design:#6d5bd0; --st-impl:#1d6aa8; --st-test:#c2410c; --st-done:#15803d;
+  /* Instrument: flat. Borders carry structure; shadows only for overlays. */
+  --shadow-surface: none;
+  --shadow-card: 0 1px 2px rgba(24,24,27,0.05);
+  --shadow-overlay: 0 16px 40px -12px rgba(24,24,27,0.25), 0 0 0 1px rgba(24,24,27,0.06);
+  /* Squarer corners in the light skin */
+  --radius-md: 0.25rem; --radius-lg: 0.3125rem; --radius-xl: 0.375rem; --radius-2xl: 0.5rem;
+}
+.dark {
+  --page:#0a0b0e; --s1:#14171c; --s2:#101318; --s3:#1f242c;
+  --line:#232832; --line-strong:#313846;
+  --ink-1:#e8eaf0; --ink-2:#b0b6c4; --ink-3:#8c93a4;
+  --accent:#22c0ff; --primary-bg:#22c0ff; --primary-ink:#04121a;
+  --live:#3ee6a8; --live-text:#3ee6a8;
+  --agent:#ff9a1f; --agent-text:#ffa53d;
+  --danger:#ff4d6a; --danger-text:#ff6b83;
+  --warn:#ffc247; --warn-text:#ffc247;
+  --st-backlog:#8e97aa; --st-design:#a08cff; --st-impl:#2cc4ff; --st-test:#ff7a59; --st-done:#4fd193;
+  /* Signal Den: depth from surface lightness + a 1px highlight, never a neon ring */
+  --shadow-surface: inset 0 1px 0 rgba(255,255,255,0.03);
+  --shadow-card: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 3px rgba(0,0,0,0.45);
+  --shadow-overlay: 0 32px 80px -16px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(255,255,255,0.06);
+  --radius-md: 0.375rem; --radius-lg: 0.5rem; --radius-xl: 0.75rem; --radius-2xl: 1rem;
+}
+
+::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+* { scrollbar-color: var(--line-strong) transparent; }
+
+/* Textures retired (grain, perlin depth, lane grid). The terminal keeps its
+   CRT texture in the dark skin only. */
+.grain::after, .depth-glow::before { display: none !important; }
+.lane-texture { background-image: none !important; }
+:root:not(.dark) .terminal-texture { display: none; }
+.neon-header-border::after { background: var(--line); }
+
+/* Pulsing neon glows retired. Working state is the live wire (below). */
+.active-glow-card, :root:not(.dark) .active-glow-card,
+.active-glow-automation, :root:not(.dark) .active-glow-automation { animation: none; outline: none; }
+.active-glow-global, :root:not(.dark) .active-glow-global { animation: none; filter: none; }
+.active-glow-automation-btn, :root:not(.dark) .active-glow-automation-btn,
+.active-glow-board-btn, :root:not(.dark) .active-glow-board-btn { animation: none; filter: none; box-shadow: inset 0 0 0 1px var(--live); }
+.active-glow-border-left, :root:not(.dark) .active-glow-border-left { animation: none; box-shadow: inset 2px 0 0 var(--live); }
+
+/* Live wire: the one thing that animates on its own — an agent is working. */
+.live-wire { position: absolute; left: 0; right: 0; top: 0; height: 2px; overflow: hidden; background: var(--live); pointer-events: none; z-index: 1; }
+.dark .live-wire { box-shadow: 0 0 8px rgba(62,230,168,0.55); }
+.live-wire::after { content: ''; position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); animation: live-wire-run 2.4s cubic-bezier(.2,.8,.2,1) infinite; }
+@keyframes live-wire-run { to { left: 100%; } }
+.live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--live); flex: none; }
+.live-dot::after { content: ''; position: absolute; inset: -4px; border-radius: 9999px; border: 2px solid var(--live); opacity: 0; animation: live-dot-ping 2.4s cubic-bezier(.2,.8,.2,1) infinite; }
+@keyframes live-dot-ping { 0% { opacity: .7; transform: scale(.5); } 70%, 100% { opacity: 0; transform: scale(1.4); } }
+.ended-ring { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; box-shadow: inset 0 0 0 2px var(--ink-3); flex: none; }
+
+/* Priority signal bars (ink; critical alone in red) */
+.prio-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.prio-bars i { display: block; width: 2px; border-radius: 1px; background: var(--line-strong); }
+.prio-bars i:nth-child(1) { height: 4px; } .prio-bars i:nth-child(2) { height: 6px; } .prio-bars i:nth-child(3) { height: 9px; } .prio-bars i:nth-child(4) { height: 12px; }
+.prio-bars.p1 i:nth-child(-n+1), .prio-bars.p2 i:nth-child(-n+2), .prio-bars.p3 i:nth-child(-n+3) { background: var(--ink-2); }
+.prio-bars.p4 i { background: var(--danger); }
+
+/* Unseen fold follows the (theme-dependent) card radius */
+.unseen-card::after { border-top-right-radius: var(--radius-lg); }
+.unseen-card-backlight { background-image: none; }
+
+/* CRT status LED: one step larger, still a multiple-of-8 pixel face */
+.card-status .card-status-text { font-size: 8px; }
+
+/* SlyCode signature: the fox's two halves (cyan → amber) as a fine rule under
+   the app's top bars. Stronger in the dark skin, a whisper in the light one. */
+.fox-rule { position: relative; }
+.fox-rule::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, #22c0ff 18%, #22c0ff 42%, #ff9a1f 58%, #ff9a1f 82%, transparent 100%); opacity: .55; }
+.dark .fox-rule::after { opacity: .85; box-shadow: 0 0 6px rgba(34,192,255,.25); }
+
+/* Shipping moment: the Done lane's stage rule flashes once when a card lands */
+.lane-flash { animation: lane-flash 900ms cubic-bezier(.2,.8,.2,1) 1; }
+@keyframes lane-flash { 30% { height: 4px; box-shadow: 0 0 14px currentColor, 0 0 4px currentColor; } }
+
+/* Automation chevrons only while a run is in progress */
+.automation-chevron:not(.automation-chevron-active)::before { display: none; }
+
+/* Dashboard tile: open cards per lane (backlog hatched = not started) */
+.stage-bar { display: flex; gap: 2px; height: 6px; }
+.stage-bar > span { border-radius: 2px; min-width: 4px; }
+.sb-backlog { background: repeating-linear-gradient(135deg, var(--st-backlog) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-backlog) 55%, transparent); }
+.sb-design { background: var(--st-design); }
+.sb-impl { background: var(--st-impl); }
+.sb-test { background: var(--st-test); }
+.sb-empty { background: var(--line); }
+.sb-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-wire::after, .live-dot::after { animation: none; display: none; }
+  .lane-flash { animation: none; }
+}
+
+
+/* ── Stage pipeline (card modal header) — press and hold a stage to move the card ── */
+.stage-pipe { gap: 2px; }
+.stage-pipe .sp-step {
+  --sp-c: var(--st-backlog);
+  position: relative;
+  height: 24px;
+  padding: 0 14px 0 16px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: var(--s3);
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%, 7px 50%);
+  transition: background-color 120ms, color 120ms;
+  cursor: pointer;
+}
+.stage-pipe .sp-step:first-child { padding-left: 10px; clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%); border-radius: 4px 0 0 4px; }
+.stage-pipe .sp-step:last-child { padding-right: 10px; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 7px 50%); border-radius: 0 4px 4px 0; }
+.stage-pipe .sp-step:hover { color: var(--ink-1); background: color-mix(in srgb, var(--sp-c) 18%, var(--s3)); }
+.stage-pipe .sp-step:focus-visible { outline: none; color: var(--ink-1); background: color-mix(in srgb, var(--sp-c) 28%, var(--s3)); }
+.stage-pipe .sp-step.is-current { background: var(--sp-c); color: #fff; cursor: default; }
+.dark .stage-pipe .sp-step.is-current { color: #0b0d12; }
+.stage-pipe .sp-design { --sp-c: var(--st-design); }
+.stage-pipe .sp-implementation { --sp-c: var(--st-impl); }
+.stage-pipe .sp-testing { --sp-c: var(--st-test); }
+.stage-pipe .sp-done { --sp-c: var(--st-done); }
+
+/* Press-and-hold to move: the chip fills in its stage colour over --hold-ms
+   (STAGE_HOLD_MS in StagePipeline.tsx); release early and it drains back. */
+.stage-pipe .sp-step {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+.stage-pipe .sp-fill {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--sp-c) 55%, var(--s3));
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 160ms cubic-bezier(.2,.8,.2,1);
+  pointer-events: none;
+}
+.stage-pipe .sp-label { position: relative; }
+.stage-pipe .sp-step.is-holding { color: var(--ink-1); }
+.stage-pipe .sp-step.is-holding .sp-fill {
+  transform: scaleX(1);
+  transition: transform var(--hold-ms, 1000ms) cubic-bezier(.45,.05,.4,1);
+}
+.stage-pipe .sp-step.is-committed { animation: sp-commit 320ms cubic-bezier(.2,.8,.2,1); }
+@keyframes sp-commit {
+  0% { filter: brightness(1.35); transform: scale(1.06); }
+  100% { filter: none; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still a hold, but a static indicator: a flat tint while held, no sweep or pulse. */
+  .stage-pipe .sp-fill { transition: none; }
+  .stage-pipe .sp-step.is-holding .sp-fill { transition: none; background: color-mix(in srgb, var(--sp-c) 32%, var(--s3)); }
+  .stage-pipe .sp-step.is-committed { animation: none; }
+}
+
+/* ── Code Mode on the shared tokens (proposal 7.2) ──────────────────────────
+   The --cm-* names stay so no component changes; they now point at the
+   shared palette. Accent replaces the teal (teal survives only on the header's
+   Code-mode badge). Drift = warn amber, fresh = done green. */
+.code-mode {
+  --cm-bg: var(--s2);
+  --cm-bg2: var(--s3);
+  --cm-panel: var(--s1);
+  --cm-panel2: var(--s1);
+  --cm-panel3: var(--s3);
+  --cm-topbar: var(--s1);
+  --cm-code-bg: var(--s1);
+  --cm-line: var(--line);
+  --cm-line2: var(--line-strong);
+  --cm-text: var(--ink-1);
+  --cm-muted: var(--ink-2);
+  --cm-faint: var(--ink-3);
+  --cm-atlas: var(--accent);
+  --cm-atlas-dim: color-mix(in srgb, var(--accent) 12%, transparent);
+  --cm-stale: var(--warn-text);
+  --cm-stale-dim: color-mix(in srgb, var(--warn) 12%, transparent);
+  --cm-fresh: var(--st-done);
+  --cm-grid: color-mix(in srgb, var(--line) 55%, transparent);
+  --cm-changed: color-mix(in srgb, var(--warn) 50%, transparent);
+}
+.dark .code-mode {
+  --cm-bg: var(--page);
+  --cm-bg2: var(--s2);
+  --cm-panel: var(--s2);
+  --cm-panel2: var(--s1);
+  --cm-panel3: var(--s3);
+  --cm-topbar: var(--s2);
+  --cm-code-bg: var(--s2);
+  --cm-line: var(--line);
+  --cm-line2: var(--line-strong);
+  --cm-text: var(--ink-1);
+  --cm-muted: var(--ink-2);
+  --cm-faint: var(--ink-3);
+  --cm-atlas: var(--accent);
+  --cm-atlas-dim: color-mix(in srgb, var(--accent) 14%, transparent);
+  --cm-stale: var(--warn-text);
+  --cm-stale-dim: color-mix(in srgb, var(--warn) 14%, transparent);
+  --cm-fresh: var(--st-done);
+  --cm-grid: color-mix(in srgb, var(--line) 70%, transparent);
+  --cm-changed: color-mix(in srgb, var(--warn) 60%, transparent);
+}
+
+/* Board header: the rule follows the lanes below it — each stage colour peaks
+   over the centre of its lane (positions published by ProjectKanban; even
+   fifths until measured). Dashboard and Code Mode keep the fox gradient. */
+.fox-rule.lane-rule::after {
+  background: linear-gradient(90deg,
+    var(--st-backlog) var(--lane-c1, 10%),
+    var(--st-design) var(--lane-c2, 30%),
+    var(--st-impl) var(--lane-c3, 50%),
+    var(--st-test) var(--lane-c4, 70%),
+    var(--st-done) var(--lane-c5, 90%));
+  opacity: .75;
+  box-shadow: none;
+}
+.dark .fox-rule.lane-rule::after { opacity: .92; }
+
+/* ── Lane heads: each lane's header carries its stage hue (#0374 follow-up)
+   Inside the header the wash grades from full strength at the stage edge down
+   to a fraction of it at the header's bottom, then eases out (smoothstep, so
+   no visible line) and has fully faded just behind the top of the first card.
+   --lane-head-h must match the fixed lane header (h-11) in KanbanColumn.tsx.
+   Knobs per theme:
+     --lane-wash          strength at the top edge
+     --lane-wash-end      fraction of that strength left at the header's bottom
+     --lane-wash-falloff  length of the ease-out below the header
+   --lane-ink is the hue for small text on the wash (darkened in light so the
+   count passes 4.5:1). */
+:root {
+  /* Light: no wash (owner, 2026-10-06), just the stage edge. Raise to bring it back. */
+  --lane-wash: 0%;
+  --lane-wash-end: 0.45;
+  --lane-wash-falloff: 20px;
+  --lane-head-h: 2.75rem;
+}
+.dark {
+  --lane-wash: 16%;
+  --lane-wash-end: 0.45;
+  --lane-wash-falloff: 20px;
+}
+.lane {
+  --lane: var(--st-backlog);
+  --lane-ink: color-mix(in srgb, var(--lane) 72%, var(--ink-1));
+  --lw-b: calc(var(--lane-wash) * var(--lane-wash-end));
+  background-image: linear-gradient(to bottom,
+    color-mix(in srgb, var(--lane) var(--lane-wash), transparent) 0,
+    color-mix(in srgb, var(--lane) var(--lw-b), transparent) var(--lane-head-h),
+    color-mix(in srgb, var(--lane) calc(var(--lw-b) * .84), transparent) calc(var(--lane-head-h) + var(--lane-wash-falloff) * .25),
+    color-mix(in srgb, var(--lane) calc(var(--lw-b) * .5), transparent) calc(var(--lane-head-h) + var(--lane-wash-falloff) * .5),
+    color-mix(in srgb, var(--lane) calc(var(--lw-b) * .16), transparent) calc(var(--lane-head-h) + var(--lane-wash-falloff) * .75),
+    transparent calc(var(--lane-head-h) + var(--lane-wash-falloff)));
+}
+.dark .lane { --lane-ink: var(--lane); }
+.lane-design { --lane: var(--st-design); }
+.lane-implementation { --lane: var(--st-impl); }
+.lane-testing { --lane: var(--st-test); }
+.lane-done { --lane: var(--st-done); }
+.lane-count { color: var(--lane-ink); }
+
+/* What's new splash (#0379). One orchestrated moment: the panel rises and the
+   version's waveform draws in bar by bar, once per open. Static with reduced motion. */
+.whats-new-panel { animation: wn-in 260ms cubic-bezier(.2,.8,.2,1) both; }
+.whats-new-wave {
+  -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent);
+          mask-image: linear-gradient(90deg, #000 70%, transparent);
+}
+.whats-new-wave > i {
+  transform-origin: 50% 50%;
+  animation: wn-bar 520ms cubic-bezier(.3,1.4,.4,1) both;
+  animation-delay: calc(140ms + var(--n) * 14ms);
+}
+@keyframes wn-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes wn-bar { from { transform: scaleY(.06); opacity: .3; } }
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-panel, .whats-new-wave > i { animation: none; }
 }

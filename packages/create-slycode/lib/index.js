@@ -104,6 +104,9 @@ async function runSetup(rl, autoYes) {
             openaiKey: '',
             elevenLabsKey: '',
             elevenLabsVoiceId: '',
+            ttsProvider: '',
+            geminiKey: '',
+            geminiVoice: '',
             installService: false,
         };
     }
@@ -162,15 +165,28 @@ async function runSetup(rl, autoYes) {
     console.log('');
     console.log('  Voice (optional)');
     console.log('  ────────────────');
-    console.log('  Enable voice messages: speech-to-text uses OpenAI Whisper,');
-    console.log('  text-to-speech uses ElevenLabs. Both are optional — text messaging');
-    console.log('  works without them. You can configure these later via .env or Telegram commands.');
+    console.log('  Enable voice messages: speech-to-text uses OpenAI, and voice replies use');
+    console.log('  ElevenLabs or Google Gemini (your choice). Both are optional — text messaging');
+    console.log('  works without them. You can configure these later via .env or the web settings.');
     console.log('');
     const openaiKey = await prompt(rl, 'OpenAI API key for voice transcription (Enter to skip)');
-    const elevenLabsKey = await prompt(rl, 'ElevenLabs API key for voice replies (Enter to skip)');
+    const providerAnswer = (await prompt(rl, 'Voice replies: elevenlabs, gemini, or skip', 'skip')).trim().toLowerCase();
+    const ttsProvider = providerAnswer.startsWith('e') ? 'elevenlabs' : providerAnswer.startsWith('g') ? 'gemini' : '';
+    let elevenLabsKey = '';
     let elevenLabsVoiceId = '';
-    if (elevenLabsKey) {
-        elevenLabsVoiceId = await prompt(rl, 'ElevenLabs voice ID (Enter for default)');
+    let geminiKey = '';
+    let geminiVoice = '';
+    if (ttsProvider === 'elevenlabs') {
+        elevenLabsKey = await prompt(rl, 'ElevenLabs API key (Enter to skip)');
+        if (elevenLabsKey)
+            elevenLabsVoiceId = await prompt(rl, 'ElevenLabs voice ID (Enter for default)');
+    }
+    else if (ttsProvider === 'gemini') {
+        console.log('  Use a key from a Google project with billing enabled: on the free tier, Google');
+        console.log('  uses what you send to improve its products.');
+        geminiKey = await prompt(rl, 'Gemini API key (Enter to skip)');
+        if (geminiKey)
+            geminiVoice = await prompt(rl, 'Gemini voice, e.g. Zuri, Sulafat, Kore (Enter for Zuri)');
     }
     // --- System service ---
     let installService = false;
@@ -187,6 +203,8 @@ async function runSetup(rl, autoYes) {
         timezone, host, webPort, bridgePort, messagingPort,
         telegramToken, telegramUserId,
         openaiKey, elevenLabsKey, elevenLabsVoiceId,
+        ttsProvider: ttsProvider && (elevenLabsKey || geminiKey) ? ttsProvider : '',
+        geminiKey, geminiVoice,
         installService,
     };
 }
@@ -220,7 +238,7 @@ function writeEnvFile(dir, answers) {
         '# Backend: openai (default) | aws-transcribe | local',
         '# STT_BACKEND=openai',
         '#',
-        '# OpenAI Whisper API. Get a key at: https://platform.openai.com/api-keys',
+        '# OpenAI speech-to-text (gpt-transcribe). Get a key at: https://platform.openai.com/api-keys',
         `OPENAI_API_KEY=${answers.openaiKey}`,
         '#',
         '# AWS Transcribe (set STT_BACKEND=aws-transcribe)',
@@ -232,13 +250,24 @@ function writeEnvFile(dir, answers) {
         '# AWS_TRANSCRIBE_S3_BUCKET=your-bucket-name',
         '',
         '# ── Voice: Text-to-Speech (optional) ──────────────────────────────',
-        '# Used to send voice replies back to you via Telegram.',
-        '# Uses ElevenLabs API. Get a key at: https://elevenlabs.io/app/settings/api-keys',
+        '# Voice replies (Telegram, spoken summaries in the web terminal, generated',
+        '# audio) use ONE provider per install: elevenlabs or gemini. Switch any time in',
+        '# the web Voice Settings or with `sly-messaging tts provider <name>`.',
+        `TTS_PROVIDER=${answers.ttsProvider}`,
+        '# Speaking speed for both providers (0.7–1.2; ELEVENLABS_SPEED also works)',
+        'TTS_SPEED=1.00',
+        '',
+        '# ElevenLabs. Get a key at: https://elevenlabs.io/app/settings/api-keys',
         `ELEVENLABS_API_KEY=${answers.elevenLabsKey}`,
-        '# Voice ID for TTS. Browse voices at: https://elevenlabs.io/voice-library',
+        '# Voice ID. Browse voices at: https://elevenlabs.io/voice-library',
         `ELEVENLABS_VOICE_ID=${answers.elevenLabsVoiceId}`,
-        '# Speech speed (1.0 = normal, 0.5 = slow, 1.5 = fast)',
-        'ELEVENLABS_SPEED=1.00',
+        '',
+        '# Google Gemini TTS. Get a key at: https://aistudio.google.com/apikey',
+        '# Use a project with billing enabled: free-tier content is used by Google to',
+        '# improve its products.',
+        `GEMINI_API_KEY=${answers.geminiKey}`,
+        `GEMINI_TTS_VOICE=${answers.geminiVoice}`,
+        '# GEMINI_TTS_MODEL=gemini-3.8-flash-tts   # or gemini-3.8-flash-lite-tts',
         '',
     ];
     fs.writeFileSync(path.join(dir, '.env'), lines.join('\n'));
@@ -497,6 +526,28 @@ function findTemplateFile(workspaceDir, relativePath) {
         return devSibling;
     return null;
 }
+/**
+ * What's new splash (#0379): a brand-new workspace has nothing "new" to show,
+ * so record the installed version as already seen. A workspace WITHOUT this
+ * file predates the feature, and the web app shows it the current release's
+ * notes once. Never overwrites an existing file.
+ */
+function seedWhatsNewState(dir) {
+    const dest = path.join(dir, 'data', 'whats-new-state.json');
+    if (fs.existsSync(dest))
+        return;
+    try {
+        const pkgPath = path.join(dir, 'node_modules', '@slycode', 'slycode', 'package.json');
+        const version = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version;
+        if (typeof version !== 'string' || !version)
+            return;
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, JSON.stringify({ lastSeenVersion: version, seenAt: new Date().toISOString() }, null, 2) + '\n');
+    }
+    catch {
+        // Package not installed: nothing to seed. Worst case is one splash on first load.
+    }
+}
 function deployStoreActions(dir) {
     const storeTemplates = findStoreTemplates(dir);
     if (!storeTemplates)
@@ -677,6 +728,8 @@ async function main(args) {
             copyFileNoFollow(providersTemplate, providersDest);
         }
     }
+    // No What's new splash on a fresh workspace
+    seedWhatsNewState(resolvedDir);
     // Seed terminal-classes.json from package templates
     const tcTemplate = findTemplateFile(resolvedDir, 'terminal-classes.json');
     if (tcTemplate) {

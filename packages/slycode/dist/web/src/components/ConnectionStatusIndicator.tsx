@@ -106,7 +106,7 @@ export function ConnectionStatusIndicator({
   if (showingSuccess && !isDisconnected) {
     return (
       <div
-        className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-green-500/50 bg-void-50 px-3 py-2 text-sm text-green-700 shadow-(--shadow-card) dark:bg-void-900 dark:text-green-400`}
+        className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-green-500/50 bg-surface-2 px-3 py-2 text-sm text-green-700 shadow-(--shadow-card) dark:text-green-400`}
       >
         <svg
           className="h-4 w-4 flex-shrink-0"
@@ -130,7 +130,7 @@ export function ConnectionStatusIndicator({
   if (status === 'reconnecting') {
     return (
       <div
-        className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-neon-blue-400/40 bg-void-50 px-3 py-2 text-sm text-neon-blue-600 shadow-(--shadow-card) dark:bg-void-900 dark:text-neon-blue-400`}
+        className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-accent/40 bg-surface-2 px-3 py-2 text-sm text-accent shadow-(--shadow-card)`}
       >
         <svg
           className="h-4 w-4 flex-shrink-0 animate-spin"
@@ -154,7 +154,7 @@ export function ConnectionStatusIndicator({
         <span>Reconnecting...</span>
         <button
           onClick={() => reconnectAll(true)}
-          className="ml-1 flex-shrink-0 rounded px-1.5 py-0.5 text-xs font-medium hover:bg-neon-blue-400/10 dark:hover:bg-neon-blue-400/10"
+          className="ml-1 flex-shrink-0 rounded px-1.5 py-0.5 text-xs font-medium hover:bg-accent/10"
         >
           Retry
         </button>
@@ -165,7 +165,7 @@ export function ConnectionStatusIndicator({
   // Disconnected state
   return (
     <div
-      className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-red-500/50 bg-void-50 px-3 py-2 text-sm text-red-700 shadow-(--shadow-card) dark:bg-void-900 dark:text-red-400`}
+      className={`fixed ${positionClasses[position]} z-50 flex items-center gap-2 whitespace-nowrap rounded-lg border border-red-500/50 bg-surface-2 px-3 py-2 text-sm text-red-700 shadow-(--shadow-card) dark:text-red-400`}
     >
       <svg
         className="h-4 w-4 flex-shrink-0"

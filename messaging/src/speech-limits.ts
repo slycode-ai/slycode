@@ -5,9 +5,12 @@
  * file (and speech-limits.test.ts of its test). Change both together.
  *
  * Words are counted on the raw text TTS will actually receive: whitespace
- * tokens, minus bracketed audio tags like "[pause]" (ElevenLabs v3 tags are
- * spoken as direction, not words). Characters count everything, tags
- * included, so a tag-stuffed or CJK/no-space text is still bounded.
+ * tokens, minus audio tags — square "[pause]" / "[short pause]" (the portable
+ * vocabulary, multi-word included) and the known Gemini angle tags
+ * ("<laugh>", "<short pause>") — because tags are direction, not words
+ * (feature 087). Unknown "<...>" stays text ("x < 5" is three words).
+ * Characters count everything, tags included, so a tag-stuffed or
+ * CJK/no-space text is still bounded.
  */
 
 export interface SpeechCount {
@@ -27,12 +30,22 @@ export const MIN_MAX_SPEAK_WORDS = 1;
 export const MAX_MAX_SPEAK_WORDS = 200;
 export const CHARS_PER_WORD_GUARD = 8;
 
-const TAG_TOKEN = /^\[[^\]]*\]$/;
+/** Square audio tags: 1-40 chars, no newline ("[pause]", "[short pause]"). */
+const SQUARE_TAG = /\[[^\]\n]{1,40}\]/g;
+
+/** Gemini vocal tag names (point events) — only these count as tags in angle brackets. */
+const ANGLE_TAG_NAMES = [
+  'argh', 'breath', 'heavy breath', 'exhales', 'cackle', 'cheer', 'chuckle', 'chuckles', 'cough', 'cry',
+  'gasp', 'giggle', 'groan', 'growl', 'grunt', 'grr', 'hiss', 'laugh', 'laughs', 'laughter', 'moan',
+  'pant', 'pff', 'phew', 'scream', 'shout', 'shriek', 'sigh', 'sighs', 'sneeze', 'snicker', 'snort',
+  'sob', 'throat-clearing', 'tsk', 'whimper', 'whispers', 'whispering', 'yawn', 'short pause', 'long pause',
+];
+const ANGLE_TAG = new RegExp(`<(?:${ANGLE_TAG_NAMES.join('|')})>`, 'gi');
 
 export function countSpeech(text: string): SpeechCount {
   const raw = typeof text === 'string' ? text : '';
-  const tokens = raw.split(/\s+/).filter(t => t.length > 0);
-  const wordTokens = tokens.filter(t => !TAG_TOKEN.test(t));
+  const untagged = raw.replace(SQUARE_TAG, ' ').replace(ANGLE_TAG, ' ');
+  const wordTokens = untagged.split(/\s+/).filter(t => t.length > 0);
   return {
     words: wordTokens.length,
     chars: raw.trim().length,

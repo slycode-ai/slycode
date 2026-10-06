@@ -1,0 +1,35 @@
+{
+  "version": "0.5.0",
+  "date": "2026-10-xx",
+  "headline": "Your agents can speak in your own voice now",
+  "intro": "0.5 is the biggest update since we went public. Most of it came from using SlyCode every day on a laptop and a phone, and fixing whatever got in our way.",
+  "highlights": [
+    {
+      "icon": "audio-lines",
+      "title": "Gemini voices",
+      "body": "Choose Google Gemini as your speech provider alongside ElevenLabs. Design a voice from a description, or clone your own from two short recordings that are never kept."
+    },
+    {
+      "icon": "palette",
+      "title": "A new look",
+      "body": "Dark mode is matte graphite now and colour carries meaning: cyan is you, mint is an agent at work, amber is something scheduled. Light mode got the same care."
+    },
+    {
+      "icon": "smartphone",
+      "title": "Voice tools on your phone",
+      "body": "Voice settings, design and cloning open as proper phone sheets with the buttons in reach, and there is a mic button in the header on small screens."
+    },
+    {
+      "icon": "calendar-sync",
+      "title": "Fresh every N days",
+      "body": "An automation can keep its conversation and start fresh once it is a week old, or any age you pick, so long-running jobs keep context without growing forever."
+    }
+  ],
+  "footnote": "Design docs now open in their own window too, and the changelog has the full list of fixes.",
+  "cta": {
+    "title": "Come and say hello on Discord",
+    "body": "We have no telemetry, so we honestly can't tell who uses SlyCode. If it helps you, or gets in your way, we would love to hear about it there.",
+    "label": "Join the Discord",
+    "url": "discord"
+  }
+}

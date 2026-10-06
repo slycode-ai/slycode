@@ -29,12 +29,15 @@ import {
   type RelayCaption,
   type RelayState,
 } from '@/lib/audio-holder';
-import { PlaybackGate, unlockAutoplay, planManualPlay, describePlayError, describeMediaError, computeProgress, base64ToArrayBuffer, PROGRESS_IDLE, type PlaybackProgress } from '@/lib/speaker-playback-gate';
+import type { SpeechHealth } from '@/lib/speech-health';
+import { PlaybackGate, unlockAutoplay, planManualPlay, planPlayRejection, isAutoPlayable, handoverReceivedAt, describePlayError, describeMediaError, computeProgress, base64ToArrayBuffer, PROGRESS_IDLE, AUTO_RETRY_DELAY_MS, type PlaybackProgress } from '@/lib/speaker-playback-gate';
 
 export interface SpeakerAvailability {
   /** null until the first probe answers */
   messagingRunning: boolean | null;
   tts: boolean | null;
+  /** Why speech isn't ready, exactly as the messaging speech-health DTO words it (feature 087). */
+  ttsReason: string | null;
   /** Human reason when spoken replies cannot work right now. */
   reason: string | null;
 }
@@ -94,17 +97,21 @@ interface SpeakerStatePayload {
   enabled: boolean;
   revision: number;
   subscribers?: number;
-  messaging?: { configured?: boolean; tts?: boolean | null };
+  messaging?: { configured?: boolean; tts?: boolean | null; speech?: SpeechHealth | null };
+}
+
+/** The DTO's reason message when speech isn't ready (shown as given), else null. */
+function speechReason(speech: SpeechHealth | null | undefined): string | null {
+  return speech && !speech.ready && typeof speech.reason?.message === 'string' ? speech.reason.message : null;
 }
 
 const QUEUE_MAX = 5;
-const QUEUE_TTL_MS = 90_000;
 const GAP_MS = 3000;
 const TOGGLE_ON_NOTICE = 'Sound is enabled. Ask each session you want spoken summaries from, including sessions already open.';
 
-function availabilityReason(a: { messagingRunning: boolean | null; tts: boolean | null }): string | null {
+function availabilityReason(a: { messagingRunning: boolean | null; tts: boolean | null; ttsReason?: string | null }): string | null {
   if (a.messagingRunning === false) return 'Spoken replies unavailable: messaging service is off';
-  if (a.tts === false) return 'Spoken replies unavailable: ElevenLabs key not set';
+  if (a.tts === false) return `Spoken replies unavailable: ${a.ttsReason ?? 'the voice provider is not set up'}`;
   return null;
 }
 
@@ -112,7 +119,7 @@ export function useSpeakerController(): SpeakerController {
   const [enabled, setEnabledState] = useState<boolean | null>(null);
   const [revision, setRevision] = useState(0);
   const [subscribers, setSubscribers] = useState(0);
-  const [availability, setAvailability] = useState<SpeakerAvailability>({ messagingRunning: null, tts: null, reason: null });
+  const [availability, setAvailability] = useState<SpeakerAvailability>({ messagingRunning: null, tts: null, ttsReason: null, reason: null });
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -139,6 +146,12 @@ export function useSpeakerController(): SpeakerController {
   const queueRef = useRef<QueuedClip[]>([]);
   const currentRef = useRef<QueuedClip | null>(null);
   const gapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Every startClip/stopCurrent bumps this, so a play() rejection can tell
+  // "we stopped or replaced it ourselves" from an outside interruption.
+  const attemptRef = useRef(0);
+  // The clip already retried once after an interruption, and its pending retry.
+  const retriedClipRef = useRef<string | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gateRef = useRef<PlaybackGate>(new PlaybackGate());
   const playingRef = useRef(false);
   const blockedRef = useRef(false);
@@ -150,11 +163,11 @@ export function useSpeakerController(): SpeakerController {
   // clip that arrives (handover / stream) immediately, gate bypassed.
   const pendingManualRef = useRef<{ clipId: string | null; at: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
   const captionRef = useRef<RelayCaption | null>(null);
-  const availabilityRef = useRef<SpeakerAvailability>({ messagingRunning: null, tts: null, reason: null });
+  const availabilityRef = useRef<SpeakerAvailability>({ messagingRunning: null, tts: null, ttsReason: null, reason: null });
   const noticeSeq = useRef(0);
 
-  const setAvailabilityBoth = useCallback((next: { messagingRunning: boolean | null; tts: boolean | null }) => {
-    const value = { ...next, reason: availabilityReason(next) };
+  const setAvailabilityBoth = useCallback((next: { messagingRunning: boolean | null; tts: boolean | null; ttsReason?: string | null }) => {
+    const value = { messagingRunning: next.messagingRunning, tts: next.tts, ttsReason: next.ttsReason ?? null, reason: availabilityReason(next) };
     availabilityRef.current = value;
     setAvailability(value);
   }, []);
@@ -170,7 +183,7 @@ export function useSpeakerController(): SpeakerController {
       blocked: blockedRef.current,
       caption: captionRef.current,
       queueLength: queueRef.current.length,
-      availability: { messagingRunning: availabilityRef.current.messagingRunning, tts: availabilityRef.current.tts },
+      availability: { messagingRunning: availabilityRef.current.messagingRunning, tts: availabilityRef.current.tts, ttsReason: availabilityRef.current.ttsReason },
       playError: playErrorRef.current,
       replayableClipId: lastPlayedRef.current?.clipId ?? null,
       progress: progressRef.current,
@@ -269,8 +282,11 @@ export function useSpeakerController(): SpeakerController {
   }, []);
 
   // ---- player loop (holder only) ----
-  const stopCurrent = useCallback(() => {
+  const stopCurrent = useCallback((reason: string) => {
+    attemptRef.current += 1;
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
     const el = audioRef.current;
+    if (currentRef.current) console.debug(`[speaker] stop clip=${currentRef.current.clipId} reason=${reason}`);
     if (el) {
       try { el.pause(); } catch { /* ignore */ }
       el.removeAttribute('src');
@@ -290,6 +306,29 @@ export function useSpeakerController(): SpeakerController {
   const playNextRef = useRef<() => void>(() => {});
   const startClipRef = useRef<(clip: QueuedClip, manual: boolean) => void>(() => {});
 
+  // May this clip start without a click? Not once any tab heard it, not past
+  // its expiry, not once older than the window since it FIRST arrived.
+  const autoPlayable = useCallback((clip: QueuedClip) => isAutoPlayable({
+    receivedAt: clip.receivedAt,
+    expiresAt: clip.expiresAt,
+    seen: holderRef.current?.hasSeen(clip.clipId) ?? false,
+    now: Date.now(),
+  }), []);
+
+  // A clip that is no longer fresh never starts or warns on its own: retire it
+  // silently to Replay (the bubble's ▶ Replay / card Replay still play it).
+  const retireStale = useCallback((clip: QueuedClip, why: string) => {
+    console.debug(`[speaker] retire stale clip=${clip.clipId} (${why}) age=${Math.round((Date.now() - clip.receivedAt) / 1000)}s`);
+    if (currentRef.current?.clipId === clip.clipId) stopCurrent(`stale:${why}`);
+    if (!holderRef.current?.hasSeen(clip.clipId)) {
+      lastPlayedRef.current = clip;
+      setReplayableClipId(clip.clipId);
+    }
+    setBlockedBoth(false);
+    setPlayErrorBoth(null);
+    publish();
+  }, [publish, setBlockedBoth, setPlayErrorBoth, stopCurrent]);
+
   // Load (if needed) and play one clip. `manual` = a deliberate user click:
   // any rejection is SHOWN (never a silent no-op) and the clip stays current
   // so the user can try again. Auto path: NotAllowedError → blocked (the Play
@@ -298,6 +337,15 @@ export function useSpeakerController(): SpeakerController {
   const startClip = useCallback((clip: QueuedClip, manual: boolean) => {
     const el = getAudio();
     if (!el) { setPlayErrorBoth('Audio is not available in this environment.'); publish(); return; }
+    // Every AUTOMATIC start (queue, dictation-end resume, interruption retry)
+    // passes the freshness/heard check; only a click may start an old clip.
+    if (!manual && !autoPlayable(clip)) {
+      retireStale(clip, 'auto-start');
+      playNextRef.current();
+      return;
+    }
+    const attempt = ++attemptRef.current;
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
     const wanted = `data:${clip.mime || 'audio/mpeg'};base64,${clip.dataBase64}`;
     if (currentRef.current?.clipId !== clip.clipId || el.getAttribute('src') !== wanted) {
       currentRef.current = clip;
@@ -379,31 +427,59 @@ export function useSpeakerController(): SpeakerController {
         publish();
       })
       .catch((err: unknown) => {
+        const name = (err as { name?: string })?.name ?? '';
         const d = describePlayError(err);
-        console.warn('[speaker] play() rejected', clip.clipId, manual ? 'manual' : 'auto', (err as { name?: string })?.name, (err as { message?: string })?.message);
+        const plan = planPlayRejection({
+          errName: name,
+          manual,
+          superseded: attempt !== attemptRef.current || !isCurrent(),
+          isHolder: isHolderRef.current,
+          retried: retriedClipRef.current === clipId,
+          fresh: autoPlayable(clip),
+          visible: typeof document !== 'undefined' && document.visibilityState === 'visible',
+        });
+        console.warn('[speaker] play() rejected', clipId, manual ? 'manual' : 'auto', name, (err as { message?: string })?.message,
+          `plan=${plan} holder=${isHolderRef.current} vis=${typeof document === 'undefined' ? 'n/a' : document.visibilityState}`);
+        if (plan === 'ignore') return; // our own stop/replace/handover already settled the state
         setPlayingBoth(false);
-        if (d.autoplayBlocked) {
-          // Keep the clip current; the Play button (a user gesture) is the fix.
-          setBlockedBoth(true);
-          setPlayErrorBoth(manual ? d.text : null);
-        } else if (manual) {
-          // Show why; keep the clip so a retry is possible.
-          setBlockedBoth(true);
-          setPlayErrorBoth(d.text);
-        } else {
-          // Auto path, real failure: surface it and move on.
-          holderRef.current?.markSeen(clip.clipId);
-          currentRef.current = null;
-          setBlockedBoth(false);
-          setPlayErrorBoth(d.text);
+        if (plan === 'retry') {
+          retriedClipRef.current = clipId;
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            if (attempt !== attemptRef.current || !isCurrent() || !isHolderRef.current) return;
+            startClipRef.current(clip, false);
+          }, AUTO_RETRY_DELAY_MS);
           publish();
+          return;
+        }
+        if (plan === 'demote') {
+          retireStale(clip, 'rejected');
           playNextRef.current();
           return;
         }
+        if (plan === 'hold' || plan === 'park') {
+          // Keep the clip current: the bubble's Play reply (a user gesture)
+          // plays it. Only a user actually waiting on it sees the reason.
+          setBlockedBoth(true);
+          setPlayErrorBoth(plan === 'hold' ? d.text : null);
+          publish();
+          return;
+        }
+        // Auto path, real failure: surface it and move on.
+        holderRef.current?.markSeen(clipId);
+        currentRef.current = null;
+        setBlockedBoth(false);
+        setPlayErrorBoth(d.text);
         publish();
+        playNextRef.current();
       });
-  }, [decodeDuration, getAudio, publish, setBlockedBoth, setCaptionBoth, setPlayErrorBoth, setPlayingBoth, setProgressBoth]);
+  }, [autoPlayable, decodeDuration, getAudio, publish, retireStale, setBlockedBoth, setCaptionBoth, setPlayErrorBoth, setPlayingBoth, setProgressBoth]);
   startClipRef.current = startClip;
+
+  const autoPlayableRef = useRef(autoPlayable);
+  autoPlayableRef.current = autoPlayable;
+  const retireStaleRef = useRef(retireStale);
+  retireStaleRef.current = retireStale;
 
   const playNext = useCallback(() => {
     if (!isHolderRef.current) return;
@@ -411,12 +487,10 @@ export function useSpeakerController(): SpeakerController {
     // Drop expired / revoked entries at the head; WAIT (keep queued) until the
     // gate has a fresh enabled snapshot with a matching revision and nobody
     // in this browser is dictating.
-    const now = Date.now();
     const gate = gateRef.current;
     while (queueRef.current.length > 0) {
       const head = queueRef.current[0];
-      const expired = (head.expiresAt !== null && head.expiresAt < now) || now - head.receivedAt > QUEUE_TTL_MS;
-      if (expired || gate.decide(head) === 'drop') { queueRef.current.shift(); continue; }
+      if (!autoPlayable(head) || gate.decide(head) === 'drop') { queueRef.current.shift(); continue; }
       break;
     }
     syncQueueLength();
@@ -425,7 +499,7 @@ export function useSpeakerController(): SpeakerController {
     syncQueueLength();
     if (!clip) return;
     startClipRef.current(clip, false);
-  }, [syncQueueLength]);
+  }, [autoPlayable, syncQueueLength]);
   playNextRef.current = playNext;
 
   const enqueue = useCallback((clip: QueuedClip) => {
@@ -468,11 +542,12 @@ export function useSpeakerController(): SpeakerController {
       setAvailabilityBoth({
         messagingRunning: payload.messaging.configured === false ? false : prev.messagingRunning,
         tts: typeof payload.messaging.tts === 'boolean' ? payload.messaging.tts : prev.tts,
+        ttsReason: payload.messaging.speech !== undefined ? speechReason(payload.messaging.speech) : prev.ttsReason,
       });
     }
     if (revoked && isHolderRef.current) {
       // OFF (or any newer revision) is literal: nothing queued survives it.
-      if (currentRef.current) stopCurrent();
+      if (currentRef.current) stopCurrent('revoked');
       flushQueue();
       setBlockedBoth(false);
       setPlayErrorBoth(null);
@@ -513,7 +588,7 @@ export function useSpeakerController(): SpeakerController {
       case 'dismiss': {
         if (currentRef.current) {
           holderRef.current?.markSeen(currentRef.current.clipId);
-          stopCurrent();
+          stopCurrent('dismiss');
         }
         setBlockedBoth(false);
         setPlayErrorBoth(null);
@@ -587,6 +662,18 @@ export function useSpeakerController(): SpeakerController {
       isVisible: () => document.visibilityState === 'visible',
       onBecomeHolder: () => {
         isHolderRef.current = true;
+        // What this tab was SHOWING came from the old holder's relay, and no one
+        // relays to a holder: a stale "interrupted" warning or Play button would
+        // stick forever. Show only this tab's own player state from here on;
+        // anything handed over sets its own state when it starts (#0377).
+        blockedRef.current = false;
+        setBlocked(false);
+        playErrorRef.current = null;
+        setPlayError(null);
+        playingRef.current = false;
+        setPlaying(false);
+        progressRef.current = PROGRESS_IDLE;
+        setProgress(PROGRESS_IDLE);
         // Nothing relayed/queued may play until THIS stream's snapshot lands.
         gateRef.current.invalidate();
         gateRef.current.setRecording(holder.isAnyRecording());
@@ -595,7 +682,7 @@ export function useSpeakerController(): SpeakerController {
       onLoseHolder: () => {
         isHolderRef.current = false;
         closeStream();
-        stopCurrent();
+        stopCurrent('lost-holder');
         flushQueue();
         // Keep the caption; the new holder will relay fresh state shortly.
       },
@@ -613,6 +700,8 @@ export function useSpeakerController(): SpeakerController {
         if (state.replayableClipId !== undefined) setReplayableClipId(state.replayableClipId);
         if (typeof state.clipSeq === 'number' && state.clipSeq !== clipSeqRef.current) { clipSeqRef.current = state.clipSeq; setClipSeq(state.clipSeq); }
         if (state.progress) { const p = { fraction: state.progress.fraction, indeterminate: state.progress.indeterminate, complete: state.progress.complete ?? state.progress.fraction === 1 }; progressRef.current = p; setProgress(p); }
+        // Mirror the shown caption so this tab relays the same one if it takes over.
+        captionRef.current = state.caption;
         setCaption(state.caption);
         setQueueLength(state.queueLength);
         if (state.availability) setAvailabilityBoth(state.availability);
@@ -631,7 +720,9 @@ export function useSpeakerController(): SpeakerController {
           lastPlayedRef.current = last;
           setReplayableClipId(last.clipId);
         }
-        for (const c of queue) enqueue({ ...c, receivedAt: Date.now() });
+        // Keep the ORIGINAL arrival time: a handover must not make an old clip
+        // fresh again (it used to reset receivedAt, re-arming stale clips).
+        for (const c of queue) enqueue({ ...c, receivedAt: handoverReceivedAt(c, Date.now()) });
         // A follower clicked Replay, took over, and the finished clip has just
         // arrived with the handover: play it now (the click was consent).
         const pm = pendingManualRef.current;
@@ -650,10 +741,19 @@ export function useSpeakerController(): SpeakerController {
     // so release on pagehide and re-announce on every wake path. NOT on
     // beforeunload: a cancelled navigation fires it with no pageshow after, and
     // the election would stay stopped for good (a lone tab loses spoken replies).
-    const onVis = () => holder.visibilityChanged();
+    // Back from the background: a parked clip that went stale while we were
+    // away is retired to Replay, never restarted or warned about.
+    const sweepStale = () => {
+      const cur = currentRef.current;
+      if (isHolderRef.current && cur && !playingRef.current && !autoPlayableRef.current(cur)) {
+        retireStaleRef.current(cur, 'resume');
+        playNextRef.current();
+      }
+    };
+    const onVis = () => { holder.visibilityChanged(); if (document.visibilityState === 'visible') sweepStale(); };
     const onUnload = () => holder.stop();
-    const onFocus = () => { if (document.visibilityState === 'visible') holder.announce(); };
-    const onShow = () => { holder.start(); holder.announce(); }; // bfcache restore: start() is idempotent
+    const onFocus = () => { if (document.visibilityState === 'visible') { holder.announce(); sweepStale(); } };
+    const onShow = () => { holder.start(); holder.announce(); sweepStale(); }; // bfcache restore: start() is idempotent
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', onUnload);
     window.addEventListener('focus', onFocus);
@@ -679,11 +779,13 @@ export function useSpeakerController(): SpeakerController {
     ]);
     let messagingRunning: boolean | null = null;
     let tts: boolean | null = null;
+    let ttsReason: string | null = null;
     if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
       try {
-        const h = (await healthRes.value.json()) as { running?: boolean; tts?: boolean | null };
+        const h = (await healthRes.value.json()) as { running?: boolean; tts?: boolean | null; speech?: SpeechHealth | null };
         messagingRunning = typeof h.running === 'boolean' ? h.running : null;
         tts = typeof h.tts === 'boolean' ? h.tts : null;
+        ttsReason = speechReason(h.speech);
       } catch { /* ignore */ }
     }
     if (speakerRes.status === 'fulfilled' && speakerRes.value.ok) {
@@ -696,12 +798,15 @@ export function useSpeakerController(): SpeakerController {
           setRevision(revisionRef.current);
           gateRef.current.applySnapshot({ enabled: s.enabled, revision: revisionRef.current });
           if (typeof s.subscribers === 'number') setSubscribers(s.subscribers);
-          if (s.messaging && typeof s.messaging.tts === 'boolean' && tts === null) tts = s.messaging.tts;
+          if (s.messaging && typeof s.messaging.tts === 'boolean' && tts === null) {
+            tts = s.messaging.tts;
+            ttsReason = speechReason(s.messaging.speech);
+          }
           if (s.messaging && s.messaging.configured === false) messagingRunning = false;
         }
       } catch { /* ignore */ }
     }
-    setAvailabilityBoth({ messagingRunning, tts });
+    setAvailabilityBoth({ messagingRunning, tts, ttsReason });
     // Availability is part of the relayed state too (holder only; no-op otherwise).
     publish();
     if (isHolderRef.current) playNextRef.current();

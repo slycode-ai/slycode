@@ -31,6 +31,22 @@
       "namedRegex": "^/api/bridge/(?<nxtPpath>.+?)(?:/)?$"
     },
     {
+      "page": "/api/messaging/voices/design/[id]",
+      "regex": "^/api/messaging/voices/design/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/messaging/voices/design/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/projects/[id]",
+      "regex": "^/api/messaging/voices/projects/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/messaging/voices/projects/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/projects/[id]",
       "regex": "^/api/projects/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -88,6 +104,22 @@
         "nxtPprojectId": "nxtPprojectId"
       },
       "namedRegex": "^/api/shortcuts/(?<nxtPprojectId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/whats-new/asset/[name]",
+      "regex": "^/api/whats\\-new/asset/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPname": "nxtPname"
+      },
+      "namedRegex": "^/api/whats\\-new/asset/(?<nxtPname>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/doc-viewer/[...path]",
+      "regex": "^/doc\\-viewer/(.+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPpath": "nxtPpath"
+      },
+      "namedRegex": "^/doc\\-viewer/(?<nxtPpath>.+?)(?:/)?$"
     },
     {
       "page": "/html-viewer/[...path]",
@@ -375,6 +407,48 @@
       "namedRegex": "^/api/messaging/health(?:/)?$"
     },
     {
+      "page": "/api/messaging/tts",
+      "regex": "^/api/messaging/tts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/tts(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices",
+      "regex": "^/api/messaging/voices(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/clone",
+      "regex": "^/api/messaging/voices/clone(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices/clone(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/default",
+      "regex": "^/api/messaging/voices/default(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices/default(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/design",
+      "regex": "^/api/messaging/voices/design(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices/design(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/preview",
+      "regex": "^/api/messaging/voices/preview(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices/preview(?:/)?$"
+    },
+    {
+      "page": "/api/messaging/voices/projects",
+      "regex": "^/api/messaging/voices/projects(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/messaging/voices/projects(?:/)?$"
+    },
+    {
       "page": "/api/projects",
       "regex": "^/api/projects(?:/)?$",
       "routeKeys": {},
@@ -487,6 +561,18 @@
       "regex": "^/api/version\\-check(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/version\\-check(?:/)?$"
+    },
+    {
+      "page": "/api/whats-new",
+      "regex": "^/api/whats\\-new(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/whats\\-new(?:/)?$"
+    },
+    {
+      "page": "/api/whats-new/seen",
+      "regex": "^/api/whats\\-new/seen(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/whats\\-new/seen(?:/)?$"
     },
     {
       "page": "/global",

@@ -10,9 +10,14 @@
  *
  * Uses useSyncExternalStore so the value is computed client-only (server
  * snapshot = false), avoiding both a hydration mismatch and a setState-in-effect.
+ *
+ * SLYCODE_CLEARTEXT_WARNING=off switches it off (trusted network, or an
+ * instance with no password). The flag comes from /api/auth/status at runtime
+ * rather than being rendered into the layout, so it also works in prebuilt
+ * production output. If that check fails, the banner shows (fail safe).
  */
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
@@ -22,14 +27,25 @@ const getClientSnapshot = () =>
 const getServerSnapshot = () => false;
 
 export default function CleartextWarningBanner() {
-  const show = useSyncExternalStore(noopSubscribe, getClientSnapshot, getServerSnapshot);
+  const insecure = useSyncExternalStore(noopSubscribe, getClientSnapshot, getServerSnapshot);
+  const [enabled, setEnabled] = useState(false);
 
-  if (!show) return null;
+  useEffect(() => {
+    if (!insecure) return;
+    let cancelled = false;
+    fetch('/api/auth/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { cleartextWarning?: boolean } | null) => { if (!cancelled) setEnabled(d?.cleartextWarning !== false); })
+      .catch(() => { if (!cancelled) setEnabled(true); });
+    return () => { cancelled = true; };
+  }, [insecure]);
+
+  if (!insecure || !enabled) return null;
 
   return (
     <div
       role="alert"
-      className="sticky top-0 z-[100] w-full bg-red-600 text-white text-sm px-4 py-2 text-center shadow-md"
+      className="sticky top-0 z-[100] w-full border-b border-warn/40 bg-warn/15 px-4 py-2 text-center text-[13px] text-ink-1 backdrop-blur"
     >
       <strong>Insecure connection.</strong> Your password is being sent in cleartext over the
       network. Put HTTPS in front — use <code className="font-mono">tailscale serve</code> or a

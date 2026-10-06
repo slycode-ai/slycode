@@ -26,3 +26,17 @@ export function docFileName(ref: string): string {
   const segments = ref.split('/');
   return segments[segments.length - 1] || ref;
 }
+
+export type DocKind = 'design' | 'feature' | 'test';
+
+/**
+ * Standalone viewer URL for a doc ref (card #0372) — same shape as the HTML
+ * attachment viewer (`/html-viewer/<segments>?projectId=`): each path segment
+ * encoded separately so slashes stay real route segments. `kind` only sets the
+ * viewer's header label.
+ */
+export function docViewerHref(ref: string, projectId: string, kind?: DocKind): string {
+  const qs = new URLSearchParams({ projectId });
+  if (kind) qs.set('kind', kind);
+  return `/doc-viewer/${ref.split('/').map(encodeURIComponent).join('/')}?${qs.toString()}`;
+}

@@ -79,7 +79,7 @@ export function ProjectPageClient({
   }, []);
 
   return (
-    <div className={`flex h-svh flex-col overflow-hidden bg-void-50 dark:bg-void-950 ${isGlobalActive ? 'active-glow-border-left' : ''}`}>
+    <div className={`flex h-svh flex-col overflow-hidden bg-surface-2 ${isGlobalActive ? 'active-glow-border-left' : ''}`}>
       {children}
 
       {/* Global Claude Panel */}

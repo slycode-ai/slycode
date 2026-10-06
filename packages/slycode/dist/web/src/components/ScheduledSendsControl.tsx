@@ -213,7 +213,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
   const canSubmit = !busy && !!fireAt && message.trim().length > 0;
 
   const chip = 'rounded border px-1.5 py-0.5 font-[family-name:var(--font-jetbrains-mono)] text-[11px] transition-colors';
-  const chipIdle = 'border-void-600 text-void-400 hover:border-neon-orange-400/40 hover:text-neon-orange-300';
+  const chipIdle = 'border-void-600 text-ink-3 hover:border-neon-orange-400/40 hover:text-neon-orange-300';
   const chipOn = 'border-neon-orange-400/50 bg-neon-orange-400/15 text-neon-orange-300';
 
   return (
@@ -226,7 +226,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
           onClick={() => setOpen(o => !o)}
           aria-expanded={open}
           aria-label={pending.length ? `Scheduled sends: next ${formatFireTime(nextFire!, now)}` : 'Schedule a send'}
-          className={`relative flex items-center rounded-md border px-2 py-1 text-neon-orange-400 transition-all hover:bg-neon-orange-400/20 hover:border-neon-orange-400/40 hover:shadow-[0_0_8px_rgba(255,140,0,0.18)] ${open ? 'border-neon-orange-400/40 bg-neon-orange-400/20' : 'border-neon-orange-400/25 bg-neon-orange-400/10'}`}
+          className={`relative flex items-center rounded-md border px-2 py-1 text-neon-orange-400 transition-all hover:bg-neon-orange-400/20 hover:border-neon-orange-400/40 ${open ? 'border-neon-orange-400/40 bg-neon-orange-400/20' : 'border-neon-orange-400/25 bg-neon-orange-400/10'}`}
         >
           <StopwatchGlyph pointAt={nextFire} />
           {pending.length > 0 && (
@@ -242,12 +242,12 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
           {/* Compose */}
           <div className="border-b border-void-700 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-void-400">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-3">
                 {editingId ? 'Edit send for' : 'Schedule for'}
                 <ProviderChip id={sessionProvider} names={providerNames} size="md" />
-                <span className="normal-case tracking-normal text-void-500">· this card</span>
+                <span className="normal-case tracking-normal text-ink-3">· this card</span>
               </span>
-              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500">{zone}</span>
+              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-ink-3">{zone}</span>
             </div>
             <textarea
               ref={textareaRef}
@@ -266,7 +266,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
               ))}
             </div>
             <div className="mb-2 flex items-center gap-2">
-              <span className="text-[11px] text-void-500">at</span>
+              <span className="text-[11px] text-ink-3">at</span>
               <input
                 type="time"
                 value={hhmm}
@@ -303,7 +303,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
               </Tooltip>
               <div className="flex shrink-0 items-center gap-1.5">
                 {editingId && (
-                  <button type="button" onClick={resetForm} className="text-[11px] text-void-500 hover:text-void-300">Cancel</button>
+                  <button type="button" onClick={resetForm} className="text-[11px] text-ink-3 hover:text-void-300">Cancel</button>
                 )}
                 <button
                   type="button"
@@ -320,7 +320,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
 
           {/* Pending */}
           <div className="border-b border-void-700 px-3 py-2">
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-void-400">Pending{pending.length ? ` (${pending.length})` : ''}</div>
+            <div className="mb-1 text-[11px] font-medium text-ink-3">Pending{pending.length ? ` (${pending.length})` : ''}</div>
             {pending.length === 0 ? (
               <div className="text-[11px] text-void-600">Nothing scheduled</div>
             ) : (
@@ -334,7 +334,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
                       </span>
                     </Tooltip>
                     <Tooltip content={e.deferrals ? `Agent was busy at fire time — retried ${e.deferrals}×, will force after 10 min` : undefined}>
-                      <span className="shrink-0 text-[10px] text-void-500">
+                      <span className="shrink-0 text-[10px] text-ink-3">
                         {e.state === 'firing' ? 'firing…' : e.deferrals ? `waiting (busy ×${e.deferrals})` : formatCountdown(e.fireAt, now)}
                       </span>
                     </Tooltip>
@@ -342,7 +342,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
                     <Tooltip content={e.message}><span className="min-w-0 flex-1 truncate text-[11px] text-void-300">{e.message}</span></Tooltip>
                     {e.state === 'pending' && (
                       <span className="flex shrink-0 items-center gap-1">
-                        <button type="button" onClick={() => startEdit(e)} className="rounded border border-transparent px-1 py-px text-[10px] text-void-400 transition-colors hover:border-neon-orange-400/40 hover:text-neon-orange-300">Edit</button>
+                        <button type="button" onClick={() => startEdit(e)} className="rounded border border-transparent px-1 py-px text-[10px] text-ink-3 transition-colors hover:border-neon-orange-400/40 hover:text-neon-orange-300">Edit</button>
                         <button type="button" onClick={() => cancelEntry(e.id)} aria-label="Cancel this send" className="rounded border border-void-600/60 px-1 py-px text-[10px] text-void-300 transition-colors hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-400">Cancel</button>
                       </span>
                     )}
@@ -355,7 +355,7 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
           {/* Sent */}
           {sent.length > 0 && (
             <div className="px-3 py-2">
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-void-400">Sent</div>
+              <div className="mb-1 text-[11px] font-medium text-ink-3">Sent</div>
               <ul className="max-h-32 overflow-y-auto">
                 {sent.map(e => {
                   const ok = e.state === 'delivered';
@@ -368,15 +368,15 @@ export function ScheduledSendsControl({ projectId, cardId, sessionName, list: li
                     <Tooltip key={e.id} content={rowTitle}>
                       <li className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-void-700/60">
                         <span className={`w-3 shrink-0 text-center text-[11px] ${ok ? 'text-neon-green-400' : e.state === 'cancelled' ? 'text-void-500' : 'text-red-400'}`}>{ok ? '✓' : e.state === 'cancelled' ? '–' : '✕'}</span>
-                        <span className="shrink-0 font-[family-name:var(--font-jetbrains-mono)] text-[11px] text-void-400">{formatFireTime(when, now)}</span>
+                        <span className="shrink-0 font-[family-name:var(--font-jetbrains-mono)] text-[11px] text-ink-3">{formatFireTime(when, now)}</span>
                         <ProviderChip id={e.provider} names={providerNames} />
-                        <span className="min-w-0 flex-1 truncate text-[11px] text-void-400">{e.message}</span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-3">{e.message}</span>
                         <span className={`shrink-0 text-[10px] ${forced ? 'text-amber-400' : ok ? 'text-void-500' : e.state === 'cancelled' ? 'text-void-600' : 'text-red-400'}`}>{label}</span>
                         <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                           {(e.state === 'failed' || e.state === 'missed') && (
-                            <button type="button" onClick={() => retry(e)} className="text-[10px] text-void-400 hover:text-neon-orange-300">Retry</button>
+                            <button type="button" onClick={() => retry(e)} className="text-[10px] text-ink-3 hover:text-neon-orange-300">Retry</button>
                           )}
-                          <button type="button" onClick={() => cancelEntry(e.id)} aria-label="Clear from history" className="rounded border border-transparent px-1 py-px text-[10px] text-void-500 transition-colors hover:border-void-500 hover:text-void-300">Clear</button>
+                          <button type="button" onClick={() => cancelEntry(e.id)} aria-label="Clear from history" className="rounded border border-transparent px-1 py-px text-[10px] text-ink-3 transition-colors hover:border-void-500 hover:text-void-300">Clear</button>
                         </span>
                       </li>
                     </Tooltip>

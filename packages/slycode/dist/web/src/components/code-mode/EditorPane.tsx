@@ -435,7 +435,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
                   onCloseFile(path);
                 }
               }}
-              className={`group flex shrink-0 items-center border-r border-(--cm-line) font-mono text-[11.5px] ${
+              className={`group flex shrink-0 items-center border-r border-(--cm-line) font-mono text-[12px] ${
                 isActive ? 'bg-(--cm-code-bg) text-(--cm-text)' : 'text-(--cm-muted) hover:text-(--cm-text)'
               }`}
             >
@@ -459,12 +459,12 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
         })}
         </div>
         <span className="ml-auto flex shrink-0 items-center gap-1.5 px-2">
-          {notice && <span className="font-mono text-[10.5px] text-(--cm-atlas)">{notice}</span>}
+          {notice && <span className="font-mono text-[11px] text-(--cm-atlas)">{notice}</span>}
           {onExplain && (
             <Tooltip content={hasSelection ? 'Explain the selected code in the Atlas terminal' : 'Explain the word/line at the cursor in the Atlas terminal'} placement="bottom">
               <button
                 onClick={triggerExplain}
-                className="rounded-full border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] text-(--cm-atlas) hover:brightness-110"
+                className="rounded-full border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[11px] text-(--cm-atlas) hover:brightness-110"
               >
                 {hasSelection ? '✦ Explain selection' : '✦ Explain'}
               </button>
@@ -474,7 +474,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
             <Tooltip content={showPreview ? 'Showing rendered Markdown — switch to raw source to edit' : 'Show rendered Markdown (read-only)'} placement="bottom">
               <button
                 onClick={toggleMdPreview}
-                className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+                className={`rounded border px-2 py-0.5 font-mono text-[11px] ${
                   showPreview ? 'border-(--cm-atlas) text-(--cm-atlas)' : 'border-(--cm-line) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
                 }`}
               >
@@ -484,7 +484,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
           )}
           <button
             onClick={toggleBlame}
-            className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+            className={`rounded border px-2 py-0.5 font-mono text-[11px] ${
               blameOn ? 'border-(--cm-atlas) text-(--cm-atlas)' : 'border-(--cm-line) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
             }`}
           >
@@ -493,7 +493,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
           <button
             onClick={() => save(activePath)}
             disabled={saving || !current?.dirty}
-            className="rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) enabled:hover:border-(--cm-atlas) enabled:hover:text-(--cm-atlas) disabled:opacity-40"
+            className="rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[11px] text-(--cm-muted) enabled:hover:border-(--cm-atlas) enabled:hover:text-(--cm-atlas) disabled:opacity-40"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -503,7 +503,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
       {/* AI highlight note (from `sly-atlas highlight`) */}
       {aiNote && (
         <div className="flex items-start gap-2 border-b border-(--cm-atlas) bg-(--cm-atlas-dim) px-3 py-1.5">
-          <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-(--cm-atlas)">✦ atlas</span>
+          <span className="font-mono text-[11px] text-(--cm-atlas)">✦ atlas</span>
           <p className="min-w-0 flex-1 text-[12px] leading-snug text-(--cm-text)">{aiNote}</p>
           <button onClick={() => { setAiNote(null); decorationsRef.current?.clear(); }} className="font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)">✕</button>
         </div>
@@ -512,7 +512,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
       {/* Disk/buffer conflict — always a user decision, never a silent pick */}
       {conflict && conflict.path === activePath && (
         <div className="flex items-center gap-2 border-b border-(--cm-stale) bg-(--cm-stale-dim) px-3 py-1.5">
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.15em] text-(--cm-stale)">⚠ conflict</span>
+          <span className="shrink-0 font-mono text-[11px] text-(--cm-stale)">⚠ conflict</span>
           <p className="min-w-0 flex-1 text-[12px] leading-snug text-(--cm-text)">
             {conflict.source === 'save'
               ? 'This file changed on disk after you loaded it — saving would overwrite those changes.'
@@ -521,7 +521,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
           <Tooltip content="Replace your buffer with the disk version (discards your edits)" placement="bottom">
             <button
               onClick={() => refreshFile(conflict.path, true)}
-              className="shrink-0 rounded border border-(--cm-stale) px-2 py-0.5 font-mono text-[10px] text-(--cm-stale) hover:brightness-110"
+              className="shrink-0 rounded border border-(--cm-stale) px-2 py-0.5 font-mono text-[11px] text-(--cm-stale) hover:brightness-110"
             >
               Reload from disk
             </button>
@@ -530,7 +530,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
             <Tooltip content="Write your buffer over the disk version" placement="bottom">
               <button
                 onClick={() => save(conflict.path, { force: true })}
-                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
               >
                 Overwrite
               </button>
@@ -539,7 +539,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
             <Tooltip content="Keep editing your version — saving will ask again if disk still differs" placement="bottom">
               <button
                 onClick={() => setConflict(null)}
-                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
+                className="shrink-0 rounded border border-(--cm-line) px-2 py-0.5 font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-stale) hover:text-(--cm-stale)"
               >
                 Keep my version
               </button>
@@ -562,7 +562,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
               <div className="mx-auto max-w-[94ch] px-8 py-8">
                 {previewDoc.frontmatter && (
                   <div className="mb-6 rounded border border-(--cm-line) bg-(--cm-panel) px-3 py-2">
-                    <p className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.15em] text-(--cm-faint)">frontmatter</p>
+                    <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">frontmatter</p>
                     <pre className="overflow-x-auto font-mono text-[11px] leading-relaxed text-(--cm-muted)">{previewDoc.frontmatter}</pre>
                   </div>
                 )}
@@ -626,7 +626,7 @@ export function EditorPane({ projectId, openFiles, active, onSelectFile, onClose
 
       {/* Blame footer */}
       {blameOn && (
-        <div className="border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[10.5px] text-(--cm-muted)">
+        <div className="border-t border-(--cm-line) bg-(--cm-panel) px-3 py-1 font-mono text-[11px] text-(--cm-muted)">
           {blameForLine ? (
             <>
               <span className="text-(--cm-atlas)">{blameForLine.shortHash}</span> · {blameForLine.author} ·{' '}
@@ -672,11 +672,11 @@ function defineThemes(monaco: any) {
       { token: 'number', foreground: '79b8ff' },
     ],
     colors: {
-      'editor.background': '#0c0f16',
-      'editor.lineHighlightBackground': '#12161f',
+      'editor.background': '#101318',
+      'editor.lineHighlightBackground': '#14171c',
       'editorLineNumber.foreground': '#5c6675',
-      'editorCursor.foreground': '#46d7c2',
-      'editor.selectionBackground': '#46d7c23a',
+      'editorCursor.foreground': '#22c0ff',
+      'editor.selectionBackground': '#22c0ff33',
     },
   });
   monaco.editor.defineTheme('slycode-light', {
@@ -690,11 +690,11 @@ function defineThemes(monaco: any) {
       { token: 'number', foreground: '0b64c2' },
     ],
     colors: {
-      'editor.background': '#fbfcfe',
-      'editor.lineHighlightBackground': '#eff2f6',
-      'editorLineNumber.foreground': '#8a94a6',
-      'editorCursor.foreground': '#0d9488',
-      'editor.selectionBackground': '#0d948826',
+      'editor.background': '#ffffff',
+      'editor.lineHighlightBackground': '#f4f4f5',
+      'editorLineNumber.foreground': '#a1a1aa',
+      'editorCursor.foreground': '#1d6aa8',
+      'editor.selectionBackground': '#1d6aa826',
     },
   });
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useEffect, useMemo, useState } from 'react';
 import Tooltip from './Tooltip';
 
@@ -91,7 +92,7 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
   }, [refs, projectId, titles]);
 
   const handleCopyPath = (path: string) => {
-    navigator.clipboard.writeText(path);
+    copyText(path);
     setCopiedPath(true);
     setTimeout(() => setCopiedPath(false), 2000);
   };
@@ -110,12 +111,12 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
   // ------ Empty state ------
   if (refs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-void-500 dark:text-void-400">
+      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-ink-3">
         <div>
           <p className="mb-2 font-medium">No HTML attachments.</p>
           <p className="text-xs opacity-70">
             Agents attach HTML documents via{' '}
-            <code className="rounded bg-void-100 px-1.5 py-0.5 font-mono text-xs dark:bg-void-800">
+            <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
               sly-kanban update {cardId} --html-ref documentation/designs/name.html
             </code>
             .
@@ -132,12 +133,12 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
         {refs.map(ref => (
           <div
             key={ref}
-            className="group flex items-center gap-3 rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 dark:border-void-700/50 dark:bg-void-900/40"
+            className="group flex items-center gap-3 rounded-lg border border-line bg-surface-1 p-4 text-left backdrop-blur-sm transition-all hover:border-accent/50 hover:bg-accent/5"
           >
             <button onClick={() => setSelectedRef(ref)} className="flex min-w-0 flex-1 items-center gap-3">
               <span
                 aria-hidden
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-neon-blue-400/30 bg-neon-blue-400/10 text-neon-blue-500 dark:text-neon-blue-300"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-accent/30 bg-accent/10 text-accent"
               >
                 {/* SVG instead of a text glyph — fonts baseline-shift, SVGs center true */}
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -145,11 +146,11 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
                 </svg>
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-void-900 dark:text-void-100">
+                <div className="truncate font-medium text-ink-1">
                   {titles[ref] || fileName(ref)}
                 </div>
                 <Tooltip content={ref}>
-                  <div className="mt-0.5 truncate font-mono text-xs text-void-500 dark:text-void-400">
+                  <div className="mt-0.5 truncate font-mono text-xs text-ink-3">
                     {ref}
                   </div>
                 </Tooltip>
@@ -159,7 +160,7 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
               <Tooltip content={`Unlink ${fileName(ref)} (removes the reference; file is not deleted)`}>
                 <button
                   onClick={() => onUnlink(ref)}
-                  className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                  className="shrink-0 rounded p-1.5 text-ink-3 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                   aria-label={`Unlink ${fileName(ref)}`}
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -186,13 +187,13 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
   // ------ Viewer (selected attachment) ------
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-void-200 px-4 py-2 text-xs dark:border-void-700">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2 text-xs">
         <div className="flex min-w-0 items-center gap-2">
           {refs.length > 1 && (
             <Tooltip content="All attachments" placement="bottom">
               <button
                 onClick={() => setSelectedRef(null)}
-                className="flex shrink-0 items-center gap-1 text-neon-blue-500 hover:text-neon-blue-400"
+                className="flex shrink-0 items-center gap-1 text-accent hover:text-accent"
                 aria-label="All attachments"
               >
                 <span aria-hidden>←</span>
@@ -203,7 +204,7 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
           <Tooltip content={copiedPath ? 'Copied!' : `Copy path: ${effectiveRef}`} placement="bottom">
             <button
               onClick={() => handleCopyPath(effectiveRef)}
-              className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-600 dark:hover:bg-void-800 dark:hover:text-void-300"
+              className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
               aria-label="Copy path"
             >
               {copiedPath ? (
@@ -218,18 +219,18 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
             </button>
           </Tooltip>
           <Tooltip content={effectiveRef} placement="bottom">
-            <span className="truncate font-mono text-void-700 dark:text-void-300">
+            <span className="truncate font-mono text-ink-2">
               {selectedLabel}
             </span>
           </Tooltip>
-          <span className="hidden text-void-400 dark:text-void-500 sm:inline">·</span>
-          <span className="hidden text-void-400 dark:text-void-500 sm:inline">sandboxed (no fetch, no remote images)</span>
+          <span className="hidden text-ink-3 sm:inline">·</span>
+          <span className="hidden text-ink-3 sm:inline">sandboxed (no fetch, no remote images)</span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip content="Print this attachment (opens a print tab — no app chrome)" placement="bottom">
             <button
               onClick={() => handlePrint(effectiveRef)}
-              className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
+              className="flex items-center gap-1 rounded border border-accent/40 bg-accent/15 px-2 py-1 text-accent hover:bg-accent/25"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -242,7 +243,7 @@ export function HtmlAttachmentsTab({ refs, projectId, cardId, onUnlink }: HtmlAt
               href={viewerHref(effectiveRef, projectId)}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 rounded border border-neon-blue-400/40 bg-neon-blue-400/15 px-2 py-1 text-neon-blue-600 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] dark:text-neon-blue-300"
+              className="flex items-center gap-1 rounded border border-accent/40 bg-accent/15 px-2 py-1 text-accent hover:bg-accent/25"
               aria-label="Open in new tab"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

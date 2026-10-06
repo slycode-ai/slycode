@@ -98,7 +98,7 @@ export function DiffView({ projectId, path, commit, onOpenFile }: DiffViewProps)
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-(--cm-line) bg-(--cm-panel) px-3 py-1.5 font-mono text-[11.5px]">
+      <div className="flex items-center gap-3 border-b border-(--cm-line) bg-(--cm-panel) px-3 py-1.5 font-mono text-[12px]">
         <span className="truncate text-(--cm-text)">
           {commit ? (
             <>
@@ -115,7 +115,7 @@ export function DiffView({ projectId, path, commit, onOpenFile }: DiffViewProps)
         {!path && files.length > 1 && (
           <button
             onClick={() => setCollapsed(collapsed.size === files.length ? new Set() : new Set(files.map(f => f.path)))}
-            className="ml-auto rounded border border-(--cm-line) px-2 py-0.5 text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+            className="ml-auto rounded border border-(--cm-line) px-2 py-0.5 text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
           >
             {collapsed.size === files.length ? 'expand all' : 'collapse all'}
           </button>
@@ -123,7 +123,7 @@ export function DiffView({ projectId, path, commit, onOpenFile }: DiffViewProps)
         {path && (
           <button
             onClick={() => onOpenFile({ path })}
-            className="ml-auto rounded border border-(--cm-line) px-2 py-0.5 text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+            className="ml-auto rounded border border-(--cm-line) px-2 py-0.5 text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
           >
             Open in editor
           </button>
@@ -151,7 +151,7 @@ export function DiffView({ projectId, path, commit, onOpenFile }: DiffViewProps)
                   <span className="shrink-0 text-red-500">−{f.deletions}</span>
                   <button
                     onClick={() => onOpenFile({ path: f.path })}
-                    className="shrink-0 rounded border border-(--cm-line) px-1.5 py-px text-[9.5px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+                    className="shrink-0 rounded border border-(--cm-line) px-1.5 py-px text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
                   >
                     edit
                   </button>

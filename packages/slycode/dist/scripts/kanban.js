@@ -788,7 +788,10 @@ Configure options:
   --schedule <cron|iso>       Cron expression or ISO datetime
   --schedule-type <type>      "recurring" or "one-shot" (default: recurring)
   --provider <id>             Provider ID (claude, codex, opencode)
-  --fresh-session <bool>      Kill and recreate session each run (default: false)
+  --fresh-session <bool>      true: new conversation every run; false: resume forever (default).
+                              Either value clears --fresh-every.
+  --fresh-every <days>        Resume, but start a new conversation once the current one is
+                              <days> calendar days old (1-365). Sets --fresh-session false.
   --working-dir <path>        Override working directory
   --report-messaging <bool>   Auto-append messaging instructions (default: false)
 
@@ -1486,7 +1489,7 @@ Priority: ${card.priority}
       output += `\nAutomation: ${auto.enabled ? 'ENABLED' : 'DISABLED'}\n`;
       output += `  Schedule: ${auto.schedule || '(not set)'} (${auto.scheduleType})\n`;
       output += `  Provider: ${auto.provider}\n`;
-      output += `  Fresh Session: ${auto.freshSession}\n`;
+      output += `  Fresh Session: ${describeFreshMode(auto)}\n`;
       if (auto.workingDirectory) output += `  Working Dir: ${auto.workingDirectory}\n`;
       output += `  Report via Messaging: ${auto.reportViaMessaging}\n`;
       output += `  Last Run: ${auto.lastRun || 'never'}${auto.lastResult ? ` (${auto.lastResult})` : ''}\n`;
@@ -2634,9 +2637,15 @@ function cmdNotes(args) {
         process.exit(1);
       }
       if (card.agentNotes.length >= MAX_NOTES_PER_CARD) {
-        console.error(`Error: Card has ${MAX_NOTES_PER_CARD} notes (hard cap). Summarize old notes first.`);
-        console.error(`Run: sly-kanban notes ${cardId} oldest 20`);
-        console.error(`Then: sly-kanban notes ${cardId} summarize "Your summary" --count 20 --agent "YourAgent"`);
+        // First AND last line both carry the failure: callers often keep only
+        // one end of the output (`2>&1 | tail -1`, which also hides the exit
+        // code), and a trailing recovery hint alone reads like success.
+        const failure = `Error: note NOT added — card ${cardId} is at the ${MAX_NOTES_PER_CARD}-note hard cap.`;
+        console.error(failure);
+        console.error(`  Read the oldest notes:  sly-kanban notes ${cardId} oldest 20`);
+        console.error(`  Fold them into one:     sly-kanban notes ${cardId} summarize "Your summary" --count 20 --agent "YourAgent"`);
+        console.error(`  Then re-run the add.`);
+        console.error(failure);
         process.exit(1);
       }
       const maxId = card.agentNotes.reduce((max, n) => Math.max(max, n.id), 0);
@@ -2659,12 +2668,16 @@ function cmdNotes(args) {
       // Soft suggestion when threshold reached
       if (card.agentNotes.length >= NOTES_SUGGEST_THRESHOLD) {
         console.log('');
-        console.log(`\u26a0 This card has ${card.agentNotes.length} notes (hard cap: ${MAX_NOTES_PER_CARD}). Consider summarizing the oldest 20 to keep notes manageable.`);
+        if (card.agentNotes.length >= MAX_NOTES_PER_CARD) {
+          console.log(`\u26a0 This card is now at the ${MAX_NOTES_PER_CARD}-note hard cap \u2014 the NEXT note add will fail until the oldest notes are summarized.`);
+        } else {
+          console.log(`\u26a0 This card has ${card.agentNotes.length} notes (hard cap: ${MAX_NOTES_PER_CARD}). Consider summarizing the oldest 20 to keep notes manageable.`);
+        }
         console.log(`To read the oldest notes:`);
         console.log(`  sly-kanban notes ${cardId} oldest 20`);
         console.log(`Then summarize them into a single note (max ${MAX_NOTE_LENGTH} chars):`);
         console.log(`  sly-kanban notes ${cardId} summarize "Your summary" --count 20 --agent "YourAgent"`);
-        console.log(`Tips: Preserve key decisions, recurring themes, important events, and unresolved issues. Compress routine status updates into trends. Keep the summary concise — it replaces 20 notes with one.`);
+        console.log(`Tips: Preserve key decisions, recurring themes, important events, and unresolved issues. Compress routine status updates into trends. If the oldest block holds an earlier [Summary] note, carry its points forward — it gets replaced too. Keep the summary concise — it replaces 20 notes with one.`);
       }
       break;
     }
@@ -2966,6 +2979,127 @@ function cmdAreas(args) {
 // Automation Command
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// Fresh session every N days (card #0373). Mirrors planAutomationSession /
+// resolveFreshness in web/src/lib/automation-freshness.ts, which the scheduler
+// uses — keep the two in step (web/src/lib/automation-cli-parity.test.ts runs
+// both against one fake bridge). Calendar days in the scheduler's timezone.
+// ---------------------------------------------------------------------------
+
+const FRESH_DAYS_MIN = 1;
+const FRESH_DAYS_MAX = 365;
+
+function isValidFreshDays(n) {
+  return typeof n === 'number' && Number.isInteger(n) && n >= FRESH_DAYS_MIN && n <= FRESH_DAYS_MAX;
+}
+
+function freshModeOf(auto) {
+  if (auto.freshSession) return 'always';
+  return isValidFreshDays(auto.freshSessionDays) ? 'interval' : 'never';
+}
+
+function describeFreshMode(auto) {
+  const mode = freshModeOf(auto);
+  if (mode === 'always') return 'every run';
+  if (mode === 'never') return 'never';
+  return `every ${auto.freshSessionDays} day${auto.freshSessionDays === 1 ? '' : 's'}`;
+}
+
+function freshLocalDateKey(instant, timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(instant);
+    const get = (type) => (parts.find((p) => p.type === type) || {}).value;
+    if (get('year') && get('month') && get('day')) return `${get('year')}-${get('month')}-${get('day')}`;
+  } catch { /* unknown timezone */ }
+  return instant.toISOString().slice(0, 10);
+}
+
+// The scheduler's timezone, resolved the way it resolves it: the process TZ,
+// else the first non-empty TZ in the workspace .env (web/src/lib/scheduler.ts
+// loadParentEnv: only fills keys the environment left empty, no quote
+// stripping), else UTC. Workspace = SLYCODE_HOME, as getSlycodeRoot() reads it.
+function configuredTimezoneCli() {
+  if (process.env.TZ) return process.env.TZ;
+  const root = process.env.SLYCODE_HOME || getWorkspaceRoot();
+  if (root) {
+    try {
+      for (const line of fs.readFileSync(path.join(root, '.env'), 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq < 0) continue;
+        if (trimmed.slice(0, eq).trim() === 'TZ') {
+          const value = trimmed.slice(eq + 1).trim();
+          if (value) return value;
+        }
+      }
+    } catch { /* no .env */ }
+  }
+  return 'UTC';
+}
+
+function freshKeyToUtcMs(key) {
+  return Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1, +key.slice(8, 10));
+}
+
+/** probe: { ok: false } or { ok: true, session: <bridge SessionInfo>|null } */
+function resolveFreshnessCli(auto, probe, now, timeZone) {
+  const mode = freshModeOf(auto);
+  if (mode === 'always') return { fresh: true, reason: 'always' };
+  if (mode === 'never') return { fresh: false, reason: 'never' };
+  if (!probe.ok) return { fresh: false, reason: 'probe-failed' };
+  if (!probe.session) return { fresh: false, reason: 'no-session' };
+  const iso = probe.session.conversationStartedAt || probe.session.createdAt;
+  if (!iso || !Number.isFinite(Date.parse(iso))) return { fresh: true, reason: 'age-unknown' };
+  const startKey = freshLocalDateKey(new Date(iso), timeZone);
+  const ageDays = Math.round((freshKeyToUtcMs(freshLocalDateKey(now, timeZone)) - freshKeyToUtcMs(startKey)) / 86400000);
+  if (ageDays >= auto.freshSessionDays) return { fresh: true, reason: 'age', ageDays, startKey };
+  const nextFreshDate = new Date(freshKeyToUtcMs(startKey) + auto.freshSessionDays * 86400000).toISOString().slice(0, 10);
+  return { fresh: false, reason: 'within-window', ageDays, startKey, nextFreshDate };
+}
+
+function rankSessionStatusCli(info) {
+  const status = info && info.status;
+  if (status === 'running' || status === 'detached') return 3;
+  if (status === 'creating') return 2;
+  if (status === 'stopped') return 1;
+  return 0;
+}
+
+/**
+ * Canonical vs project-ID alias, then fresh or resume on the chosen record's
+ * conversation, acting under its name (a due fresh start rolls the selected
+ * session over in place). Probes are { ok, info } or null; freshSession=true
+ * never probes and always uses canonical.
+ */
+function planAutomationSessionCli(auto, canonicalName, aliasName, canonical, alias, now, timeZone) {
+  if (auto.freshSession) {
+    return { sessionName: canonicalName, selected: 'canonical', freshness: resolveFreshnessCli(auto, { ok: true, session: null }, now, timeZone) };
+  }
+  const selected = aliasName && alias && rankSessionStatusCli(alias.info) > rankSessionStatusCli(canonical ? canonical.info : null)
+    ? 'alias' : 'canonical';
+  const chosen = selected === 'alias' ? alias : canonical;
+  const probe = !chosen || chosen.ok ? { ok: true, session: chosen ? chosen.info : null } : { ok: false };
+  return {
+    sessionName: selected === 'alias' ? aliasName : canonicalName,
+    selected,
+    freshness: resolveFreshnessCli(auto, probe, now, timeZone),
+  };
+}
+
+function describeFreshDecision(d) {
+  switch (d.reason) {
+    case 'always': return 'yes (every run)';
+    case 'never': return 'no (resume)';
+    case 'age': return `yes (conversation started ${d.startKey}, ${d.ageDays} days ago)`;
+    case 'age-unknown': return 'yes (conversation start unknown)';
+    case 'within-window': return `no (conversation started ${d.startKey}; fresh start due on or after ${d.nextFreshDate})`;
+    case 'no-session': return 'no (no earlier session; the bridge starts a new one)';
+    case 'probe-failed': return 'no (could not ask the bridge for the session age; resuming)';
+    default: return d.fresh ? 'yes' : 'no';
+  }
+}
+
 function cmdAutomation(args) {
   const opts = parseArgs(args);
 
@@ -3024,9 +3158,25 @@ function cmdAutomation(args) {
         card.automation.provider = opts.provider;
         updates.push(`provider: ${opts.provider}`);
       }
+      if (opts['fresh-session'] !== undefined && opts['fresh-every'] !== undefined) {
+        console.error('Error: use --fresh-session or --fresh-every, not both');
+        process.exit(1);
+      }
       if (opts['fresh-session'] !== undefined) {
         card.automation.freshSession = opts['fresh-session'] === 'true' || opts['fresh-session'] === true;
-        updates.push(`freshSession: ${card.automation.freshSession}`);
+        delete card.automation.freshSessionDays;
+        updates.push(`freshSession: ${describeFreshMode(card.automation)}`);
+      }
+      if (opts['fresh-every'] !== undefined) {
+        const raw = opts['fresh-every'];
+        const days = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
+        if (!isValidFreshDays(days)) {
+          console.error(`Error: --fresh-every must be a whole number of days from ${FRESH_DAYS_MIN} to ${FRESH_DAYS_MAX}`);
+          process.exit(1);
+        }
+        card.automation.freshSession = false;
+        card.automation.freshSessionDays = days;
+        updates.push(`freshSession: ${describeFreshMode(card.automation)}`);
       }
       if (opts['working-dir'] !== undefined) {
         card.automation.workingDirectory = opts['working-dir'];
@@ -3135,10 +3285,17 @@ function cmdAutomation(args) {
       const bridgePort = process.env.BRIDGE_PORT || process.env.PORT || '3004';
       const bridgeUrl = process.env.BRIDGE_URL || `http://localhost:${bridgePort}`;
       const provider = auto.provider || 'claude';
-      const sessionName = `${PROJECT_NAME}:${provider}:card:${result.card.id}`;
+      // Same names as the scheduler: canonical from the project path, plus the
+      // project-ID alias when the registry id differs from it.
+      const sessionKey = computeSessionKey(PROJECT_ROOT);
+      const canonicalName = `${sessionKey}:${provider}:card:${result.card.id}`;
+      const registryProject = TARGET_PROJECT
+        || loadRegistryProjects().find((p) => p.path === path.resolve(PROJECT_ROOT));
+      const aliasName = registryProject && registryProject.id !== sessionKey
+        ? `${registryProject.id}:${provider}:card:${result.card.id}`
+        : null;
 
       console.log(`Triggering automation: ${cardId}`);
-      console.log(`  Session: ${sessionName}`);
       console.log(`  Provider: ${provider}`);
       console.log(`  Prompt: ${description.substring(0, 100)}${description.length > 100 ? '...' : ''}`);
 
@@ -3151,6 +3308,29 @@ function cmdAutomation(args) {
       // Use fetch to call bridge API (Node 18+)
       const doRun = async () => {
         try {
+          // Same session choice and fresh-or-resume rule as the scheduler (card #0373).
+          const probeSession = async (name) => {
+            try {
+              const infoRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(name)}`);
+              return infoRes.ok ? { ok: true, info: await infoRes.json() } : { ok: false, info: null };
+            } catch {
+              return { ok: false, info: null };
+            }
+          };
+          let canonicalProbe = null;
+          let aliasProbe = null;
+          if (!auto.freshSession) {
+            [canonicalProbe, aliasProbe] = await Promise.all([
+              probeSession(canonicalName),
+              aliasName ? probeSession(aliasName) : Promise.resolve(null),
+            ]);
+          }
+          const plan = planAutomationSessionCli(auto, canonicalName, aliasName, canonicalProbe, aliasProbe, new Date(), configuredTimezoneCli());
+          const sessionName = plan.sessionName;
+          const freshness = plan.freshness;
+          console.log(`  Session: ${sessionName}${plan.selected === 'alias' ? ' (project-ID alias)' : ''}`);
+          console.log(`  Fresh session: ${describeFreshDecision(freshness)}`);
+
           // Create or reuse session
           const cwd = auto.workingDirectory || PROJECT_ROOT;
           const createRes = await fetch(`${bridgeUrl}/sessions`, {
@@ -3162,7 +3342,7 @@ function cmdAutomation(args) {
               skipPermissions: true,
               cwd,
               prompt: fullPrompt,
-              fresh: auto.freshSession || false,
+              fresh: freshness.fresh,
               verifyDelivery: true,
             }),
           });
@@ -3267,7 +3447,7 @@ function cmdAutomation(args) {
       console.log(`Schedule Type: ${auto.scheduleType}`);
       console.log(`Provider: ${auto.provider}`);
       console.log(`Description (prompt): ${card.description ? card.description.substring(0, 200) + (card.description.length > 200 ? '...' : '') : '(empty)'}`);
-      console.log(`Fresh Session: ${auto.freshSession}`);
+      console.log(`Fresh Session: ${describeFreshMode(auto)}`);
       if (auto.workingDirectory) console.log(`Working Dir: ${auto.workingDirectory}`);
       console.log(`Report via Messaging: ${auto.reportViaMessaging}`);
       console.log(`Last Run: ${auto.lastRun || 'never'}`);

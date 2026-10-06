@@ -291,12 +291,12 @@ export function QuestionnaireTab({
   // ------ Empty state ------
   if (refs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-void-500 dark:text-void-400">
+      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-ink-3">
         <div>
           <p className="mb-2 font-medium">No questionnaires attached.</p>
           <p className="text-xs opacity-70">
             Agents attach questionnaires via{' '}
-            <code className="rounded bg-void-100 px-1.5 py-0.5 font-mono text-xs dark:bg-void-800">
+            <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
               sly-kanban update {card.id} --questionnaire-ref documentation/questionnaires/NNN_name.json
             </code>
             .
@@ -316,15 +316,15 @@ export function QuestionnaireTab({
           </div>
         )}
         {!indexItems && !indexError && (
-          <div className="text-center text-sm text-void-500 dark:text-void-400">Loading…</div>
+          <div className="text-center text-sm text-ink-3">Loading…</div>
         )}
         {indexItems && indexItems.length === 0 && (
-          <div className="text-center text-sm text-void-500 dark:text-void-400">No questionnaires found.</div>
+          <div className="text-center text-sm text-ink-3">No questionnaires found.</div>
         )}
         {indexItems && indexItems.map((item) => (
           <div
             key={item.ref}
-            className="group flex items-start gap-2 rounded-lg border border-void-200/60 bg-white/40 p-4 text-left backdrop-blur-sm transition-all hover:border-neon-blue-400/50 hover:bg-neon-blue-400/5 dark:border-void-700/50 dark:bg-void-900/40"
+            className="group flex items-start gap-2 rounded-lg border border-line bg-surface-1 p-4 text-left backdrop-blur-sm transition-all hover:border-accent/50 hover:bg-accent/5"
           >
             <button
               onClick={() => item.name && setSelectedName(item.name)}
@@ -333,11 +333,11 @@ export function QuestionnaireTab({
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-void-900 dark:text-void-100">
+                  <div className="font-medium text-ink-1">
                     {item.title || item.name || item.ref}
                   </div>
                   {item.title && item.name && (
-                    <div className="mt-0.5 font-mono text-xs text-void-500 dark:text-void-400">
+                    <div className="mt-0.5 font-mono text-xs text-ink-3">
                       {item.name}
                     </div>
                   )}
@@ -348,17 +348,17 @@ export function QuestionnaireTab({
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   {item.status && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         item.status === 'submitted'
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                          : 'bg-void-100 text-void-600 dark:bg-void-800 dark:text-void-400'
+                          : 'bg-surface-2 text-ink-2'
                       }`}
                     >
                       {item.status}
                     </span>
                   )}
                   {item.answerable !== undefined && (
-                    <span className="font-mono text-xs text-void-500 dark:text-void-400">
+                    <span className="font-mono text-xs text-ink-3">
                       {item.answered ?? 0} / {item.answerable} answered
                     </span>
                   )}
@@ -369,7 +369,7 @@ export function QuestionnaireTab({
               <Tooltip content="Unlink this questionnaire (removes the reference; file is not deleted)">
                 <button
                   onClick={() => onUnlink(item.ref)}
-                  className="shrink-0 rounded p-1.5 text-void-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                  className="shrink-0 rounded p-1.5 text-ink-3 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                   aria-label="Unlink this questionnaire"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -388,17 +388,17 @@ export function QuestionnaireTab({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-void-200/60 px-4 py-2 dark:border-void-700/40">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2">
         <div className="min-w-0">
           {indexItems && indexItems.length > 1 && (
             <button
               onClick={() => setSelectedName(null)}
-              className="mb-1.5 flex items-center gap-1 text-xs text-neon-blue-500 hover:text-neon-blue-400"
+              className="mb-1.5 flex items-center gap-1 text-xs text-accent hover:text-accent"
             >
               <span aria-hidden>←</span> All questionnaires
             </button>
           )}
-          <div className="text-base font-semibold text-void-900 dark:text-void-50">
+          <div className="text-base font-semibold text-ink-1">
             {questionnaire?.title || selectedName}
           </div>
         </div>
@@ -413,12 +413,12 @@ export function QuestionnaireTab({
           </div>
         )}
         {!questionnaire && !loadError && (
-          <div className="text-center text-sm text-void-500 dark:text-void-400">Loading…</div>
+          <div className="text-center text-sm text-ink-3">Loading…</div>
         )}
         {questionnaire && (
           <>
             {questionnaire.intro && (
-              <p className="mb-5 border-l-2 border-cyan-400/50 py-0.5 pl-3.5 whitespace-pre-wrap text-[15px] leading-relaxed text-void-700 dark:text-void-200">
+              <p className="mb-5 border-l-2 border-cyan-400/50 py-0.5 pl-3.5 whitespace-pre-wrap text-[15px] leading-relaxed text-ink-2">
                 {questionnaire.intro}
               </p>
             )}
@@ -437,19 +437,19 @@ export function QuestionnaireTab({
 
       {/* Footer */}
       {questionnaire && counts && (
-        <div className="border-t border-void-200/60 px-4 py-2 dark:border-void-700/40">
+        <div className="border-t border-line px-4 py-2">
           {submitToast && (
             <div className="mb-2 rounded-md border border-amber-300/50 bg-amber-50/50 p-2.5 text-sm text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
               {submitToast}
             </div>
           )}
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm text-void-600 dark:text-void-300">
+            <div className="text-sm text-ink-2">
               <span className="font-mono font-medium">
                 {counts.answered} / {counts.answerable} answered
               </span>
               {questionnaire.submission_count > 0 && questionnaire.submitted_at && (
-                <span className="ml-2 text-xs text-void-500 dark:text-void-400">
+                <span className="ml-2 text-xs text-ink-3">
                   · submitted {questionnaire.submission_count}× (last:{' '}
                   {formatDateTime(questionnaire.submitted_at)})
                 </span>
@@ -458,7 +458,7 @@ export function QuestionnaireTab({
             <button
               onClick={handleSubmit}
               disabled={submitDisabled()}
-              className="rounded-lg border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none"
+              className="rounded-lg border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-medium text-accent transition-all hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none"
             >
               {submitting ? 'Submitting…' : 'Submit to terminal'}
             </button>
@@ -484,7 +484,7 @@ function SaveStatusBadge({ state, error }: { state: SaveState; error: string | n
   if (state === 'idle') return null;
   if (state === 'saving') {
     return (
-      <span className="text-xs text-void-500 dark:text-void-400">Saving…</span>
+      <span className="text-xs text-ink-3">Saving…</span>
     );
   }
   if (state === 'saved') {
@@ -514,8 +514,8 @@ function ItemControl({
 }) {
   if (item.type === 'exposition') {
     return (
-      <div className="rounded-lg border-l-2 border-cyan-400/40 bg-void-50/70 px-4 py-3 dark:bg-void-850/60">
-        <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-void-700 dark:text-void-200">
+      <div className="rounded-lg border-l-2 border-cyan-400/40 bg-surface-2 px-4 py-3">
+        <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-2">
           {item.text}
         </p>
       </div>
@@ -523,8 +523,8 @@ function ItemControl({
   }
 
   return (
-    <div className="rounded-lg border border-void-200/70 bg-white/40 px-4 py-3.5 dark:border-void-700/60 dark:bg-void-850/50">
-      <label className="mb-2.5 block text-base font-semibold leading-snug text-void-900 dark:text-void-50">
+    <div className="rounded-lg border border-line bg-surface-1 px-4 py-3.5">
+      <label className="mb-2.5 block text-base font-semibold leading-snug text-ink-1">
         {item.question}
       </label>
       {renderInput(item, onChange)}
@@ -541,7 +541,7 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
           value={item.answer ?? ''}
           onChange={(e) => onChange(e.target.value || null, 500)}
           rows={3}
-          className="w-full rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] leading-relaxed text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
+          className="w-full rounded-md border border-line bg-surface-1 px-3 py-2 text-[15px] leading-relaxed text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
           placeholder="Type your answer…"
         />
       );
@@ -566,8 +566,8 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
               onClick={() => onChange(n)}
               className={`min-w-[36px] rounded-md border px-2.5 py-1.5 text-sm transition-all ${
                 item.answer === n
-                  ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
-                  : 'border-void-200/60 bg-white/30 text-void-700 hover:border-neon-blue-400/30 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-200'
+                  ? 'border-accent/50 bg-accent/15 text-accent'
+                  : 'border-line bg-surface-1 text-ink-2 hover:border-accent/30'
               }`}
             >
               {n}
@@ -577,7 +577,7 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
             <Tooltip content="Clear">
               <button
                 onClick={() => onChange(null)}
-                className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
+                className="rounded-md border border-line bg-transparent px-2 py-1.5 text-xs text-ink-3 hover:bg-surface-3"
                 aria-label="Clear"
               >
                 ✕
@@ -605,7 +605,7 @@ function renderInput(item: AnswerableItem, onChange: (v: unknown, debounceMs?: n
               if (Number.isFinite(n)) onChange(n, 300);
             }
           }}
-          className="w-28 rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] text-void-900 outline-none focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50"
+          className="w-28 rounded-md border border-line bg-surface-1 px-3 py-2 text-[15px] text-ink-1 outline-none focus:border-accent"
         />
       );
   }
@@ -631,8 +631,8 @@ function BooleanInput({
   const buttonClass = (selected: boolean) =>
     `rounded-md border px-3 py-1.5 text-sm transition-all ${
       selected
-        ? 'border-neon-blue-400/50 bg-neon-blue-400/15 text-neon-blue-400'
-        : 'border-void-200/60 bg-white/30 text-void-700 hover:border-neon-blue-400/30 dark:border-void-700/50 dark:bg-void-900/40 dark:text-void-200'
+        ? 'border-accent/50 bg-accent/15 text-accent'
+        : 'border-line bg-surface-1 text-ink-2 hover:border-accent/30'
     }`;
 
   return (
@@ -653,7 +653,7 @@ function BooleanInput({
           <Tooltip content="Clear">
             <button
               onClick={() => onChange(null)}
-              className="rounded-md border border-void-200/60 bg-transparent px-2 py-1.5 text-xs text-void-500 hover:bg-void-50 dark:border-void-700/40 dark:text-void-400 dark:hover:bg-void-900"
+              className="rounded-md border border-line bg-transparent px-2 py-1.5 text-xs text-ink-3 hover:bg-surface-3"
               aria-label="Clear"
             >
               ✕
@@ -668,7 +668,7 @@ function BooleanInput({
           onChange={(e) => onChange(`Other: ${e.target.value}`, 500)}
           rows={2}
           placeholder="Specify…"
-          className="w-full rounded-md border border-void-200/60 bg-white/50 px-3 py-2 text-[15px] leading-relaxed text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
+          className="w-full rounded-md border border-line bg-surface-1 px-3 py-2 text-[15px] leading-relaxed text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
         />
       )}
       <ChoiceFooter
@@ -700,26 +700,26 @@ function SingleChoiceInput({
   return (
     <div className="space-y-1.5">
       {item.options.map((opt) => (
-        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
+        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-ink-2">
           <input
             type="radio"
             name={item.id}
             checked={item.answer === opt}
             onChange={() => onChange(opt)}
-            className="h-4 w-4 accent-neon-blue-400"
+            className="h-4 w-4 accent-accent"
           />
           {opt}
         </label>
       ))}
       {showOther && (
         <div className="space-y-1.5">
-          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
+          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-ink-2">
             <input
               type="radio"
               name={item.id}
               checked={isOther}
               onChange={() => onChange('Other:')}
-              className="h-4 w-4 accent-neon-blue-400"
+              className="h-4 w-4 accent-accent"
             />
             Other
           </label>
@@ -730,7 +730,7 @@ function SingleChoiceInput({
               value={otherText}
               onChange={(e) => onChange(`Other: ${e.target.value}`, 500)}
               placeholder="Specify…"
-              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-3 py-1.5 text-[15px] text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
+              className="ml-6 w-full max-w-md rounded-md border border-line bg-surface-1 px-3 py-1.5 text-[15px] text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
             />
           )}
         </div>
@@ -787,24 +787,24 @@ function MultiChoiceInput({
   return (
     <div className="space-y-1.5">
       {item.options.map((opt) => (
-        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
+        <label key={opt} className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-ink-2">
           <input
             type="checkbox"
             checked={current.includes(opt)}
             onChange={() => toggleOption(opt)}
-            className="h-4 w-4 accent-neon-blue-400"
+            className="h-4 w-4 accent-accent"
           />
           {opt}
         </label>
       ))}
       {showOther && (
         <div className="space-y-1.5">
-          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-void-700 dark:text-void-200">
+          <label className="flex cursor-pointer items-center gap-2.5 py-0.5 text-[15px] text-ink-2">
             <input
               type="checkbox"
               checked={isOther}
               onChange={toggleOther}
-              className="h-4 w-4 accent-neon-blue-400"
+              className="h-4 w-4 accent-accent"
             />
             Other
           </label>
@@ -815,7 +815,7 @@ function MultiChoiceInput({
               value={otherText}
               onChange={(e) => setOtherText(e.target.value)}
               placeholder="Specify…"
-              className="ml-6 w-full max-w-md rounded-md border border-void-200/60 bg-white/50 px-3 py-1.5 text-[15px] text-void-900 outline-none placeholder:text-void-400 focus:border-neon-blue-400 dark:border-void-700/50 dark:bg-void-900/50 dark:text-void-50 dark:placeholder:text-void-500"
+              className="ml-6 w-full max-w-md rounded-md border border-line bg-surface-1 px-3 py-1.5 text-[15px] text-ink-1 outline-none placeholder:text-ink-3 focus:border-accent"
             />
           )}
         </div>
@@ -857,7 +857,7 @@ function ChoiceFooter({
           <Tooltip content="Clear selection">
             <button
               onClick={onClear}
-              className="text-xs text-void-600 hover:text-void-800 dark:text-void-300 dark:hover:text-void-100"
+              className="text-xs text-ink-2 hover:text-ink-1"
             >
               Clear
             </button>
@@ -869,7 +869,7 @@ function ChoiceFooter({
           <Tooltip content="Add an 'Other' option for a free-text answer">
             <button
               onClick={onAddOther}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-void-500 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:text-void-400"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink-3 hover:bg-accent/10 hover:text-accent"
             >
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />

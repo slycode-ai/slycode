@@ -1,4 +1,4 @@
-import type { Channel, TelegramChannelConfig, InlineButton } from '../types.js';
+import type { Channel, TelegramChannelConfig, InlineButton, VoicePick } from '../types.js';
 export declare class TelegramChannel implements Channel {
     readonly name = "Telegram";
     private botToken;
@@ -13,6 +13,9 @@ export declare class TelegramChannel implements Channel {
     private commandHandlers;
     private persistentKeyboard;
     private pendingVoiceList;
+    /** The list the buttons belong to: bumps on every list, so older buttons are recognisably stale. */
+    private voiceListGeneration;
+    private voiceListMeta;
     private photoBuffer;
     private polling;
     private pollOffset;
@@ -31,7 +34,7 @@ export declare class TelegramChannel implements Channel {
     sendText(text: string): Promise<void>;
     sendTextRaw(text: string): Promise<void>;
     sendReply(text: string, replyToMessageId: number): Promise<void>;
-    sendVoice(audio: Buffer): Promise<{
+    sendVoice(audio: Buffer, format?: 'ogg' | 'mp3'): Promise<{
         messageId: number;
     }>;
     sendMedia(req: {
@@ -51,8 +54,13 @@ export declare class TelegramChannel implements Channel {
         id: string;
         name: string;
         description: string;
-    }[]): Promise<void>;
-    onVoiceSelect(handler: (voiceId: string, voiceName: string) => void): void;
+        kind?: 'prebuilt' | 'library' | 'custom';
+        expiresAt?: string;
+    }[], meta?: {
+        provider: string;
+        revision: number;
+    }): Promise<void>;
+    onVoiceSelect(handler: (voiceId: string, voiceName: string, pick: VoicePick) => void): void;
     isReady(): boolean;
     /** Generic JSON API call to Telegram Bot API. */
     /**

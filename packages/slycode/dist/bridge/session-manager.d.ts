@@ -11,6 +11,10 @@ export declare class SessionManager {
     private idleCheckTimer;
     private sseHeartbeatTimer;
     private exitDetectionChain;
+    private activeSave;
+    private queuedSave;
+    private exitHandlers;
+    private exitObserved;
     constructor(config?: Partial<BridgeConfig>, runtimeConfig?: BridgeRuntimeConfig);
     init(): Promise<void>;
     /**
@@ -46,7 +50,46 @@ export declare class SessionManager {
      */
     getStaleSessionPids(): Map<number, string>;
     private loadPersistedState;
+    /**
+     * bridge-sessions.json is not loadable as-is (card #0366: overlapping writes
+     * left a valid document plus trailing garbage, and a fatal load turned that
+     * into a launchd/systemd crash loop). Keep the bad file, salvage the longest
+     * valid prefix, keep every session record that validates and drop the rest by
+     * name, carry on. The corrupt copy is the precondition for everything else:
+     * if it can't be kept we stay fatal rather than overwrite the only evidence.
+     */
+    private recoverCorruptState;
+    /**
+     * Remove bridge-sessions.json.tmp.<pid>.<id> files left by writers that died
+     * between writeFile and rename. A file is unlinked only when BOTH hold: it is
+     * older than STALE_TEMP_FILE_AGE_MS, and the pid in its name is ours (nothing
+     * of ours is in flight this early in init) or is confirmed not running.
+     * Anything uncertain is kept — unparseable name, liveness check inconclusive.
+     * What this does NOT guarantee: a dead writer whose pid has since been reused
+     * by an unrelated process looks alive, so its debris stays until that process
+     * ends. Leaking a file is the safe direction; deleting a live writer's temp
+     * would fail its rename.
+     */
+    private sweepStaleTempFiles;
+    /**
+     * Persist session state. Saves are serialized: at most one write in flight
+     * and one queued. The state object is shared and is serialized when a write
+     * STARTS, so a caller arriving while a save is still queued joins it — that
+     * write carries their mutation. Overlapping saves used to race on the temp
+     * file and publish a corrupt document (card #0366).
+     *
+     * A failed write rejects for the callers that were waiting on it; it never
+     * blocks the saves behind it.
+     */
     private savePersistedState;
+    /**
+     * Bounded wait for the killed sessions' exit handlers and the exit-detection
+     * chain they feed. Never rejects; gives up at the deadline with a warning.
+     */
+    private waitForExitHandling;
+    /** Wait until no save is queued or in flight. Never rejects. */
+    private flushSaves;
+    private writeStateAtomic;
     private extractGroup;
     /**
      * Convert a new-format session name to old format by removing the provider segment.
@@ -102,6 +145,7 @@ export declare class SessionManager {
      * intermittent issue where \r fires before large prompts finish writing).
      */
     private deliverPendingPrompt;
+    private onPtyExit;
     private handlePtyExit;
     getSessionInfo(name: string): SessionInfo | null;
     getSessionCwd(name: string): string | null;

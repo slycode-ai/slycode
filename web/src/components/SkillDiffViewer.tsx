@@ -47,35 +47,35 @@ export function SkillDiffViewer({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-void-700 bg-void-850 shadow-(--shadow-overlay)">
+      <div className="mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-line bg-surface-2 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-void-700 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-void-100">{skillName}</h3>
+            <h3 className="text-lg font-semibold text-ink-1">{skillName}</h3>
             {isNewSkill ? (
-              <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs font-medium text-emerald-300">
+              <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs font-medium text-st-done">
                 New skill
               </span>
             ) : (
-              <span className="rounded bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-300">
+              <span className="rounded bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-warn-text">
                 v{currentVersion} → v{newVersion}
               </span>
             )}
-            <span className="text-xs text-void-500">
-              <span className="text-emerald-400">+{stats.additions}</span>
+            <span className="text-xs text-ink-3">
+              <span className="text-st-done">+{stats.additions}</span>
               {' '}
-              <span className="text-red-400">-{stats.deletions}</span>
+              <span className="text-danger-text">-{stats.deletions}</span>
             </span>
           </div>
           <div className="flex items-center gap-2">
             {!isNewSkill && (
-              <div className="flex gap-1 rounded-md border border-void-700 bg-void-900 p-0.5">
+              <div className="flex gap-1 rounded-md border border-line bg-surface-2 p-0.5">
                 <button
                   onClick={() => setViewMode('diff')}
                   className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     viewMode === 'diff'
-                      ? 'bg-void-800 text-void-100 shadow-sm'
-                      : 'text-void-400 hover:text-void-200'
+                      ? 'bg-surface-1 text-ink-1 shadow-sm'
+                      : 'text-ink-3 hover:text-ink-1'
                   }`}
                 >
                   Diff
@@ -84,8 +84,8 @@ export function SkillDiffViewer({
                   onClick={() => setViewMode('new')}
                   className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     viewMode === 'new'
-                      ? 'bg-void-800 text-void-100 shadow-sm'
-                      : 'text-void-400 hover:text-void-200'
+                      ? 'bg-surface-1 text-ink-1 shadow-sm'
+                      : 'text-ink-3 hover:text-ink-1'
                   }`}
                 >
                   Full
@@ -94,7 +94,7 @@ export function SkillDiffViewer({
             )}
             <button
               onClick={onClose}
-              className="rounded p-1 text-void-400 hover:bg-void-800 hover:text-void-200"
+              className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -111,8 +111,8 @@ export function SkillDiffViewer({
             // Full view of new content
             <div className="font-mono text-xs leading-relaxed">
               {newContent.split('\n').map((line, i) => (
-                <div key={i} className="flex text-void-300">
-                  <span className="w-10 flex-shrink-0 select-none px-2 text-right text-void-600">
+                <div key={i} className="flex text-ink-2">
+                  <span className="w-10 flex-shrink-0 select-none px-2 text-right text-ink-3">
                     {i + 1}
                   </span>
                   <span className="flex-1 whitespace-pre-wrap break-all px-2">{line}</span>

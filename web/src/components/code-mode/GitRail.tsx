@@ -96,17 +96,17 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
             setBranchError(null);
             if (!branchesOpen) loadBranches();
           }}
-          className="flex min-w-0 items-center gap-1 truncate font-mono text-[11.5px] font-semibold text-(--cm-text) hover:text-(--cm-atlas)"
+          className="flex min-w-0 items-center gap-1 truncate font-mono text-[12px] font-semibold text-(--cm-text) hover:text-(--cm-atlas)"
         >
           ⎇ {status.branch}
-          <span className="text-[9px] text-(--cm-faint)">{branchesOpen ? '▴' : '▾'}</span>
+          <span className="text-[11px] text-(--cm-faint)">{branchesOpen ? '▴' : '▾'}</span>
         </button>
         </Tooltip>
         <span className="ml-auto flex gap-1">
-          <button onClick={() => onShowDiff(undefined)} className="rounded border border-(--cm-line) px-1.5 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)">
+          <button onClick={() => onShowDiff(undefined)} className="rounded border border-(--cm-line) px-1.5 py-0.5 font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)">
             diff all
           </button>
-          <button onClick={() => onShowLog(undefined)} className="rounded border border-(--cm-line) px-1.5 py-0.5 font-mono text-[10px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)">
+          <button onClick={() => onShowLog(undefined)} className="rounded border border-(--cm-line) px-1.5 py-0.5 font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)">
             history
           </button>
         </span>
@@ -150,13 +150,13 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
             <button
               type="submit"
               disabled={!newBranch.trim() || branchBusy}
-              className="shrink-0 rounded border border-(--cm-line2) px-2 py-1 font-mono text-[10px] text-(--cm-muted) enabled:hover:border-(--cm-atlas) enabled:hover:text-(--cm-atlas) disabled:opacity-40"
+              className="shrink-0 rounded border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) enabled:hover:border-(--cm-atlas) enabled:hover:text-(--cm-atlas) disabled:opacity-40"
             >
               {branchBusy ? '…' : '+ create'}
             </button>
           </form>
           {branchError && (
-            <p className="mt-1.5 rounded border border-(--cm-stale) bg-amber-500/8 px-2 py-1 font-mono text-[10px] leading-snug text-(--cm-stale)">
+            <p className="mt-1.5 rounded border border-(--cm-stale) bg-amber-500/8 px-2 py-1 font-mono text-[11px] leading-snug text-(--cm-stale)">
               {branchError}
             </p>
           )}
@@ -168,7 +168,7 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
         {(['staged', 'unstaged', 'untracked'] as const).map(cat =>
           byCategory[cat].length > 0 ? (
             <div key={cat} className="mb-1.5">
-              <p className="px-2 pt-1 font-mono text-[9.5px] uppercase tracking-[0.15em] text-(--cm-faint)">
+              <p className="px-2 pt-1 font-mono text-[11px] text-(--cm-faint)">
                 {cat} ({byCategory[cat].length})
               </p>
               {byCategory[cat].map((f, i) => (
@@ -187,7 +187,7 @@ export function GitRail({ projectId, onShowDiff, onShowLog, onOpenFile }: GitRai
                   <Tooltip content="Open in editor" placement="right">
                     <button
                       onClick={() => onOpenFile({ path: f.path })}
-                      className="hidden shrink-0 rounded px-1 font-mono text-[10px] text-(--cm-faint) hover:text-(--cm-atlas) group-hover:inline"
+                      className="hidden shrink-0 rounded px-1 font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-atlas) group-hover:inline"
                     >
                       edit
                     </button>

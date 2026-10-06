@@ -1,8 +1,8 @@
 ---
 name: messaging
-version: 2.6.0
-updated: 2026-09-08
-description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc), give short spoken summaries in the web terminal (speak / voice reply / speaker), and manage a project's TTS voice (project voice). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc., or when the user asks for spoken summaries, voice replies, or to change the project voice.
+version: 2.9.0
+updated: 2026-10-05
+description: Send responses back to the user via their messaging channel (Telegram, Slack, Teams, etc), give short spoken summaries in the web terminal (speak / voice reply / speaker), and manage a project's TTS voice (project voice) on either voice provider (ElevenLabs or Gemini). Use this skill when a message arrives with a channel header like [Telegram], [Slack], etc., or when the user asks for spoken summaries, voice replies, or to change the project voice.
 ---
 
 # Messaging Response Skill
@@ -75,13 +75,13 @@ Telegram delivers it as a generic file attachment.
 
 ### Generate-Only TTS (render audio to disk, no send)
 
-Render ElevenLabs TTS audio to a file **without sending anything** to the
-channel. Use this when the audio is an ingredient for something else — e.g.
+Render TTS audio (with whichever voice provider the install uses) to a file
+**without sending anything** to the channel. Use this when the audio is an ingredient for something else — e.g.
 a voiceover track for a video pipeline — rather than a message.
 
 ```bash
 sly-messaging generate "Your narration text here"                      # → data/generated-audio/<date>/*.ogg
-sly-messaging generate "Your narration" --format mp3 --out-dir /tmp    # custom format + location
+sly-messaging generate "Your narration" --format mp3 --out-dir /tmp    # custom format + location (ogg | mp3 | wav)
 sly-messaging generate "Your narration" --filename intro --voice-id <id>
 sly-messaging generate "Your narration" --project slycode              # use a project's voice
 ```
@@ -89,7 +89,8 @@ sly-messaging generate "Your narration" --project slycode              # use a p
 - Prints the **absolute path** of the generated file on success.
 - Defaults: `ogg` format, `data/generated-audio/<date>/` output dir.
 - Voice resolution: `--voice-id` > `--project` voice > caller's session voice > global default.
-- All the audio tags from "Speech Control" below work here too.
+- Long narration is fine: the service splits it into pieces and joins them.
+- All the tags from "Expressive delivery" below work here too.
 
 **When to use `send-file` instead of `send --tts`:**
 - You already have an audio/video file on disk that you want delivered as-is
@@ -118,7 +119,9 @@ sly-messaging speak "tests pass, one thing left to check on the modal"
 ```
 
 - Keep it **short and casual**: a heads-up, not a read-out of your reply.
-  Default limit 60 words (user-adjustable in the gear settings).
+  Default limit 60 words: the "Browser reply length (words)" setting in
+  Voice Settings. It applies to `speak` only; Telegram voice replies
+  (`send --tts`) have a separate, fixed 5,000-character limit.
 - Renders with the calling project's voice (same voice Telegram uses for
   that project). Style comes from the user's ask, not from `/tone`.
 - Plays in every browser where the SlyCode web app is open. The output line
@@ -144,22 +147,76 @@ Never fall back to `generate` or `send --tts` to "make sound anyway".
 
 ## Project Voice (`voice set|show|clear`)
 
-Each project has its own TTS voice, shared by Telegram voice replies and
-terminal `speak`. Change it from any terminal when the user asks:
+The install uses ONE voice provider (ElevenLabs or Gemini). Each project keeps
+its own voice **per provider**, shared by Telegram voice replies and terminal
+`speak`. Change it from any terminal when the user asks:
 
 ```bash
-sly-messaging voices british                         # search voices (id  name (category) — description)
+sly-messaging voices warm                            # search the active provider's voices
+sly-messaging voices --gender female --accent british   # Gemini filters (also --language en-GB, --custom)
 sly-messaging voice set <voice-id> --project slycode # set by id (preferred)
-sly-messaging voice set "Rachel" --project slycode   # set by exact name (must match exactly one voice)
-sly-messaging voice show --project slycode           # stored + effective voice
+sly-messaging voice set "Sulafat" --project slycode  # or an exact name (must match exactly one voice)
+sly-messaging voice show --project slycode           # provider, stored + effective voice, the other provider's voice
 sly-messaging voice clear --project slycode          # back to the inherited default
 ```
 
+- `voices` and `voice set|show|clear` act on the **active provider**; add
+  `--provider elevenlabs|gemini` to prepare the other one (e.g. pick Gemini
+  voices before the user switches).
 - `--project` accepts a project id, display name or session key; it defaults
   to the calling session's project when omitted.
 - `clear` resets to the current inherited default, not to "no voice".
-- Ambiguous or unknown names fail loudly; a search-service failure is
-  reported as such, not as "not found". Never pick the first fuzzy hit.
+- Ambiguous or unknown names fail loudly with candidates; a search-service
+  failure is reported as such, not as "not found". Never pick the first fuzzy
+  hit. Gemini library voices share names ("Authoritative Advisor 1"), so set
+  those by id.
+- With nothing set, Gemini speaks in its built-in default, the library voice
+  **Zuri** (`en-us-zuri`, East Coast US, female). `voice set Zuri` works by
+  name. Voices that a project or the install chose explicitly are never
+  changed by this default.
+- `sly-messaging tts show` prints the active provider and each provider's
+  default voice. **Only when the user asks**, switch the whole install with
+  `sly-messaging tts provider gemini|elevenlabs`; it refuses (naming the
+  projects and the fix) if a project would be left without a usable voice.
+
+### Designed voices (Gemini; only when the user asks for a new voice)
+
+```bash
+sly-messaging voice design "a calm Scottish narrator in her fifties" --name Isla --set   # ~30 s, ~2-3 cents
+sly-messaging voices --custom                      # designed voices + expiry; recipes of deleted ones
+sly-messaging voice design --recreate <voice_id> --set   # rebuild an expired/deleted one (similar, not identical)
+sly-messaging voice delete <voice_id>              # Google keeps at most 200; the recipe stays for --recreate
+```
+
+- Works whatever the active provider is (needs `GEMINI_API_KEY`). `--set`
+  makes it the project's **Gemini** voice; `--gender female|male|neutral`
+  and `--language en-GB` are optional.
+- It prints a sample path (`.ogg`); offer to send it with `send-file`.
+- Designed voices expire after a year. `voice show`, `tts show` and the
+  Telegram `/voice` header warn 30 days ahead, and errors name the fix. Only
+  suggest `--recreate` when the message does. Never recreate, delete or
+  re-point projects on your own initiative.
+
+### Cloned voices (Gemini; only when the user asks to clone their voice)
+
+The user records two takes **themselves**: a 10–30 s sample of natural
+speech and the consent statement read aloud, same person, same room. The
+easiest way is the web (Voice Settings → Change → Clone), which works on a
+phone. From files:
+
+```bash
+sly-messaging voice consent-text --locale en-AU     # the exact statement to read (no locale: all 30)
+sly-messaging voice clone --sample me.wav --consent consent.wav --name "My voice" --locale en-AU --set
+sly-messaging voice clone --sample new.wav --consent new-consent.wav --recreate <voice_id> --set   # renew an expired clone
+```
+
+- Never make, edit or synthesise either recording for the user, and never
+  clone anyone else's voice. Google checks that the consent speaker matches.
+- The recordings go to Google once and are **not kept**. An expiring clone
+  is renewed by recording again (`voice design --recreate` refuses clones).
+- WAV goes as-is; other formats need ffmpeg. A consent refusal means "record
+  both again, reading the statement exactly"; a region refusal means cloning
+  isn't offered there (designed voices still work).
 
 ## When to Use Voice (`--tts`)
 
@@ -167,6 +224,10 @@ Use the `--tts` flag when:
 - The user sent a voice message (`/Voice]` in the header)
 - The user explicitly asked for voice responses (e.g., "use voice from now on")
 - The response is a brief summary or confirmation that benefits from audio
+
+Telegram voice replies are limited to 5,000 characters (fixed; the browser
+word limit in Voice Settings is for `speak` only). Longer replies are refused:
+shorten them or send text.
 
 Do NOT use voice for:
 - Long technical explanations or code snippets
@@ -198,7 +259,7 @@ Mode is always present in the footer. Follow it exactly.
 When Tone is present and mode includes voice, adapt your voice response to match:
 - The tone describes both the **style** and **desired length** of voice responses
 - Examples: "short ominous updates" = brief, dark, dramatic. "casual and conversational" = relaxed, moderate length. "excited and energetic" = upbeat, punchy.
-- Use audio tags that match the tone (e.g., `[dramatic tone]` for ominous, `[lighthearted]` for casual)
+- Express the tone with mood tags (e.g., `[dramatic tone]` for ominous, `[lighthearted]` for casual) — see "Expressive delivery" below
 - When no Tone is set, use the default conversational style described in "Voice Tone & Style" below
 
 ### Examples
@@ -244,40 +305,47 @@ When using `--tts`, write like you're **talking to a friend**, not writing a rep
 - **Round numbers**: say "about a dozen" not "12 out of 14"
 - **Use transitions**: "so", "anyway", "oh and", "by the way" to connect thoughts naturally
 
-### Speech Control: Audio Tags (ElevenLabs v3)
+### Expressive delivery (works on every voice provider)
 
-The TTS engine uses ElevenLabs v3 which supports `[tag]` audio tags. These are NOT spoken aloud — they modify delivery. Use them to make speech feel natural and expressive.
+Write `[square]` tags to direct delivery. They are **never spoken**: SlyCode
+translates them for whichever provider the install uses (ElevenLabs reads
+them natively; Gemini gets its own pause/sound tags and delivery styles). You
+never write anything provider-specific.
 
-**Emotion & Tone:**
-- `[excited]`, `[sad]`, `[angry]`, `[sarcastic]`, `[curious]`
-- `[happily]`, `[serious tone]`, `[lighthearted]`, `[matter-of-fact]`
-- `[wistful]`, `[resigned]`, `[dramatic tone]`, `[mischievously]`
+**Be expressive.** A flat voice reply wastes the medium. As a rule of thumb:
+- Open every voice reply with a **mood** tag.
+- Add a **pause** or a **sound** where a person naturally would — before a
+  punchline, after bad news, at a change of subject.
+- Change the mood when the content changes (good news → the one problem → wrap-up).
+- About one tag per sentence at most. Never tag every word.
 
-**Delivery:**
-- `[whispers]` / `[whispering]` — Whispered speech
-- `[shouts]` — Loud, projected
-- `[calm]` — Measured, relaxed
-- `[emphasized]` — Stressed delivery
-- `[stress on next word]` — Emphasize the next word
-- `[timidly]` — Shy, quiet
+**How tags behave (the one rule):** pauses and sounds happen **once, where you
+put them**. Mood, pace and whisper/shout **last until you change them** — and
+a new mood also ends a whisper or shout.
 
-**Pauses & Pacing:**
-- `[pause]`, `[short pause]`, `[long pause]`
-- `[continues after a beat]` — Brief dramatic pause
-- `[hesitates]` — Hesitation
-- `[breathes]` — Audible breath
+**Pauses (once):** `[pause]`, `[short pause]`, `[long pause]` (dramatic, ~3 s),
+`[continues after a beat]`, `[hesitates]`
 
-**Speed:**
-- `[rushed]` / `[rapid-fire]` — Faster
-- `[slows down]` / `[deliberate]` — Slower
-- `[drawn out]` — Prolonged words
+**Sounds (once):** `[laughs]`, `[chuckles]`, `[giggles]`, `[sighs]`, `[exhales]`,
+`[breathes]`, `[gasps]`, `[clears throat]`, `[coughs]`, `[snorts]`, `[groans]`,
+`[yawns]`, `[crying]`
 
-**Non-verbal:**
-- `[laughs]`, `[giggles]`, `[chuckles]`
-- `[sighs]`, `[clears throat]`, `[coughs]`
-- `[crying]`, `[snorts]`
+**Mood (until changed):** `[excited]`, `[calm]`, `[serious tone]`, `[sarcastic]`,
+`[curious]`, `[happily]`, `[lighthearted]`, `[matter-of-fact]`, `[dramatic tone]`,
+`[wistful]`, `[resigned]`, `[mischievously]`, `[sad]`, `[angry]`, `[timidly]`
 
-**Tags can combine:** [angry][laughing] You think that's funny?
+**Pace (until changed):** `[rushed]` / `[rapid-fire]`, `[slows down]` / `[deliberate]`, `[drawn out]`
+
+**Whisper / shout (until the next mood):** `[whispers]`, `[shouts]` — keep them
+to the sentence that needs it, ideally the last one, or follow with a clearly
+different sentence and a new mood tag such as `[calm]`. On some voices the
+meaning of the words carries the whisper further than the tag does.
+
+**Emphasis (next word):** `[stress on next word]`, or write the word in CAPS.
+
+**Stick to this list.** Unknown tags are dropped on some voices. If you need
+something new, a short plain mood word (`[warm and reassuring]`) is the safe
+way to try it; sound effects (`[applause]`, `[door creaks]`) are always dropped.
 
 ### Text-Level Cues (also work)
 
@@ -294,6 +362,12 @@ The TTS engine uses ElevenLabs v3 which supports `[tag]` audio tags. These are N
 
 **Good** (natural, conversational with tags):
 > "[calm] Alright, I've checked off four items. The voice stuff is all working [pause] transcription, replies, TTS, the whole lot. [lighthearted] The ones left are mostly setup steps you probably already did, plus a couple of bot commands to verify."
+
+**Flat:**
+> "The deploy finished. One test is still failing in the payment module. I will look into it next."
+
+**Expressive:**
+> "[excited] Deploy's out, and it went smoothly! [pause] [serious tone] One test is still unhappy, though, in the payment module. [sighs] Classic. [lighthearted] I'm on it next."
 
 ## Error Handling
 

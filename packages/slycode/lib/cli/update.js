@@ -92,12 +92,12 @@ function logHintFor(service, runMode) {
 async function verifyServicesUp(workspace, config, runMode) {
     const envVars = (0, service_common_1.loadEnvFile)(workspace);
     // Mirror install-time enablement logic so we don't warn on services that were
-    // intentionally skipped (e.g. messaging without a channel token).
+    // intentionally skipped (e.g. messaging with no channel token and no TTS key).
     const enabled = [];
     for (const svc of service_detect_1.SERVICES) {
         if (!config.services[svc])
             continue;
-        if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN)
+        if (svc === 'messaging' && !(0, service_common_1.messagingHasWork)(envVars))
             continue;
         enabled.push({ name: svc, port: config.ports[svc] });
     }

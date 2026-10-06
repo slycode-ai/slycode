@@ -77,12 +77,12 @@ export default function EndedSessionPanel({
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="flex items-center gap-2">
         <div className="h-1.5 w-1.5 rounded-full border opacity-70" style={{ borderColor: colors.color }} />
-        <span className="text-lg text-void-400 dark:text-void-400">{displayName} session ended</span>
+        <span className="text-lg text-ink-3">{displayName} session ended</span>
       </div>
-      <p className="max-w-md text-sm text-void-500 dark:text-void-500">
+      <p className="max-w-md text-sm text-ink-3">
         This session stopped before its conversation was linked, so it can&apos;t be resumed.
         {endedAt && (
-          <span className="mt-1 block text-xs text-void-400 dark:text-void-600">
+          <span className="mt-1 block text-xs text-ink-3">
             Ended {formatDateTime(endedAt)}
           </span>
         )}
@@ -99,20 +99,20 @@ export default function EndedSessionPanel({
         <button
           onClick={() => setConfirmDismiss(true)}
           disabled={busy !== null}
-          className="rounded-lg border border-red-800/60 px-4 py-2 text-sm font-medium text-red-400 transition-all hover:border-red-700 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg border border-red-800/60 px-4 py-2 text-sm font-medium text-danger-text transition-all hover:border-red-700 hover:text-danger-text disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === 'dismiss' ? 'Removing…' : 'Dismiss'}
         </button>
       </div>
       {error && (
-        <p className="max-w-md text-xs text-red-400">{error}</p>
+        <p className="max-w-md text-xs text-danger-text">{error}</p>
       )}
       <ConfirmDialog
         open={confirmDismiss}
         onClose={() => setConfirmDismiss(false)}
         onConfirm={dismiss}
         title="Dismiss session"
-        message={<>Remove the ended <span className="font-medium text-void-900 dark:text-void-200">{displayName}</span> session record from this card? The record can&apos;t be restored after removal.</>}
+        message={<>Remove the ended <span className="font-medium text-ink-1">{displayName}</span> session record from this card? The record can&apos;t be restored after removal.</>}
         confirmLabel="Dismiss"
       />
     </div>

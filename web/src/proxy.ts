@@ -18,8 +18,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isPasswordSet, verifySessionToken, SESSION_COOKIE } from '@/lib/auth';
 
 export const config = {
-  // Run on everything except Next internals and obvious static asset files.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|ico|webp|gif|css|js|woff2?|ttf)$).*)'],
+  // Run on everything except Next internals and the real public files. The
+  // extension rule only skips ROOT-level files (public/*.webp, favicon.png …)
+  // and the bundled Monaco editor (public/monaco/) — never a deeper path, so a
+  // dynamic segment that merely ends in an extension (/api/…/projects/Next.js,
+  // /project/next.js, /doc-viewer/…/style.css) is still gated (#0369).
+  // Checked against Next's own matcher compiler in src/lib/proxy-matcher.test.ts.
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|monaco/|[^/]+\\.(?:png|jpg|jpeg|svg|ico|webp|gif|css|js|woff2?|ttf)$).*)'],
 };
 
 // Paths always reachable (the auth flow itself + its API).

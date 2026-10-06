@@ -49,7 +49,7 @@ export function todayDateString(): string {
 export function buildGeneratedFilename(opts: {
   text: string;
   voiceId: string | null;
-  format: 'ogg' | 'mp3';
+  format: 'ogg' | 'mp3' | 'wav';
 }): string {
   const slug = slugifyForFilename(pickFirstNWords(opts.text, 5));
   const hash8 = createHash('sha256')

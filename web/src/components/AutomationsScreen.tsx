@@ -27,11 +27,11 @@ function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: bool
   if (!nextRun || !enabled) {
     return (
       <div className="flex flex-col items-center justify-center">
-        <span className="font-mono text-2xl font-bold tracking-wider text-void-300 dark:text-void-600">
+        <span className="font-mono text-lg font-medium tabular-nums text-ink-3">
           --:--
         </span>
-        <span className="text-[9px] uppercase tracking-[0.2em] text-void-300 dark:text-void-600">
-          idle
+        <span className="text-[11px] text-ink-3">
+          Off
         </span>
       </div>
     );
@@ -43,7 +43,7 @@ function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: bool
   if (diff === 0) {
     return (
       <div className="flex flex-col items-center justify-center">
-        <span className="font-mono text-2xl font-bold tracking-wider text-orange-500 animate-pulse">NOW</span>
+        <span className="font-mono text-lg font-medium text-agent-text">Now</span>
       </div>
     );
   }
@@ -60,21 +60,21 @@ function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: bool
   let label: string;
   if (days > 0) {
     display = `${days}d ${pad(hours)}:${pad(minutes)}`;
-    label = 'days hrs min';
+    label = 'until next run';
   } else if (hours > 0) {
     display = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-    label = 'hrs min sec';
+    label = 'until next run';
   } else {
     display = `${pad(minutes)}:${pad(seconds)}`;
-    label = 'min sec';
+    label = 'until next run';
   }
 
   return (
     <div className="flex flex-col items-center justify-center">
-      <span className="font-mono text-2xl font-bold tabular-nums tracking-wider text-orange-500 dark:text-orange-400">
+      <span className="font-mono text-lg font-medium tabular-nums text-ink-1">
         {display}
       </span>
-      <span className="text-[9px] uppercase tracking-[0.2em] text-void-400 dark:text-void-500">{label}</span>
+      <span className="text-[11px] text-ink-3">{label}</span>
     </div>
   );
 }
@@ -116,22 +116,22 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
       <div className="mx-auto max-w-5xl">
         {/* Header */}
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-void-900 dark:text-void-100">
+          <h2 className="text-xl font-semibold tracking-tight text-ink-1">
             Automations
-            <span className="ml-2 text-sm font-normal text-void-500 dark:text-void-400">
+            <span className="ml-2 font-mono text-[13px] font-normal text-ink-3">
               ({cards.length} card{cards.length !== 1 ? 's' : ''})
             </span>
             {timezoneAbbr && (
-              <span className="ml-2 rounded bg-void-100 px-1.5 py-0.5 text-xs font-normal text-void-500 dark:bg-void-700 dark:text-void-400">
+              <span className="ml-2 rounded border border-line px-1.5 py-0.5 font-mono text-[11px] font-normal text-ink-3">
                 {timezoneAbbr}
               </span>
             )}
           </h2>
           <button
             onClick={onCreateAutomation}
-            className="rounded-lg border border-orange-500/50 bg-orange-400/10 px-3 py-1.5 text-sm font-medium text-orange-700 transition-colors hover:bg-orange-400/20 dark:border-orange-400/40 dark:text-orange-400"
+            className="rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-on-primary transition-opacity hover:opacity-90"
           >
-            + New Automation
+            New automation
           </button>
         </div>
 
@@ -142,8 +142,8 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <p className="text-sm text-void-500 dark:text-void-400">No automations configured yet.</p>
-            <p className="mt-1 text-xs text-void-400 dark:text-void-500">Toggle any card to automation mode, or create a new automation above.</p>
+            <p className="text-sm text-ink-3">No automations configured yet.</p>
+            <p className="mt-1 text-xs text-ink-3">Toggle any card to automation mode, or create a new automation above.</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -151,9 +151,9 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
               <div key={groupName}>
                 {/* Group header */}
                 <details open>
-                  <summary className="mb-3 cursor-pointer text-sm font-medium text-void-600 hover:text-void-800 dark:text-void-400 dark:hover:text-void-200">
+                  <summary className="mb-3 cursor-pointer text-[13px] font-semibold text-ink-2 hover:text-ink-1">
                     <span className="ml-1">{groupName}</span>
-                    <span className="ml-1 text-void-400 dark:text-void-500">({groups[groupName].length})</span>
+                    <span className="ml-1.5 font-mono font-normal text-ink-3">{groups[groupName].length}</span>
                   </summary>
 
                   {/* 2-column max grid */}
@@ -173,32 +173,33 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                               onCardContextMenu(card, e);
                             }
                           }}
-                          className={`group overflow-hidden rounded-lg text-left transition-all border border-void-200/80 border-l-[3px] border-l-orange-500/70 bg-white shadow-(--shadow-card) transition-[transform,box-shadow,border-color] duration-200 hover:translate-y-0.5 hover:shadow-[0_2px_8px_rgba(249,115,22,0.2)] hover:border-orange-400/60 dark:hover:shadow-[0_2px_8px_rgba(249,115,22,0.15)] dark:border-void-700/60 dark:border-l-orange-400/60 dark:bg-void-800 dark:hover:border-orange-400/40 ${isActive ? 'active-glow-automation' : ''}`}
+                          className={`group relative overflow-hidden rounded-xl border border-line border-l-[3px] border-l-agent bg-surface-1 text-left shadow-(--shadow-card) transition-[transform,border-color] duration-150 hover:-translate-y-px hover:border-line-strong hover:border-l-agent ${!isEnabled ? 'opacity-70' : ''}`}
                         >
+                          {isActive && <div className="live-wire" aria-hidden />}
                           {/* Card body with chevron background — 2 row layout */}
                           <div className={`automation-chevron px-5 py-3 ${isActive ? 'automation-chevron-active' : ''}`}>
                             <div className="relative z-10 flex items-stretch gap-4">
                               {/* Left: 2 rows (title + schedule/badges) */}
                               <div className="min-w-0 flex-1 flex flex-col gap-1.5 justify-center">
-                                <h3 className="text-base font-semibold text-void-900 dark:text-void-100 truncate">
+                                <h3 className="truncate text-[15px] font-semibold text-ink-1">
                                   {card.title}
                                 </h3>
                                 <div className="flex items-center gap-3">
-                                  <p className="min-w-0 flex-1 truncate text-sm text-void-600 dark:text-void-400">
+                                  <p className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
                                     {card.automation
                                       ? cronToHumanReadable(card.automation.schedule, card.automation.scheduleType, 'No schedule', timezoneAbbr || undefined)
                                       : 'No schedule'}
                                   </p>
                                   <div className="flex shrink-0 items-center gap-1.5">
                                     {card.automation?.provider && (
-                                      <span className="rounded bg-void-100 px-1.5 py-0.5 text-[11px] text-void-600 dark:bg-void-700 dark:text-void-400">
+                                      <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[11px] text-ink-2">
                                         {card.automation.provider}
                                       </span>
                                     )}
                                     <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
                                       isEnabled
-                                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                        ? 'bg-agent/10 text-agent-text'
+                                        : 'bg-surface-3 text-ink-3'
                                     }`}>
                                       {isEnabled ? 'Enabled' : 'Disabled'}
                                     </span>
@@ -214,11 +215,11 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                                         <span
                                           className={`rounded px-1.5 py-0.5 text-[11px] ${
                                             card.automation.lastResult === 'success'
-                                              ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
-                                              : 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                                              ? 'text-ink-3'
+                                              : 'bg-danger/10 text-danger-text'
                                           } ${card.automation.lastResult === 'error' && card.automation.lastError ? 'cursor-help' : ''}`}
                                         >
-                                          {card.automation.lastResult === 'success' ? 'OK' : 'Err'}
+                                          {card.automation.lastResult === 'success' ? 'Started' : 'Kickoff failed'}
                                         </span>
                                       </Tooltip>
                                     )}
@@ -227,28 +228,28 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                               </div>
 
                               {/* Right: Timer + previous run — spans full card height, fixed size */}
-                              <div className="flex shrink-0 flex-col items-center justify-center border-l border-void-200 pl-4 dark:border-void-700/50 min-h-[52px]">
+                              <div className="flex min-h-[52px] min-w-[112px] shrink-0 flex-col items-end justify-center border-l border-line pl-4">
                                 {isTriggering ? (
                                   <div className="flex flex-col items-center justify-center">
-                                    <span className="animate-pulse font-mono text-2xl font-bold tracking-wider text-orange-500">
-                                      STARTING
+                                    <span className="font-mono text-lg font-medium text-agent-text">
+                                      Starting
                                     </span>
-                                    <span className="text-[9px] uppercase tracking-[0.2em] text-transparent">placeholder</span>
+                                    <span className="text-[11px] text-transparent">placeholder</span>
                                   </div>
                                 ) : (
                                   <CountdownTimer nextRun={card.automation?.nextRun} enabled={card.automation?.enabled} />
                                 )}
-                                <div className="mt-0.5 h-4 text-[10px] text-void-350 dark:text-void-600">
+                                <div className="mt-0.5 h-4 text-[11px] text-ink-3">
                                   {card.automation?.lastRun
-                                    ? `Prev: ${formatDateTimeShort(card.automation.lastRun)}`
+                                    ? `Last ${formatDateTimeShort(card.automation.lastRun)}`
                                     : ''}
                                 </div>
                               </div>
                             </div>
                           </div>
 
-                          {/* Hazard stripe bottom bar */}
-                          <div className="h-[5px] hazard-stripe" />
+                          {/* Hazard stripe only when the last kickoff failed */}
+                          {card.automation?.lastResult === 'error' && <div className="h-1 hazard-stripe" />}
                         </button>
                       );
                     })}

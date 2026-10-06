@@ -22,6 +22,8 @@ export interface Session {
     connectedClients: number;
     claudeSessionId: string | null;
     createdAt: string;
+    conversationStartedAt?: string;
+    spawnedAt?: string;
     lastActive: string;
     lastOutputAt: string;
     activityStartedAt: string;
@@ -95,11 +97,13 @@ export interface SessionInfo {
     exitCode?: number;
     exitedAt?: string;
     createdAt?: string;
+    conversationStartedAt?: string;
 }
 export interface PersistedSession {
     claudeSessionId: string | null;
     cwd: string;
     createdAt: string;
+    conversationStartedAt?: string;
     lastActive: string;
     provider?: string;
     skipPermissions?: boolean;

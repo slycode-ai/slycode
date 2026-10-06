@@ -83,14 +83,14 @@ export function SpeechBubble() {
       {showNotice && notice && (
         <div
           role="status"
-          className="pointer-events-auto flex items-start gap-3 rounded-lg border border-neon-blue-400/40 bg-void-50/95 px-3.5 py-2.5 text-sm text-void-700 shadow-(--shadow-card) backdrop-blur-sm dark:border-neon-blue-400/25 dark:bg-void-900/95 dark:text-void-200"
+          className="pointer-events-auto flex items-start gap-3 rounded-lg border border-accent/40 bg-surface-2 px-3.5 py-2.5 text-sm text-ink-2 shadow-(--shadow-card) backdrop-blur-sm"
         >
-          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2490b5] dark:bg-neon-blue-400" aria-hidden="true" />
+          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2490b5] bg-accent" aria-hidden="true" />
           <p className="min-w-0 flex-1 leading-snug">{notice.text}</p>
           <button
             type="button"
             onClick={speaker.dismissNotice}
-            className="-mr-1 -mt-0.5 rounded p-1 text-void-400 hover:bg-void-200/60 hover:text-void-700 dark:hover:bg-void-700/60 dark:hover:text-void-200"
+            className="-mr-1 -mt-0.5 rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
             aria-label="Dismiss"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -106,12 +106,12 @@ export function SpeechBubble() {
           onMouseLeave={() => setEngaged(false)}
           onFocus={() => setEngaged(true)}
           onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setEngaged(false); }}
-          className="pointer-events-auto relative rounded-lg border border-void-300/70 bg-void-50/95 px-3.5 pb-3 pt-2.5 text-void-800 shadow-(--shadow-card) backdrop-blur-sm dark:border-void-600 dark:bg-void-900/95 dark:text-void-100"
+          className="pointer-events-auto relative rounded-lg border border-line-strong bg-surface-2 px-3.5 pb-3 pt-2.5 text-ink-1 shadow-(--shadow-card) backdrop-blur-sm"
         >
           {/* Bubble tail — the one detail that says "speech", not "toast" */}
           <span
             aria-hidden="true"
-            className="absolute -bottom-1.5 left-5 h-3 w-3 rotate-45 border-b border-r border-void-300/70 bg-void-50/95 dark:border-void-600 dark:bg-void-900/95"
+            className="absolute -bottom-1.5 left-5 h-3 w-3 rotate-45 border-b border-r border-line-strong bg-surface-2"
           />
 
           <div className="flex items-start gap-2.5">
@@ -121,7 +121,7 @@ export function SpeechBubble() {
             />
             <div className="min-w-0 flex-1">
               <Tooltip content={caption.sourceLabel}>
-                <div className="truncate font-mono text-[11px] leading-4 text-void-500 dark:text-void-400">
+                <div className="truncate font-mono text-[11px] leading-4 text-ink-3">
                   {caption.sourceLabel || 'Spoken reply'}
                 </div>
               </Tooltip>
@@ -141,7 +141,7 @@ export function SpeechBubble() {
                     <button
                       type="button"
                       onClick={speaker.playNow}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-void-300/70 bg-transparent px-2 py-1 text-xs font-medium text-void-600 hover:border-neon-blue-400/40 hover:bg-neon-blue-400/10 hover:text-[#2490b5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neon-blue-400/60 dark:border-void-600 dark:text-void-300 dark:hover:text-neon-blue-400"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-transparent px-2 py-1 text-xs font-medium text-ink-2 hover:border-accent/40 hover:bg-accent/10 hover:text-[#2490b5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 hover:text-accent"
                       aria-label="Replay this reply"
                     >
                       <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><polygon points="5,3 19,12 5,21" /></svg>
@@ -149,7 +149,7 @@ export function SpeechBubble() {
                     </button>
                   ) : <span />}
                   {speaker.queueLength > 0 && (
-                    <span className="text-xs tabular-nums text-void-500 dark:text-void-400">+{speaker.queueLength} queued</span>
+                    <span className="text-xs tabular-nums text-ink-3">+{speaker.queueLength} queued</span>
                   )}
                 </div>
               )}
@@ -163,7 +163,7 @@ export function SpeechBubble() {
               <button
                 type="button"
                 onClick={() => { setHiddenCaptionId(caption.clipId); speaker.dismiss(); }}
-                className="-mr-1 -mt-0.5 rounded p-1 text-void-400 hover:bg-void-200/60 hover:text-void-700 dark:hover:bg-void-700/60 dark:hover:text-void-200"
+                className="-mr-1 -mt-0.5 rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
                 aria-label={speaker.playing ? 'Stop and dismiss' : 'Dismiss'}
               >
                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -179,12 +179,12 @@ export function SpeechBubble() {
               aria-hidden="true"
               data-speaker-track=""
               data-phase={phase}
-              className={`absolute bottom-1 left-3 right-3 block h-px overflow-hidden rounded bg-void-300/60 transition-opacity duration-[450ms] ease-out dark:bg-void-700 ${phase === 'fading' ? 'opacity-0' : 'opacity-100'}`}
+              className={`absolute bottom-1 left-3 right-3 block h-px overflow-hidden rounded bg-surface-3 transition-opacity duration-[450ms] ease-out ${phase === 'fading' ? 'opacity-0' : 'opacity-100'}`}
             >
               <span
                 data-speaker-fill=""
                 data-fraction={speaker.progress.fraction ?? 'indeterminate'}
-                className={`block h-full w-full bg-[#2490b5] dark:bg-neon-blue-400 ${speaker.progress.indeterminate ? 'speech-bubble-indeterminate' : ''}`}
+                className={`block h-full w-full bg-[#2490b5] bg-accent ${speaker.progress.indeterminate ? 'speech-bubble-indeterminate' : ''}`}
                 style={progressFillStyle(speaker.progress)}
               />
             </span>

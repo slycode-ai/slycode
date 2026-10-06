@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useState, useEffect } from 'react';
 
 const DISMISS_KEY = 'claude-retention-dismissed';
@@ -40,7 +41,7 @@ export function RetentionWarningToast() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(SETTINGS_LINE);
+      await copyText(SETTINGS_LINE);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -52,33 +53,33 @@ export function RetentionWarningToast() {
   if (periodDays === undefined || !atRisk || dismissed) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 max-w-lg rounded-lg border border-amber-500/40 bg-void-50 px-4 py-3 shadow-(--shadow-card) dark:border-amber-500/25 dark:bg-void-900">
+    <div className="fixed bottom-4 left-4 z-50 max-w-lg rounded-xl border border-line border-l-[3px] border-l-warn bg-surface-1 px-4 py-3 shadow-(--shadow-overlay)">
       <div className="flex items-start gap-3">
         <span
-          className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-400"
+          className="mt-1 h-2 w-2 shrink-0 rounded-full bg-warn"
           style={{ boxShadow: '0 0 6px rgba(251,191,36,0.5)' }}
         />
         <div className="min-w-0">
-          <p className="text-sm text-void-700 dark:text-void-300">
+          <p className="text-sm text-ink-2">
             Claude Code deletes session transcripts after{' '}
             <span className="font-medium text-amber-600 dark:text-amber-400">
               {periodDays === null ? '30 days (default)' : `${periodDays} days`}
             </span>{' '}
             — older card sessions become unresumable.
           </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-void-500 dark:text-void-400">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
             <span>To keep them, add</span>
-            <code className="rounded bg-void-100 px-1.5 py-0.5 text-void-600 dark:bg-void-800 dark:text-void-400">
+            <code className="rounded bg-surface-2 px-1.5 py-0.5 text-ink-2">
               {SETTINGS_LINE}
             </code>
             <button
               onClick={handleCopy}
-              className="rounded border border-void-300 px-1.5 py-0.5 text-void-500 transition-colors hover:bg-void-200 hover:text-void-700 dark:border-void-600 dark:text-void-400 dark:hover:bg-void-800 dark:hover:text-void-200"
+              className="rounded border border-line-strong px-1.5 py-0.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
             <span>to</span>
-            <code className="rounded bg-void-100 px-1.5 py-0.5 text-void-600 dark:bg-void-800 dark:text-void-400">
+            <code className="rounded bg-surface-2 px-1.5 py-0.5 text-ink-2">
               ~/.claude/settings.json
             </code>
             <span>on this machine.</span>
@@ -86,7 +87,7 @@ export function RetentionWarningToast() {
         </div>
         <button
           onClick={handleDismiss}
-          className="ml-1 shrink-0 rounded p-0.5 text-void-400 transition-colors hover:bg-void-200 hover:text-void-600 dark:text-void-500 dark:hover:bg-void-800 dark:hover:text-void-300"
+          className="ml-1 shrink-0 rounded p-0.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
           aria-label="Dismiss for 30 days"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

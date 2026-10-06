@@ -1,5 +1,67 @@
 [
   {
+    "version": "0.5.0",
+    "date": "2026-10-06",
+    "changes": [
+      {
+        "type": "feature",
+        "description": "Visual elevation reskin — Signal Den (dark) and Instrument (light). The dashboard has been reshaped around the day you actually spend in it: dark lane header wash, attention strips that surface what needs you across all lanes, a mobile lane bar for one-thumb navigation, and a redesigned card workbench. Code Mode now renders on the shared design tokens so it looks like one app with the rest of the dashboard."
+      },
+      {
+        "type": "feature",
+        "description": "Gemini TTS provider — Google Gemini voices are now available for both Telegram and in-browser voice replies, alongside the existing ElevenLabs provider. The web Voice Settings page gets a provider picker with live preview per voice, a Designed Voices tab with local recipes you can tune and save, and the login gate now covers dynamic paths that end in a file extension (so voice preview URLs are not accidentally public)."
+      },
+      {
+        "type": "feature",
+        "description": "Whats new release splash — the first time you open the dashboard on a new SlyCode version, a release splash shows you what shipped. It is a dismissible modal keyed per user per version, so you see it once and never again."
+      },
+      {
+        "type": "feature",
+        "description": "Stage-strip hold-to-move with undo — on the dashboards stage strip (the mobile and compact lane row), press-and-hold a card to move it to a different stage. An undo toast appears for a few seconds so a misdrag is a one-tap fix."
+      },
+      {
+        "type": "feature",
+        "description": "Automation fresh session every N days — `sly-kanban automation configure <card> --fresh-every 7` keeps resuming the automation conversation most of the time but starts a fresh conversation once the current one is N days old. `--fresh-session true` is still available for always-fresh; `--fresh-session false` goes back to resume-forever and clears any `--fresh-every`. Kanban skill v1.21.0 documents the new flag."
+      },
+      {
+        "type": "feature",
+        "description": "Doc viewer in a new tab — long-form reference docs (features, designs, tests, HTML attachments) can now be opened in their own tab from the card modal instead of being pinned inside the small modal viewer."
+      },
+      {
+        "type": "bugfix",
+        "description": "Session-file corruption fix — a crash mid-write on the per-session state file can no longer leave the file truncated. Writes are now atomic (temp file + rename), so a bridge restart during a save never costs you the session."
+      },
+      {
+        "type": "improvement",
+        "description": "OpenAI gpt-transcribe is now the default voice-input transcription backend (replacing whisper-1), with lower latency and better accuracy on short dictation."
+      },
+      {
+        "type": "improvement",
+        "description": "Security dep bump — Next.js patched to 16.3.8 (same major, latest patch stream)."
+      },
+      {
+        "type": "improvement",
+        "description": "Notes cap fix — long cross-session agent notes no longer silently truncate at the storage layer; the write path and the UI agree on the same cap and surface it."
+      },
+      {
+        "type": "improvement",
+        "description": "Messaging skill v2.9.0 — covers the Gemini TTS provider, the per-browser reply length setting, and the voice-preview workflow."
+      },
+      {
+        "type": "improvement",
+        "description": "Kanban skill v1.21.0 — documents `--fresh-every N` on `automation configure`."
+      },
+      {
+        "type": "improvement",
+        "description": "Status marquee is 20% faster — the ticker that scrolls long card statuses now covers the width quicker so you can read the whole string sooner."
+      },
+      {
+        "type": "improvement",
+        "description": "Voice panel and dashboard polish — spacing, affordances, and animation tightened across the voice panel and the dashboard header."
+      }
+    ]
+  },
+  {
     "version": "0.4.10",
     "date": "2026-09-17",
     "changes": [

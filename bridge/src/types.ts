@@ -25,6 +25,11 @@ export interface Session {
   connectedClients: number;
   claudeSessionId: string | null;
   createdAt: string;
+  // When the current conversation began (card #0373). Set on a fresh start or a
+  // link/relink to a different conversation; kept across resume and bridge
+  // restart. createdAt is the record's own timestamp and is not reliable for this.
+  conversationStartedAt?: string;
+  spawnedAt?: string;  // When this PTY was spawned (per spawn; resume gets a new one)
   lastActive: string;
   lastOutputAt: string;  // Timestamp of last PTY output (for activity detection)
   activityStartedAt: string;  // When current activity burst started (for debouncing)
@@ -115,12 +120,14 @@ export interface SessionInfo {
   exitCode?: number;
   exitedAt?: string;
   createdAt?: string;
+  conversationStartedAt?: string;  // Card #0373 — falls back to createdAt for records that predate it
 }
 
 export interface PersistedSession {
   claudeSessionId: string | null;
   cwd: string;
   createdAt: string;
+  conversationStartedAt?: string;  // Card #0373 — absent on records that predate it (read as createdAt)
   lastActive: string;
   provider?: string;         // Provider id (absent on old sessions = "claude")
   skipPermissions?: boolean; // Whether permission-skip was used

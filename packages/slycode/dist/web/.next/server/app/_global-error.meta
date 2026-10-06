@@ -18,5 +18,13 @@
         "slots": null
       }
     }
+  },
+  "routeCache": {
+    "key": "/route-cache/APP_PAGE/1ac71fc16c24600253696ffa2528949094f971f5409b0b353b2b775b5e1ba07d/$/_global-error",
+    "owner": {
+      "kind": "APP_PAGE",
+      "sourceRoute": "/_global-error/page"
+    },
+    "isFallback": false
   }
 }

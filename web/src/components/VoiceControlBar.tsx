@@ -53,7 +53,7 @@ export function VoiceControlBar({
               onClick={onRecord}
               onMouseDown={(e) => e.preventDefault()} // don't steal focus from the field being dictated into
               disabled={disabled}
-              className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-500 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 disabled:opacity-50 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
+              className="rounded-md border border-line-strong bg-surface-3 p-1.5 text-ink-3 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 disabled:opacity-50 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
               aria-label="Start recording"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -81,7 +81,7 @@ export function VoiceControlBar({
           <Tooltip content={voiceState === 'recording' ? 'Pause (Space)' : 'Resume (Space)'}>
             <button
               onClick={voiceState === 'recording' ? onPause : onResume}
-              className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-600 transition-all hover:border-neon-blue-400/40 hover:bg-neon-blue-400/10 hover:text-neon-blue-400 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-neon-blue-400/40 dark:hover:bg-neon-blue-400/10 dark:hover:text-neon-blue-400"
+              className="rounded-md border border-line-strong bg-surface-3 p-1.5 text-ink-2 transition-all hover:border-accent/40 hover:bg-accent/10 hover:text-accent"
               aria-label={voiceState === 'recording' ? 'Pause' : 'Resume'}
             >
               {voiceState === 'recording' ? (
@@ -101,7 +101,7 @@ export function VoiceControlBar({
           <Tooltip content="Clear recording (Escape)">
             <button
               onClick={onClear}
-              className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-600 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
+              className="rounded-md border border-line-strong bg-surface-3 p-1.5 text-ink-2 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
               aria-label="Clear recording"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -115,7 +115,7 @@ export function VoiceControlBar({
             <button
               onClick={onSubmit}
               onMouseDown={(e) => e.preventDefault()} // keep the target field focused for insertion
-              className="rounded-md border border-green-400/40 bg-green-400/15 px-2 py-1.5 text-xs font-medium text-green-600 transition-all hover:bg-green-400/25 hover:shadow-[0_0_8px_rgba(34,197,94,0.2)] dark:text-green-400"
+              className="rounded-md border border-green-400/40 bg-green-400/15 px-2 py-1.5 text-xs font-medium text-green-600 transition-all hover:bg-green-400/25 dark:text-green-400"
               aria-label="Submit for transcription"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,11 +130,11 @@ export function VoiceControlBar({
       {/* Transcribing: spinner */}
       {voiceState === 'transcribing' && (
         <div className="flex items-center gap-1.5 px-1">
-          <svg className="h-4 w-4 animate-spin text-[#2490b5] dark:text-neon-blue-400" viewBox="0 0 24 24" fill="none">
+          <svg className="h-4 w-4 animate-spin text-[#2490b5] text-accent" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          <span className="text-xs text-[#2490b5] dark:text-neon-blue-400">Transcribing...</span>
+          <span className="text-xs text-[#2490b5] text-accent">Transcribing...</span>
         </div>
       )}
 
@@ -142,12 +142,12 @@ export function VoiceControlBar({
       {voiceState === 'error' && (
         <div className="flex items-center gap-1.5">
           <Tooltip content={error || 'Transcription failed'}>
-            <span className="text-xs text-red-400">Failed</span>
+            <span className="text-xs text-danger-text">Failed</span>
           </Tooltip>
           <Tooltip content="Retry transcription">
             <button
               onClick={onRetry}
-              className="rounded-md border border-neon-blue-400/40 bg-neon-blue-400/15 px-1.5 py-1 text-xs font-medium text-neon-blue-400 transition-all hover:bg-neon-blue-400/25"
+              className="rounded-md border border-accent/40 bg-accent/15 px-1.5 py-1 text-xs font-medium text-accent transition-all hover:bg-accent/25"
             >
               Retry
             </button>
@@ -155,7 +155,7 @@ export function VoiceControlBar({
           <Tooltip content="Clear">
             <button
               onClick={onClear}
-              className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-600 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
+              className="rounded-md border border-line-strong bg-surface-3 p-1.5 text-ink-2 transition-all hover:border-red-400/40 hover:bg-red-400/10 hover:text-red-400 dark:hover:border-red-400/40 dark:hover:bg-red-400/10 dark:hover:text-red-400"
               aria-label="Clear"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -174,7 +174,7 @@ export function VoiceControlBar({
       <Tooltip content="Voice settings">
       <button
         onClick={onOpenSettings}
-        className="rounded-md border border-void-400/30 bg-void-200/50 p-1.5 text-void-500 transition-all hover:border-void-400/50 hover:text-void-700 dark:border-void-500/25 dark:bg-void-700/50 dark:text-void-400 dark:hover:border-void-400/50 dark:hover:text-void-300"
+        className="rounded-md border border-line-strong bg-surface-3 p-1.5 text-ink-3 transition-all hover:border-void-400/50 hover:text-ink-2 dark:hover:border-void-400/50"
         aria-label="Voice settings"
       >
         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

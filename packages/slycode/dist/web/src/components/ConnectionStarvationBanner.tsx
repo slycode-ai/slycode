@@ -36,7 +36,7 @@ export default function ConnectionStarvationBanner() {
     <div
       role="alert"
       aria-live="assertive"
-      className="conn-budget sticky top-0 z-[110] w-full border-t-2 border-neon-orange-400 bg-void-900 text-void-100 shadow-(--shadow-overlay)"
+      className="conn-budget sticky top-0 z-[110] w-full border-b border-line border-t-2 border-t-warn bg-surface-1 text-ink-1 shadow-(--shadow-overlay)"
     >
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
         {/* Slot gauge */}
@@ -49,10 +49,10 @@ export default function ConnectionStarvationBanner() {
               const cls = !held
                 ? 'bg-void-700/70'
                 : overflow
-                  ? 'conn-budget-breathe bg-neon-orange-400 shadow-[0_0_10px_rgba(255,140,0,0.7)]'
+                  ? 'conn-budget-breathe bg-neon-orange-400'
                   : mine
-                    ? 'bg-neon-blue-400 shadow-[0_0_8px_rgba(0,191,255,0.55)]'
-                    : 'bg-neon-blue-800';
+                    ? 'bg-accent'
+                    : 'bg-accent';
               return (
                 <span key={i} className="flex items-end gap-[3px]">
                   {i === limit && <span className="mx-[3px] h-6 w-px bg-neon-orange-400" />}
@@ -62,9 +62,9 @@ export default function ConnectionStarvationBanner() {
             })}
           </div>
           <span className="font-mono text-[11px] leading-none text-void-300" style={{ fontFamily: 'var(--font-jetbrains-mono), ui-monospace, monospace' }}>
-            <span className={total >= limit ? 'text-neon-orange-300' : 'text-neon-blue-300'}>{total}</span>
-            <span className="text-void-500">/{limit}</span>
-            <span className="ml-2 text-void-400">{own} here{others > 0 ? `, ${others} elsewhere` : ''}</span>
+            <span className={total >= limit ? 'text-neon-orange-300' : 'text-accent'}>{total}</span>
+            <span className="text-ink-3">/{limit}</span>
+            <span className="ml-2 text-ink-3">{own} here{others > 0 ? `, ${others} elsewhere` : ''}</span>
           </span>
         </div>
 
@@ -80,7 +80,7 @@ export default function ConnectionStarvationBanner() {
             {httpsUrl ? (
               <a
                 href={httpsUrl}
-                className="rounded-sm font-mono text-neon-blue-300 underline decoration-neon-blue-700 underline-offset-2 hover:text-neon-blue-200 focus-visible:outline-2 focus-visible:outline-neon-blue-400"
+                className="rounded-sm font-mono text-accent underline decoration-accent underline-offset-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
                 style={{ fontFamily: 'var(--font-jetbrains-mono), ui-monospace, monospace' }}
               >
                 {httpsUrl.replace(/^https:\/\//, '')}

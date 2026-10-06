@@ -83,17 +83,17 @@ export function diffStats(lines: DiffLine[]): { additions: number; deletions: nu
 }
 
 const lineStyles: Record<string, string> = {
-  add: 'bg-emerald-950/40 text-emerald-300',
-  remove: 'bg-red-950/40 text-red-300',
+  add: 'bg-emerald-950/40 text-st-done',
+  remove: 'bg-red-950/40 text-danger-text',
   context: 'text-void-300',
-  header: 'bg-neon-blue-950/30 text-neon-blue-300 font-medium',
+  header: 'bg-accent/30 text-accent font-medium',
 };
 
 const lineNoStyles: Record<string, string> = {
   add: 'text-emerald-600',
   remove: 'text-red-600',
   context: 'text-void-600',
-  header: 'text-neon-blue-600',
+  header: 'text-accent',
 };
 
 const prefixChars: Record<string, string> = {

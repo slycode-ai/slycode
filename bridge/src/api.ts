@@ -181,7 +181,8 @@ export function createApiRouter(sessionManager: SessionManager, responseStore: R
     const speaker = getSpeakerAuthority();
     const health = await getMessagingClient().health();
     const s = speaker.getState();
-    return { enabled: s.enabled, revision: s.revision, subscribers: s.subscribers, messaging: { configured: health.configured, tts: health.tts } };
+    // `speech` is the messaging service's speech-health DTO (feature 087), passed through as-is.
+    return { enabled: s.enabled, revision: s.revision, subscribers: s.subscribers, messaging: { configured: health.configured, tts: health.tts, speech: health.speech } };
   };
 
   router.get('/speaker', async (_req, res) => {

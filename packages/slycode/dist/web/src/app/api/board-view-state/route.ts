@@ -2,7 +2,7 @@
  * Board view state API (feature 082) — the "have I looked at this card" layer.
  *
  *   GET  /api/board-view-state?projectId=<id>  — that project's seen-state
- *   GET  /api/board-view-state?counts=1        — unseen count per project (dashboard roll-up)
+ *   GET  /api/board-view-state?counts=1        — unseen count + cards per project (dashboard roll-up)
  *   POST /api/board-view-state { projectId, cardId }  — stamp a card as seen
  *
  * UI-owned, mirroring /api/atlas/view-state: the web is the only writer, there
@@ -56,15 +56,18 @@ async function fetchBridgeSessions(): Promise<BridgeSession[]> {
  * automation cards are excluded, so neither can contribute to the count.
  * Stage + updated_at also feed the Done-lane suppression rule.
  */
-async function liveCards(projectRoot: string): Promise<UnseenCardInput[]> {
-  const cards: UnseenCardInput[] = [];
+/** A live card plus what the dashboard's "new output" list shows for it. */
+type LiveCard = UnseenCardInput & { number?: number; title: string };
+
+async function liveCards(projectRoot: string): Promise<LiveCard[]> {
+  const cards: LiveCard[] = [];
   try {
     const raw = await fs.readFile(path.join(projectRoot, 'documentation', 'kanban.json'), 'utf-8');
     const board = JSON.parse(raw) as KanbanBoard;
     for (const stage of STAGES) {
       for (const card of board.stages?.[stage] ?? []) {
         if (card.archived || card.automation) continue;
-        cards.push({ id: card.id, stage, updatedAt: card.updated_at });
+        cards.push({ id: card.id, stage, updatedAt: card.updated_at, number: card.number, title: card.title });
       }
     }
   } catch {
@@ -80,6 +83,8 @@ export async function GET(request: NextRequest) {
     if (searchParams.get('counts') === '1') {
       const [registry, sessions] = await Promise.all([loadRegistry(), fetchBridgeSessions()]);
       const counts: Record<string, number> = {};
+      // The unseen cards themselves (board order), for the dashboard's list.
+      const unseenCards: Record<string, { id: string; number?: number; title: string }[]> = {};
 
       await Promise.all(
         registry.projects.map(async (project) => {
@@ -105,9 +110,10 @@ export async function GET(request: NextRequest) {
               readBoardViewState(projectRoot),
               liveCards(projectRoot),
             ]);
-            const live = new Set(cards.map((c) => c.id));
             const unseen = computeUnseen(inputs, state, new Date(), cards);
-            counts[project.id] = [...unseen].filter((id) => live.has(id)).length;
+            const list = cards.filter((c) => unseen.has(c.id)).map((c) => ({ id: c.id, number: c.number, title: c.title }));
+            counts[project.id] = list.length;
+            if (list.length > 0) unseenCards[project.id] = list;
           } catch {
             // A project that can't be resolved or read just reports zero rather
             // than failing the whole dashboard response.
@@ -116,7 +122,7 @@ export async function GET(request: NextRequest) {
         }),
       );
 
-      return NextResponse.json({ counts });
+      return NextResponse.json({ counts, cards: unseenCards });
     }
 
     const projectId = searchParams.get('projectId');

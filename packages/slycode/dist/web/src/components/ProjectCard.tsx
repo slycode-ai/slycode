@@ -7,17 +7,32 @@ import { HealthDot } from './HealthDot';
 import { PlatformBadges } from './PlatformBadges';
 import Tooltip from './Tooltip';
 
+function relativeTime(iso?: string | null): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
 interface ProjectCardProps {
   project: ProjectWithBacklog;
   onDeleted?: () => void;
   /** Cards with finished-but-unviewed session output (feature 082). */
   unseenCount?: number;
+  /** Opens the dashboard's "new output" list for this project (or its one card). */
+  onUnseenClick?: (anchor: HTMLElement) => void;
   shortcutKey?: number;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }
 
-export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, onDragStart, onDragEnd }: ProjectCardProps) {
+export function ProjectCard({ project, onDeleted, unseenCount = 0, onUnseenClick, shortcutKey, onDragStart, onDragEnd }: ProjectCardProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editName, setEditName] = useState(project.name);
@@ -77,40 +92,27 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
     action();
   }
 
+  const working = project.activeSessions ?? 0;
+  const stages = project.stageCounts;
+  const openCards = stages ? stages.backlog + stages.design + stages.implementation + stages.testing : 0;
+  const lastMoved = relativeTime(project.lastActivity);
+
   const cardContent = (
     <>
-      <div className="mb-1 flex items-center justify-between gap-2">
+      {working > 0 && <div className="live-wire" aria-hidden />}
+      <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate font-semibold text-void-950 dark:text-void-100">
+          <h3 className="truncate text-[15px] font-semibold leading-6 tracking-tight text-ink-1">
             {project.name}
           </h3>
           <HealthDot health={project.healthScore} />
-          {/*
-            Unseen roll-up (feature 082) — how many cards in this project have
-            finished work you haven't opened. Same "cue, not alarm" brief as the
-            card marker, so it stays a quiet count rather than a red badge.
-          */}
-          {unseenCount > 0 && (
-            <Tooltip content={`${unseenCount} card${unseenCount !== 1 ? 's' : ''} with activity you haven't looked at`}>
-              <span
-                className="flex-shrink-0 rounded-full border border-neon-blue-400/30 bg-neon-blue-400/10 px-1.5 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-4 text-neon-blue-700 dark:border-neon-blue-400/25 dark:text-neon-blue-300"
-              >
-                {unseenCount}
-              </span>
-            </Tooltip>
-          )}
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
-          {project.masterCompliant && (
-            <span className="rounded border border-green-500/20 bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-              Compliant
-            </span>
-          )}
+        <div className="flex flex-shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100">
           <Tooltip content="Edit project">
             <button
               onClick={(e) => handleActionClick(e, () => setShowEditModal(true))}
               aria-label="Edit project"
-              className="rounded p-1 text-void-400 hover:bg-void-200 hover:text-void-600 dark:hover:bg-void-700 dark:hover:text-void-200"
+              className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -121,7 +123,7 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
             <button
               onClick={(e) => handleActionClick(e, () => setShowDeleteConfirm(true))}
               aria-label="Remove project"
-              className="rounded p-1 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400"
+              className="rounded p-1 text-ink-3 hover:bg-danger/10 hover:text-danger-text"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -130,74 +132,94 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
           </Tooltip>
         </div>
       </div>
-      <p className="mb-2 text-sm text-void-500 dark:text-void-400">
-        {project.description}
-      </p>
-
-      {/* Platform badges */}
-      <PlatformBadges platforms={project.platforms} />
+      {project.description && (
+        <p className="mt-0.5 line-clamp-2 text-[13px] leading-5 text-ink-3">{project.description}</p>
+      )}
 
       {!project.accessible && (
-        <div className="mt-2 rounded border border-red-500/20 bg-red-500/5 p-2 text-sm text-red-700 dark:text-red-300">
+        <div className="mt-3 rounded-md bg-danger/10 px-2 py-1.5 text-[13px] text-danger-text">
           {project.error}
         </div>
       )}
 
-      {project.accessible && (
-        <>
-          {/* Asset counts */}
-          {(skillCount + agentCount) > 0 && (
-            <div className="mt-1.5 text-xs text-void-500 dark:text-void-400">
-              {skillCount > 0 && <span>{skillCount} skill{skillCount !== 1 ? 's' : ''}</span>}
-              {skillCount > 0 && agentCount > 0 && <span> / </span>}
-              {agentCount > 0 && <span>{agentCount} agent{agentCount !== 1 ? 's' : ''}</span>}
-            </div>
-          )}
-
-          {/* Git uncommitted */}
-          {project.gitUncommitted !== undefined && project.gitUncommitted > 0 && (
-            <div className="mt-1.5 text-xs text-neon-orange-500 dark:text-neon-orange-400">
-              {project.gitUncommitted} uncommitted
-            </div>
-          )}
-        </>
-      )}
-
-      {project.tags.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {project.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-void-200 bg-void-100 px-2 py-0.5 text-xs text-void-500 dark:border-void-600 dark:bg-void-800 dark:text-void-400"
-            >
-              {tag}
-            </span>
-          ))}
+      {project.accessible && stages && (
+        <div className="mt-3">
+          <div
+            className="stage-bar"
+            role="img"
+            aria-label={`Open cards: ${stages.backlog} backlog, ${stages.design} design, ${stages.implementation} implementation, ${stages.testing} testing`}
+          >
+            {openCards === 0 && <span className="sb-empty" style={{ flex: 1 }} />}
+            {stages.backlog > 0 && <span className="sb-backlog" style={{ flex: stages.backlog }} />}
+            {stages.design > 0 && <span className="sb-design" style={{ flex: stages.design }} />}
+            {stages.implementation > 0 && <span className="sb-impl" style={{ flex: stages.implementation }} />}
+            {stages.testing > 0 && <span className="sb-test" style={{ flex: stages.testing }} />}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] leading-4 text-ink-3">
+            {stages.backlog > 0 && <span className="flex items-center gap-1"><i className="sb-key sb-backlog" />{stages.backlog} backlog</span>}
+            {stages.design > 0 && <span className="flex items-center gap-1"><i className="sb-key sb-design" />{stages.design} design</span>}
+            {stages.implementation > 0 && <span className="flex items-center gap-1"><i className="sb-key sb-impl" />{stages.implementation} impl</span>}
+            {stages.testing > 0 && <span className="flex items-center gap-1"><i className="sb-key sb-test" />{stages.testing} testing</span>}
+            {openCards === 0 && <span>No open cards</span>}
+            <span className="ml-auto">{stages.done} done</span>
+          </div>
         </div>
       )}
 
-      {project.accessible && project.areas.length > 0 && (
-        <div className="mt-3 border-t border-void-100 pt-3 dark:border-void-700">
-          <p className="mb-1 text-xs font-medium text-void-500 dark:text-void-500">
-            Areas
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {project.areas.map((area) => (
-              <span
-                key={area}
-                className="rounded border border-neon-blue-400/12 bg-neon-blue-400/8 px-2 py-0.5 text-xs text-neon-blue-600 dark:text-neon-blue-400/70"
-              >
-                {area}
+      {project.accessible && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {working > 0 && (
+            <Tooltip content={`${working} agent${working !== 1 ? 's' : ''} working right now`}>
+              <span className="flex items-center gap-1.5 rounded bg-live/10 px-1.5 text-[11px] font-medium leading-5 text-live-text">
+                <span className="live-dot" />
+                {working} working
               </span>
-            ))}
-          </div>
+            </Tooltip>
+          )}
+          {/* Unseen roll-up (feature 082): cards with finished work you haven't opened. */}
+          {unseenCount > 0 && (
+            <Tooltip content={`${unseenCount} card${unseenCount !== 1 ? 's' : ''} with output you haven't looked at`}>
+              {onUnseenClick ? (
+                <button
+                  type="button"
+                  onClick={(e) => { const el = e.currentTarget; handleActionClick(e, () => onUnseenClick(el)); }}
+                  aria-haspopup={unseenCount > 1 ? 'dialog' : undefined}
+                  className="rounded bg-accent/10 px-1.5 text-[11px] font-medium leading-5 text-accent transition-colors hover:bg-accent/20"
+                >
+                  {unseenCount} new
+                </button>
+              ) : (
+                <span className="rounded bg-accent/10 px-1.5 text-[11px] font-medium leading-5 text-accent">
+                  {unseenCount} new
+                </span>
+              )}
+            </Tooltip>
+          )}
+          {project.gitUncommitted !== undefined && project.gitUncommitted > 0 && (
+            <span className="rounded bg-warn/10 px-1.5 font-mono text-[11px] leading-5 text-warn-text">
+              {project.gitUncommitted} uncommitted
+            </span>
+          )}
+        </div>
+      )}
+
+      {project.accessible && (
+        <div className="mt-3 flex items-center gap-2 border-t border-line pt-2.5 text-[11px] leading-4 text-ink-3">
+          <PlatformBadges platforms={project.platforms} />
+          {(skillCount + agentCount) > 0 && (
+            <span className="truncate">
+              {skillCount > 0 && `${skillCount} skill${skillCount !== 1 ? 's' : ''}`}
+              {skillCount > 0 && agentCount > 0 && ', '}
+              {agentCount > 0 && `${agentCount} agent${agentCount !== 1 ? 's' : ''}`}
+            </span>
+          )}
+          {lastMoved && <span className="ml-auto shrink-0 pr-6">active {lastMoved}</span>}
         </div>
       )}
     </>
   );
 
-  const isActive = (project.activeSessions ?? 0) > 0;
-  const baseClasses = `block h-full rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_20px_-5px_rgba(0,191,255,0.1)] ${isActive ? 'active-glow-card' : ''}`;
+  const baseClasses = `group relative block h-full overflow-hidden rounded-xl border p-4 transition-[transform,border-color] duration-150 hover:-translate-y-px`;
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('text/plain', project.id);
@@ -217,76 +239,76 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
           draggable
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
-          className={`${baseClasses} relative cursor-pointer border-void-200 bg-white shadow-(--shadow-card) hover:border-neon-blue-400/40 hover:shadow-[0_8px_30px_rgba(0,0,0,0.18)] dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.7)] dark:border-void-700 dark:bg-void-800 dark:hover:border-neon-blue-400/30`}
+          className={`${baseClasses} cursor-pointer border-line bg-surface-1 shadow-(--shadow-card) hover:border-line-strong`}
         >
           {shortcutKey !== undefined && (
-            <span className="absolute bottom-2 right-2 flex h-5 w-5 items-center justify-center rounded border border-neon-blue-400/15 bg-neon-blue-400/10 font-mono text-xs text-neon-blue-500 dark:text-neon-blue-400">
+            <span className="absolute bottom-2.5 right-3 flex h-[18px] min-w-[18px] items-center justify-center rounded border border-line-strong font-mono text-[11px] text-ink-3">
               {shortcutKey}
             </span>
           )}
           {cardContent}
         </Link>
       ) : (
-        <div className={`${baseClasses} border-red-500/20 bg-red-500/5 dark:border-red-500/20 dark:bg-red-500/5`}>
+        <div className={`${baseClasses} border-danger/30 bg-danger/5`}>
           {cardContent}
         </div>
       )}
 
       {/* Edit Modal */}
       {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 w-full max-w-md rounded-lg border border-void-700 bg-void-900 p-6 shadow-(--shadow-overlay)">
-            <h3 className="mb-4 text-lg font-semibold text-void-100">Edit Project</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] dark:bg-black/60">
+          <div className="mx-4 w-full max-w-md rounded-2xl border border-line bg-surface-1 p-6 shadow-(--shadow-overlay)">
+            <h3 className="mb-4 text-lg font-semibold text-ink-1">Edit Project</h3>
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-sm text-void-300">Name</label>
+                <label className="mb-1 block text-[13px] font-medium text-ink-2">Name</label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 focus:border-neon-blue-400 focus:outline-none"
+                  className="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink-1 focus:border-accent focus:outline-none"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm text-void-300">Description</label>
+                <label className="mb-1 block text-[13px] font-medium text-ink-2">Description</label>
                 <textarea
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   rows={2}
-                  className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 focus:border-neon-blue-400 focus:outline-none"
+                  className="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink-1 focus:border-accent focus:outline-none"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm text-void-300">Path</label>
+                <label className="mb-1 block text-[13px] font-medium text-ink-2">Path</label>
                 <input
                   type="text"
                   value={editPath}
                   onChange={(e) => setEditPath(e.target.value)}
-                  className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 font-mono text-sm text-void-100 focus:border-neon-blue-400 focus:outline-none"
+                  className="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 font-mono text-sm text-ink-1 focus:border-accent focus:outline-none"
                 />
-                <p className="mt-1 text-xs text-void-500">Repoints registry only — files are not moved.</p>
+                <p className="mt-1 text-xs text-ink-3">Repoints registry only — files are not moved.</p>
               </div>
               <div>
-                <label className="mb-1 block text-sm text-void-300">Tags</label>
+                <label className="mb-1 block text-[13px] font-medium text-ink-2">Tags</label>
                 <input
                   type="text"
                   value={editTags}
                   onChange={(e) => setEditTags(e.target.value)}
-                  className="w-full rounded border border-void-700 bg-void-800 px-3 py-2 text-sm text-void-100 focus:border-neon-blue-400 focus:outline-none"
+                  className="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink-1 focus:border-accent focus:outline-none"
                 />
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setShowEditModal(false)}
-                className="rounded px-4 py-2 text-sm text-void-400 hover:text-void-200"
+                className="rounded-md px-4 py-2 text-sm text-ink-2 hover:bg-surface-3 hover:text-ink-1"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:opacity-90 disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
@@ -297,24 +319,24 @@ export function ProjectCard({ project, onDeleted, unseenCount = 0, shortcutKey, 
 
       {/* Delete Confirmation */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="mx-4 w-full max-w-sm rounded-lg border border-void-700 bg-void-900 p-6 shadow-(--shadow-overlay)">
-            <h3 className="mb-2 text-lg font-semibold text-void-100">Remove Project</h3>
-            <p className="mb-4 text-sm text-void-400">
-              This will remove <strong className="text-void-200">{project.name}</strong> from
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] dark:bg-black/60">
+          <div className="mx-4 w-full max-w-sm rounded-2xl border border-line bg-surface-1 p-6 shadow-(--shadow-overlay)">
+            <h3 className="mb-2 text-lg font-semibold text-ink-1">Remove Project</h3>
+            <p className="mb-4 text-sm text-ink-2">
+              This will remove <strong className="text-ink-1">{project.name}</strong> from
               Code Den. Project files will not be deleted.
             </p>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="rounded px-4 py-2 text-sm text-void-400 hover:text-void-200"
+                className="rounded-md px-4 py-2 text-sm text-ink-2 hover:bg-surface-3 hover:text-ink-1"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
                 disabled={deleting}
-                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                className="rounded-md bg-danger px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
               >
                 {deleting ? 'Removing...' : 'Remove'}
               </button>

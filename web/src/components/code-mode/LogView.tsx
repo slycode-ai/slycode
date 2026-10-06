@@ -38,7 +38,7 @@ export function LogView({ projectId, path, onShowCommit }: LogViewProps) {
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">
+      <p className="mb-3 font-mono text-[11px] text-(--cm-faint)">
         History · {path ?? 'project'} · last {entries.length} commits
       </p>
       <div className="max-w-3xl">
@@ -50,8 +50,8 @@ export function LogView({ projectId, path, onShowCommit }: LogViewProps) {
             >
             <span className="shrink-0 text-(--cm-atlas)">{e.shortHash}</span>
             <span className="min-w-0 flex-1 truncate text-(--cm-text)">{e.subject}</span>
-            <span className="hidden shrink-0 text-[10.5px] text-(--cm-muted) sm:inline">{e.author}</span>
-            <span className="shrink-0 text-[10.5px] text-(--cm-faint)">
+            <span className="hidden shrink-0 text-[11px] text-(--cm-muted) sm:inline">{e.author}</span>
+            <span className="shrink-0 text-[11px] text-(--cm-faint)">
               {formatDate(e.date)}
             </span>
             </button>

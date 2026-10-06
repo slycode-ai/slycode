@@ -45,18 +45,18 @@ export function DbRail({ projectId, onOpenTable }: DbRailProps) {
     <div className="p-2">
       <button
         onClick={() => onOpenTable(undefined)}
-        className="mb-2 w-full rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+        className="mb-2 w-full rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
       >
         Open schema view
       </button>
       {data.sources.map(src => (
         <div key={src.path} className="mb-2.5">
           <Tooltip content={src.path} placement="right">
-            <p className="truncate px-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-(--cm-faint)">
+            <p className="truncate px-1 font-mono text-[11px] text-(--cm-faint)">
               {src.kind} · {src.path.split('/').pop()}
             </p>
           </Tooltip>
-          {src.error && <p className="px-1 font-mono text-[10px] text-(--cm-stale)">{src.error}</p>}
+          {src.error && <p className="px-1 font-mono text-[11px] text-(--cm-stale)">{src.error}</p>}
           {src.tables.map(t => (
             <Tooltip key={t.name} content={`${t.name} — ${t.columns.length} columns`} placement="right">
               <button
@@ -64,7 +64,7 @@ export function DbRail({ projectId, onOpenTable }: DbRailProps) {
                 className="block w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[11px] text-(--cm-muted) transition-colors hover:bg-(--cm-panel3) hover:text-(--cm-text)"
               >
                 {t.name}
-                <span className="ml-1.5 text-[9.5px] text-(--cm-faint)">{t.columns.length}</span>
+                <span className="ml-1.5 text-[11px] text-(--cm-faint)">{t.columns.length}</span>
               </button>
             </Tooltip>
           ))}

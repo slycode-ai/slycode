@@ -27,18 +27,18 @@ export default function HtmlViewerPage() {
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => window.close()}
-            className="px-3 py-1.5 text-sm rounded border border-neon-blue-400/40 bg-neon-blue-400/15 text-neon-blue-600 dark:text-neon-blue-300 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] transition"
+            className="px-3 py-1.5 text-sm rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 transition"
             title="Close this tab and return to SlyCode"
           >
             Close
           </button>
-          <span className="text-xs uppercase tracking-wider text-void-500 dark:text-void-400 font-mono">HTML Attachment</span>
-          <span className="text-sm text-void-700 dark:text-void-200 font-mono truncate" title={filePath}>
+          <span className="text-xs text-ink-3 font-mono">HTML Attachment</span>
+          <span className="text-sm text-ink-2 font-mono truncate" title={filePath}>
             {filePath || '(loading…)'}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="hidden text-xs text-void-500 dark:text-void-400 sm:inline">
+          <span className="hidden text-xs text-ink-3 sm:inline">
             Sandboxed · no fetch · no remote images
           </span>
           <button
@@ -51,7 +51,7 @@ export default function HtmlViewerPage() {
               // no app chrome in the output, page-break CSS honored natively.
               window.open(`/api/html-attachment?${qs.toString()}`, '_blank', 'noopener,noreferrer');
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-neon-blue-400/40 bg-neon-blue-400/15 text-neon-blue-600 dark:text-neon-blue-300 hover:bg-neon-blue-400/25 hover:shadow-[0_0_12px_rgba(0,191,255,0.3)] transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 transition"
             title="Print this attachment (opens a print tab — no app chrome)"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -66,7 +66,7 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
         </div>
 
         {stale && (
-          <p className="flex items-center gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-amber-600 dark:text-amber-400">
+          <p className="flex items-center gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3.5 py-1 font-mono text-[11px] text-amber-600 dark:text-amber-400">
             <span className="min-w-0 flex-1">source files changed since this tour was written — anchors may have drifted</span>
             {onRefresh && (
               <Tooltip content="Ask the Atlas to re-answer this tour against the current code">
@@ -83,18 +83,18 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
 
         <div className="px-3.5 py-2.5">
           <div className="flex items-baseline gap-2">
-            <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-(--cm-atlas)">
+            <p className="font-mono text-[11px] text-(--cm-atlas)">
               Tour · {tour.title}
             </p>
-            <span className="ml-auto font-mono text-[10px] text-(--cm-faint)">
+            <span className="ml-auto font-mono text-[11px] text-(--cm-faint)">
               {stepIndex + 1}/{tour.steps.length}
             </span>
           </div>
-          <h3 className="mt-1 text-[13.5px] font-semibold text-(--cm-text)">{step.title}</h3>
-          <p className="mt-0.5 font-mono text-[10px] text-(--cm-faint)">
+          <h3 className="mt-1 text-[14px] font-semibold text-(--cm-text)">{step.title}</h3>
+          <p className="mt-0.5 font-mono text-[11px] text-(--cm-faint)">
             {step.file}{step.line ? `:${step.line}${step.endLine ? `-${step.endLine}` : ''}` : ''}
           </p>
-          <div className="mt-1.5 max-h-[130px] overflow-y-auto pr-1 text-[12.5px] leading-relaxed text-(--cm-muted)">
+          <div className="mt-1.5 max-h-[130px] overflow-y-auto pr-1 text-[13px] leading-relaxed text-(--cm-muted)">
             {step.body.split(/\n{2,}/).map((para, i) => (
               <p key={i} className="mb-2 last:mb-0">{para}</p>
             ))}
@@ -105,28 +105,28 @@ export function TourPlayer({ tour, stale, stepIndex, onStep, onAsk, onRefresh, o
           <button
             onClick={() => go(-1)}
             disabled={!canPrev}
-            className="rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-40"
+            className="rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-40"
           >
             ← Prev
           </button>
           <button
             onClick={() => go(1)}
             disabled={!canNext}
-            className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-40"
+            className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[11px] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-40"
           >
             Next →
           </button>
           <Tooltip content="Ask the Atlas terminal about this step">
             <button
               onClick={() => onAsk(step, stepIndex)}
-              className="ml-2 rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] tracking-[0.03em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+              className="ml-2 rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[11px] tracking-[0.03em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
             >
               ✦ Ask about this step
             </button>
           </Tooltip>
           <button
             onClick={onExit}
-            className="ml-auto rounded-md px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-faint) hover:text-(--cm-text)"
+            className="ml-auto rounded-md px-2 py-1 font-mono text-[11px] text-(--cm-faint) hover:text-(--cm-text)"
           >
             End tour
           </button>

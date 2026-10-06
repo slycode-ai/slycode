@@ -8,6 +8,7 @@ import { formatCardNumber } from '@/lib/kanban-numbering';
 import { formatFireTime, formatCountdown, nextPendingFireAt, pendingEntries } from '@/lib/scheduled-prompts';
 import { StopwatchGlyph } from './StopwatchGlyph';
 import Tooltip from './Tooltip';
+import { Bug, Sparkles, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react';
 
 // Status panel: single static text with ellipsis at rest.
 // On hover, IF the text overflows the container, fade in a marquee overlay
@@ -27,11 +28,11 @@ function CardStatusPanel({ status, stage }: { status: CardStatus; stage: KanbanS
       const overflowing = el.scrollWidth > el.clientWidth + 0.5;
       setOverflows(overflowing);
       if (overflowing) {
-        // Target ~60 px/sec horizontal scroll. The track translates by one
+        // Target ~96 px/sec horizontal scroll. The track translates by one
         // block width on each loop. Block width \u2248 text scrollWidth + ~30px gap
         // (6 non-breaking spaces at 7px font). Clamp to keep extreme cases sane.
         const blockWidth = el.scrollWidth + 30;
-        const seconds = Math.max(3, Math.min(30, blockWidth / 60));
+        const seconds = Math.max(2.1, Math.min(20, blockWidth / 96));
         setMarqueeSeconds(seconds);
       }
     };
@@ -90,33 +91,13 @@ interface KanbanCardItemProps {
   onDragEnd?: () => void;
 }
 
-const priorityIndicators: Record<string, { border: string; hoverGlow: string; glowRgb: string }> = {
-  critical: {
-    border: 'border-l-[#ff1744]',
-    glowRgb: '255, 23, 68',
-    hoverGlow: 'hover:shadow-[var(--shadow-card),inset_5px_0_8px_-6px_rgba(255,23,68,0.5)] dark:hover:shadow-[var(--shadow-card),inset_6px_0_14px_-6px_rgba(255,23,68,0.5),_-4px_0_16px_-3px_rgba(255,23,68,0.55)] hover:before:bg-white/40 dark:hover:before:bg-white/60',
-  },
-  high: {
-    border: 'border-l-[#ff9100]',
-    glowRgb: '255, 145, 0',
-    hoverGlow: 'hover:shadow-[var(--shadow-card),inset_4px_0_7px_-5px_rgba(255,145,0,0.45)] dark:hover:shadow-[var(--shadow-card),inset_5px_0_12px_-5px_rgba(255,145,0,0.45),_-3px_0_14px_-3px_rgba(255,145,0,0.45)] hover:before:bg-white/35 dark:hover:before:bg-white/50',
-  },
-  medium: {
-    border: 'border-l-[#00bfff]',
-    glowRgb: '0, 191, 255',
-    hoverGlow: 'hover:shadow-[var(--shadow-card),inset_4px_0_6px_-5px_rgba(0,191,255,0.4)] dark:hover:shadow-[var(--shadow-card),inset_4px_0_10px_-4px_rgba(0,191,255,0.4),_-3px_0_12px_-3px_rgba(0,191,255,0.35)] hover:before:bg-white/30 dark:hover:before:bg-white/45',
-  },
-  low: {
-    border: 'border-l-[#00c853]',
-    glowRgb: '0, 200, 83',
-    hoverGlow: 'hover:shadow-[var(--shadow-card),inset_4px_0_6px_-5px_rgba(0,200,83,0.35)] dark:hover:shadow-[var(--shadow-card),inset_4px_0_10px_-4px_rgba(0,200,83,0.35),_-3px_0_12px_-3px_rgba(0,200,83,0.3)] hover:before:bg-white/25 dark:hover:before:bg-white/40',
-  },
-};
+// Priority as signal bars (ink; critical alone in red) — see .prio-bars in globals.css
+const priorityLevels: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 
-const typeEmojis: Record<string, string> = {
-  bug: '\u{1FAB3}',
-  feature: '\u{2728}',
-  chore: '\u{1F527}',
+const typeIcons: Record<string, { Icon: LucideIcon; label: string }> = {
+  bug: { Icon: Bug, label: 'Bug' },
+  feature: { Icon: Sparkles, label: 'Feature' },
+  chore: { Icon: Wrench, label: 'Chore' },
 };
 
 interface TooltipPosition {
@@ -128,69 +109,30 @@ interface TooltipPosition {
 function ChecklistProgress({ completed, total }: { completed: number; total: number }) {
   const isComplete = completed === total;
   const progress = total > 0 ? completed / total : 0;
-  const size = 13;
-  const strokeWidth = 1.5;
+  const size = 14;
+  const strokeWidth = 2;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference * (1 - progress);
 
-  if (isComplete) {
-    // Green circle with checkmark when complete
-    return (
-      <Tooltip content="Checklist complete">
-        <div className="flex items-center">
-          <svg width={size} height={size} viewBox="0 0 16 16" className="text-void-400 dark:text-void-500">
-            <circle cx="8" cy="8" r="7" fill="currentColor" />
-            <path
-              d="M5 8l2 2 4-4"
-              stroke="white"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </svg>
-        </div>
-      </Tooltip>
-    );
-  }
-
-  // Red at 0%, orange when in progress
-  const isZero = completed === 0;
-  const progressColor = 'text-orange-500 dark:text-orange-400';
-  const bgColor = isZero
-    ? 'text-red-500'
-    : 'text-void-200 dark:text-void-600';
-
   return (
-    <Tooltip content={`${completed}/${total} items complete`}>
+    <Tooltip content={isComplete ? 'Checklist complete' : `${completed}/${total} items complete`}>
       <div className="flex items-center gap-1">
-        <svg width={size} height={size} className="-rotate-90">
-          {/* Background circle - bright red when 0%, gray otherwise */}
+        <svg width={size} height={size} className="-rotate-90" aria-hidden>
+          <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--line-strong)" strokeWidth={strokeWidth} />
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="currentColor"
-            strokeWidth={strokeWidth}
-            className={bgColor}
-          />
-          {/* Progress circle */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="currentColor"
+            stroke={isComplete ? 'var(--live)' : 'var(--ink-2)'}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
-            className={progressColor}
           />
         </svg>
-        <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-500 dark:text-void-400">{completed}/{total}</span>
+        <span className="font-mono text-[11px] tabular-nums text-ink-3">{completed}/{total}</span>
       </div>
     </Tooltip>
   );
@@ -207,7 +149,11 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
   const hoverTimeout = useRef<NodeJS.Timeout | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const priority = priorityIndicators[card.priority] || priorityIndicators.medium;
+  const priorityLevel = priorityLevels[card.priority] ?? 2;
+  const priorityLabel = `${card.priority.charAt(0).toUpperCase()}${card.priority.slice(1)} priority`;
+  const { Icon: TypeIcon, label: typeLabel } = typeIcons[card.type] || typeIcons.chore;
+  const isIdle = !isActivelyWorking && sessionStatus === 'running';
+  const isEnded = !isActivelyWorking && (sessionStatus === 'detached' || sessionStatus === 'resumable');
 
   const handleMouseEnter = () => {
     if (card.description) {
@@ -275,7 +221,6 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
   // Done-lane tag toggle: in compact (Done) mode, show ALL tags (no areas, no
   // truncation) when the column's toggle is on.
   const showDoneTags = isCompact && showTags && card.tags.length > 0;
-  const hasFooterContent = hasTags || !!status || showDoneTags;
 
   // Unseen-activity marker (feature 082): a 10px lane-coloured corner fold plus
   // a lane-tinted backlight. The lane class supplies --unseen-rgb (light/dark
@@ -293,7 +238,6 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onClick={onClick}
-        style={{ '--glow-color': priority.glowRgb } as React.CSSProperties}
         onContextMenu={(e) => {
           if (onContextMenu) {
             setShowTooltip(false);
@@ -303,118 +247,121 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`group relative cursor-pointer rounded-lg border-l-4 border-t border-t-white/50 backdrop-blur-lg bg-white/55 px-3 pt-3 pb-2 shadow-(--shadow-card) ring-1 ring-transparent transition-[transform,ring-color,box-shadow] duration-200 hover:translate-y-0.5 hover:ring-[rgba(var(--glow-color),0.4)] before:pointer-events-none before:absolute before:inset-y-1 before:-left-[3px] before:w-px before:rounded-full before:bg-white/0 before:transition-colors before:duration-200 dark:border-t-white/10 dark:backdrop-blur-xl dark:bg-[#20232a]/55 dark:hover:ring-[rgba(var(--glow-color),0.25)] ${priority.border} ${priority.hoverGlow} ${isActivelyWorking ? 'active-glow-card' : ''} ${unseenClasses}`}
+        className={`group relative cursor-pointer overflow-hidden rounded-lg border border-line bg-surface-1 shadow-(--shadow-card) transition-[transform,border-color] duration-150 hover:-translate-y-px hover:border-line-strong ${isCompact ? 'px-3 py-2' : 'px-3 pt-2.5 pb-2.5'} ${unseenClasses}`}
       >
-        {/* Header: title on left, number + dot on right */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <h4 className="text-sm font-medium text-void-900 dark:text-void-100">
-              {card.title}
-            </h4>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {/* Card number */}
-            {card.number != null && (
-              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-none text-void-400 dark:text-void-500">
-                {formatCardNumber(card.number)}
+        {isActivelyWorking && <div className="live-wire" aria-hidden />}
+
+        {/* Meta row: number, priority, type, session state */}
+        <div className="flex items-center gap-2 text-[11px] leading-4 text-ink-3">
+          {card.number != null && (
+            <span className="font-mono tabular-nums">{formatCardNumber(card.number)}</span>
+          )}
+          {!isCompact && (
+            <Tooltip content={priorityLabel}>
+              <span className={`prio-bars p${priorityLevel}`} role="img" aria-label={priorityLabel}>
+                <i /><i /><i /><i />
               </span>
-            )}
-            {/* Session status dot */}
-            {(isActivelyWorking || sessionStatus === 'running') && (
-              <Tooltip content="Session running">
-                <span className="relative flex h-2.5 w-2.5 -translate-y-px">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00e676] opacity-75"></span>
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#00e676] dark:drop-shadow-[0_0_4px_rgba(0,230,118,0.6)]" style={{ boxShadow: '0 0 6px rgba(0,230,118,0.6)' }}></span>
+            </Tooltip>
+          )}
+          <Tooltip content={typeLabel}>
+            <span className="flex" role="img" aria-label={typeLabel}>
+              <TypeIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+            </span>
+          </Tooltip>
+          <span className="ml-auto flex items-center gap-1.5">
+            {isActivelyWorking && (
+              <Tooltip content="Agent working">
+                <span className="flex items-center gap-1.5 rounded bg-live/10 px-1.5 text-[11px] font-medium leading-[18px] text-live-text">
+                  <span className="live-dot" />
+                  Working
                 </span>
               </Tooltip>
             )}
-            {!isActivelyWorking && (sessionStatus === 'detached' || sessionStatus === 'resumable') && (
-              <Tooltip content="Session paused"><span className="flex h-2.5 w-2.5 -translate-y-px rounded-full bg-neon-orange-400 dark:drop-shadow-[0_0_4px_rgba(255,140,0,0.5)]"  style={{ boxShadow: '0 0 4px rgba(255,140,0,0.4)' }} /></Tooltip>
+            {isIdle && (
+              <Tooltip content="Session running, idle">
+                <span className="inline-block h-2 w-2 rounded-full bg-live" aria-label="Session idle" />
+              </Tooltip>
             )}
-            {!isActivelyWorking && sessionStatus === 'none' && (
-              <Tooltip content="No session"><span className="flex h-2 w-2 -translate-y-px rounded-full bg-void-300 dark:bg-void-600" /></Tooltip>
+            {isEnded && (
+              <Tooltip content="Session ended (resumable)">
+                <span className="ended-ring" aria-label="Session ended, resumable" />
+              </Tooltip>
             )}
-          </div>
+          </span>
         </div>
+
+        <h4 className={`mt-1.5 text-[13px] leading-5 ${isCompact ? 'font-normal text-ink-2' : 'font-medium text-ink-1'}`}>
+          {card.title}
+        </h4>
 
         {/* Problems indicator */}
         {unresolvedProblems > 0 && (
-          <div className="mt-2 flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-300">
-            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
-            <span>{unresolvedProblems} issue{unresolvedProblems !== 1 ? 's' : ''}</span>
+          <div className="mt-2">
+            <span className="inline-flex items-center gap-1 rounded bg-danger/10 px-1.5 text-[11px] font-medium leading-[18px] text-danger-text">
+              <TriangleAlert className="h-3 w-3" aria-hidden />
+              {unresolvedProblems} problem{unresolvedProblems !== 1 ? 's' : ''}
+            </span>
           </div>
         )}
 
-        {/* Footer: status panel OR tags row on the left, checklist + emoji on right */}
-        <div className={`${hasFooterContent ? 'mt-2' : 'mt-1'} flex items-center justify-end gap-2`}>
-          {status && stage && <CardStatusPanel status={status} stage={stage} />}
-          {hasTags && (
-            <div className="flex min-w-0 flex-1 gap-1 overflow-hidden">
-              {/* Areas */}
-              {card.areas.slice(0, 1).map((area) => (
-                <span
-                  key={area}
-                  className="shrink-0 rounded border border-neon-blue-400/25 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-neon-blue-700 transition-colors group-hover:bg-neon-blue-400/8 dark:border-neon-blue-400/20 dark:text-neon-blue-400/70 dark:group-hover:bg-neon-blue-400/10"
-                >
-                  {area}
-                </span>
-              ))}
-              {card.areas.length > 1 && (
-                <span className="shrink-0 rounded border border-neon-blue-400/25 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-neon-blue-600 transition-colors group-hover:bg-neon-blue-400/8 dark:border-neon-blue-400/20 dark:text-neon-blue-400/50 dark:group-hover:bg-neon-blue-400/10">
-                  +{card.areas.length - 1}
-                </span>
-              )}
-              {/* Tags */}
-              {card.tags.slice(0, 1).map((tag) => (
-                <span
-                  key={tag}
-                  className="shrink-0 rounded border border-void-300 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-600 transition-colors group-hover:bg-void-100 dark:border-void-600 dark:text-void-400 dark:group-hover:bg-void-800"
-                >
-                  {tag}
-                </span>
-              ))}
-              {card.tags.length > 1 && (
-                <span className="shrink-0 rounded border border-void-300 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-600 transition-colors group-hover:bg-void-100 dark:border-void-600 dark:text-void-500 dark:group-hover:bg-void-800">
-                  +{card.tags.length - 1}
-                </span>
-              )}
-            </div>
-          )}
-          {showDoneTags && (
-            <div className="flex min-w-0 flex-1 flex-wrap gap-1 overflow-hidden">
-              {card.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="shrink-0 rounded border border-void-300 bg-transparent px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-void-600 transition-colors group-hover:bg-void-100 dark:border-void-600 dark:text-void-400 dark:group-hover:bg-void-800"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="flex shrink-0 items-center gap-1.5">
-            {nextScheduled && (
-              <Tooltip content={pendingSends.map(e => `${formatFireTime(e.fireAt)} (${formatCountdown(e.fireAt)}): ${e.message}`).join('\n')}>
-                <span
-                  className="flex items-center gap-0.5 rounded border border-neon-orange-400/35 bg-neon-orange-400/10 px-1 py-px font-[family-name:var(--font-jetbrains-mono)] text-[10px] text-neon-orange-700 dark:text-neon-orange-300/90"
-                  aria-label={`Scheduled send at ${formatFireTime(nextScheduled)}`}
-                >
-                  <StopwatchGlyph pointAt={nextScheduled} className="h-2.5 w-2.5" />
-                  {formatFireTime(nextScheduled)}
-                  {pendingSends.length > 1 && <span className="opacity-70">+{pendingSends.length - 1}</span>}
-                </span>
-              </Tooltip>
-            )}
-            {checklistTotal > 0 && (
-              <ChecklistProgress completed={checklistCompleted} total={checklistTotal} />
-            )}
-            <span className="text-base leading-none">
-              {typeEmojis[card.type] || typeEmojis.chore}
-            </span>
+        {/* Agent status LED on its own row */}
+        {status && stage && (
+          <div className="mt-2 flex">
+            <CardStatusPanel status={status} stage={stage} />
           </div>
-        </div>
+        )}
+
+        {/* Footer: chips left, scheduled send + checklist right */}
+        {(hasTags || showDoneTags || nextScheduled || checklistTotal > 0) && (
+          <div className="mt-2 flex items-center gap-1.5">
+            {hasTags && (
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                {card.areas.slice(0, 1).map((area) => (
+                  <span key={area} className="shrink-0 rounded border border-line px-1.5 text-[11px] leading-[18px] text-ink-2">
+                    {area}
+                  </span>
+                ))}
+                {card.areas.length > 1 && (
+                  <span className="shrink-0 text-[11px] leading-[18px] text-ink-3">+{card.areas.length - 1}</span>
+                )}
+                {card.tags.slice(0, 1).map((tag) => (
+                  <span key={tag} className="shrink-0 px-1 text-[11px] leading-[18px] text-ink-3">
+                    {tag}
+                  </span>
+                ))}
+                {card.tags.length > 1 && (
+                  <span className="shrink-0 text-[11px] leading-[18px] text-ink-3">+{card.tags.length - 1}</span>
+                )}
+              </div>
+            )}
+            {showDoneTags && (
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1 overflow-hidden">
+                {card.tags.map((tag) => (
+                  <span key={tag} className="shrink-0 rounded border border-line px-1.5 text-[11px] leading-[18px] text-ink-3">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {nextScheduled && (
+                <Tooltip content={pendingSends.map(e => `${formatFireTime(e.fireAt)} (${formatCountdown(e.fireAt)}): ${e.message}`).join('\n')}>
+                  <span
+                    className="flex items-center gap-1 rounded bg-agent/10 px-1.5 font-mono text-[11px] leading-[18px] text-agent-text"
+                    aria-label={`Scheduled send at ${formatFireTime(nextScheduled)}`}
+                  >
+                    <StopwatchGlyph pointAt={nextScheduled} className="h-2.5 w-2.5" />
+                    {formatFireTime(nextScheduled)}
+                    {pendingSends.length > 1 && <span className="opacity-70">+{pendingSends.length - 1}</span>}
+                  </span>
+                </Tooltip>
+              )}
+              {checklistTotal > 0 && (
+                <ChecklistProgress completed={checklistCompleted} total={checklistTotal} />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tooltip - rendered in portal */}
@@ -423,15 +370,15 @@ export function KanbanCardItem({ card, sessionStatus, isActivelyWorking = false,
           className={`fixed z-[100] w-64 animate-in fade-in duration-200 ${tooltipFlipped ? 'slide-in-from-right-1' : 'slide-in-from-left-1'}`}
           style={{ top: tooltipPos.top, left: tooltipPos.left }}
         >
-          <div className="rounded-lg border border-neon-blue-400/20 bg-void-50 p-3 shadow-(--shadow-overlay) dark:bg-void-850">
-            <p className="whitespace-pre-wrap text-sm text-void-700 dark:text-void-300">
+          <div className="rounded-lg border border-line bg-surface-1 p-3 shadow-(--shadow-overlay)">
+            <p className="whitespace-pre-wrap text-[13px] leading-5 text-ink-2">
               {card.description.length > 200
                 ? card.description.slice(0, 200) + '...'
                 : card.description}
             </p>
           </div>
           {/* Arrow */}
-          <div className={`absolute top-3 h-2 w-2 rotate-45 ${tooltipFlipped ? '-right-1 border-t border-r' : '-left-1 border-b border-l'} border-neon-blue-400/20 bg-void-50 dark:bg-void-850`} />
+          <div className={`absolute top-3 h-2 w-2 rotate-45 ${tooltipFlipped ? '-right-1 border-t border-r' : '-left-1 border-b border-l'} border-line bg-surface-1`} />
         </div>,
         document.body
       )}

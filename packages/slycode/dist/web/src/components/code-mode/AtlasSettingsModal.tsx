@@ -106,7 +106,7 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
     >
       <div className="w-full max-w-md overflow-hidden rounded-xl border border-(--cm-line2) bg-(--cm-panel) shadow-[0_16px_60px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-2 border-b border-(--cm-line) bg-(--cm-panel2) px-4 py-2.5">
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-(--cm-atlas)">⚙ Atlas settings</span>
+          <span className="font-mono text-[11px] text-(--cm-atlas)">⚙ Atlas settings</span>
           <button onClick={onClose} className="ml-auto font-mono text-[13px] text-(--cm-faint) hover:text-(--cm-text)">✕</button>
         </div>
 
@@ -118,7 +118,7 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
             <label className="flex items-center justify-between gap-3">
               <span>
                 <span className="block text-[13px] font-semibold text-(--cm-text)">Nightly refresh</span>
-                <span className="block text-[11.5px] text-(--cm-muted)">
+                <span className="block text-[12px] text-(--cm-muted)">
                   The scheduler starts the Atlas terminal and runs the refresh + coverage crawl.
                 </span>
               </span>
@@ -146,9 +146,9 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
                 value={schedule}
                 onChange={e => setSchedule(e.target.value)}
                 spellCheck={false}
-                className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[12.5px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
+                className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[13px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
               />
-              <span className={`mt-1 block font-mono text-[10.5px] ${cronPreview ? 'text-(--cm-muted)' : 'text-(--cm-stale)'}`}>
+              <span className={`mt-1 block font-mono text-[11px] ${cronPreview ? 'text-(--cm-muted)' : 'text-(--cm-stale)'}`}>
                 {cronPreview ?? 'invalid cron expression'}
               </span>
             </label>
@@ -160,7 +160,7 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
                 <select
                   value={provider}
                   onChange={e => { setProvider(e.target.value); setModel(''); setCustomModel(false); }}
-                  className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[12.5px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
+                  className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[13px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
                 >
                   <option value="">Global default ({globalDefault})</option>
                   {providers.map(p => (
@@ -177,7 +177,7 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
                       onChange={e => setModel(e.target.value)}
                       placeholder="model id"
                       spellCheck={false}
-                      className="w-full min-w-0 rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[12.5px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
+                      className="w-full min-w-0 rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[13px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
                     />
                     <Tooltip content="Back to the configured list">
                       <button
@@ -196,7 +196,7 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
                       if (e.target.value === '__custom__') { setCustomModel(true); setModel(''); }
                       else setModel(e.target.value);
                     }}
-                    className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[12.5px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
+                    className="w-full rounded-md border border-(--cm-line2) bg-(--cm-bg2) px-2.5 py-1.5 font-mono text-[13px] text-(--cm-text) outline-none focus:border-(--cm-atlas)"
                   >
                     <option value="">
                       {provider === '' && globalModel ? `Default (${globalModel})` : 'Provider default'}
@@ -212,22 +212,22 @@ export function AtlasSettingsModal({ projectId, onClose, onRunRefresh, refreshBu
 
             {/* Meta + actions */}
             <div className="flex items-center gap-2 border-t border-(--cm-line) pt-3">
-              <span className="font-mono text-[10.5px] text-(--cm-faint)">
+              <span className="font-mono text-[11px] text-(--cm-faint)">
                 {lastRun ? `last run ${relTime(lastRun)}` : 'never run'}
               </span>
-              {notice && <span className="font-mono text-[10.5px] text-(--cm-atlas)">{notice}</span>}
+              {notice && <span className="font-mono text-[11px] text-(--cm-atlas)">{notice}</span>}
               <span className="ml-auto flex gap-2">
                 <button
                   onClick={onRunRefresh}
                   disabled={refreshBusy}
-                  className="rounded-md border border-(--cm-line2) px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
+                  className="rounded-md border border-(--cm-line2) px-3 py-1.5 font-mono text-[11px] text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
                 >
                   {refreshBusy ? 'starting…' : 'Run now'}
                 </button>
                 <button
                   onClick={save}
                   disabled={saving || !cronPreview}
-                  className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-4 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--cm-atlas) hover:brightness-110 disabled:opacity-50"
+                  className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-4 py-1.5 font-mono text-[11px] text-(--cm-atlas) hover:brightness-110 disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : 'Save'}
                 </button>

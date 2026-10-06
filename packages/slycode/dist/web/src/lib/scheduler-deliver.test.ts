@@ -312,6 +312,76 @@ test('triggerAutomation (fresh) still spawns fresh and passes liveness', async (
 });
 
 // ---------------------------------------------------------------------------
+// Fresh every N days (card #0373) — the probe's conversation start decides
+// ---------------------------------------------------------------------------
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+function intervalCard(days = 7): KanbanCard {
+  const card = automationCard();
+  card.automation!.freshSessionDays = days;
+  return card;
+}
+
+async function lastLog() {
+  const lines = (await fs.readFile(LOG_PATH, 'utf-8')).trim().split('\n');
+  return JSON.parse(lines[lines.length - 1]);
+}
+
+test('every N days: conversation past the limit → fresh spawn, logged with reason age', async () => {
+  const started = daysAgo(8);
+  reset({
+    create: { status: 200, body: { status: 'running', pid: 7, delivery: { ...cliArg } } },
+    info: { status: 200, body: { status: 'running', createdAt: daysAgo(200), conversationStartedAt: started } },
+  });
+  const r = await triggerAutomation(intervalCard(7), 'proj', '/tmp/proj', { trigger: 'manual' });
+  assert.equal(r.success, true);
+  const body = calls.find(c => c.method === 'POST')!.body;
+  assert.equal(body.fresh, true);
+  assert.match(body.prompt, /Session: fresh \(previous conversation started \d{4}-\d{2}-\d{2}, 8 days ago; limit 7 days\)/);
+  const last = await lastLog();
+  assert.equal(last.fresh, true);
+  assert.equal(last.freshReason, 'age');
+  assert.equal(last.conversationStartedAt, started);
+  assert.equal(last.trigger, 'manual');
+});
+
+test('every N days: conversation inside the limit → resumes, header names the due date', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', delivery: delivered } },
+    info: { status: 200, body: { status: 'running', createdAt: daysAgo(200), conversationStartedAt: daysAgo(1) } },
+  });
+  const r = await triggerAutomation(intervalCard(7), 'proj', '/tmp/proj');
+  assert.equal(r.success, true);
+  const body = calls.find(c => c.method === 'POST')!.body;
+  assert.equal(body.fresh, false);
+  assert.match(body.prompt, /Session: resumed \(conversation started \d{4}-\d{2}-\d{2}; fresh start due on or after \d{4}-\d{2}-\d{2}\)/);
+  const last = await lastLog();
+  assert.equal(last.fresh, false);
+  assert.equal(last.freshReason, 'within-window');
+});
+
+test('every N days: bridge probe fails → resume path, never a fresh stop', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', delivery: delivered } },
+    info: { status: 500, body: { error: 'boom' } },
+  });
+  await triggerAutomation(intervalCard(7), 'proj', '/tmp/proj');
+  assert.equal(calls.find(c => c.method === 'POST')!.body.fresh, false);
+  assert.equal((await lastLog()).freshReason, 'probe-failed');
+});
+
+test('never (no freshSessionDays) stays resume even for an ancient conversation', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', delivery: delivered } },
+    info: { status: 200, body: { status: 'running', conversationStartedAt: daysAgo(400) } },
+  });
+  await triggerAutomation(automationCard(), 'proj', '/tmp/proj');
+  assert.equal(calls.find(c => c.method === 'POST')!.body.fresh, false);
+  assert.equal((await lastLog()).freshReason, 'never');
+});
+
+// ---------------------------------------------------------------------------
 // busyPolicy 'defer' — the bridge's own busy guard decides (card #0352 problem)
 // ---------------------------------------------------------------------------
 

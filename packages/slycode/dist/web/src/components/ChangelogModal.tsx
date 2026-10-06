@@ -21,13 +21,13 @@ const TYPE_LABELS: Record<ChangelogChangeType, string> = {
 
 const TYPE_STYLES: Record<ChangelogChangeType, string> = {
   feature:
-    'border-neon-blue-400/40 bg-neon-blue-400/15 text-neon-blue-600 dark:text-neon-blue-400',
+    'border-accent/40 bg-accent/15 text-accent',
   bugfix:
     'border-red-400/40 bg-red-400/15 text-red-600 dark:text-red-400',
   improvement:
     'border-emerald-400/40 bg-emerald-400/15 text-emerald-600 dark:text-emerald-400',
   chore:
-    'border-void-400/40 bg-void-400/15 text-void-600 dark:text-void-300',
+    'border-void-400/40 bg-void-400/15 text-ink-2',
 };
 
 // ============================================================================
@@ -97,14 +97,14 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex w-full max-w-3xl max-h-[85vh] flex-col overflow-hidden rounded-xl border border-void-200 bg-white shadow-(--shadow-overlay) dark:border-void-700 dark:bg-void-850">
+      <div className="flex w-full max-w-3xl max-h-[85vh] flex-col overflow-hidden rounded-xl border border-line bg-surface-1 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-void-200 px-6 py-5 dark:border-void-800">
+        <div className="flex items-start justify-between border-b border-line px-6 py-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-neon-blue-600 dark:text-neon-blue-400">
+            <div className="font-mono text-[10px] tracking-[0.22em] text-accent">
               Release History
             </div>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-void-900 dark:text-void-100">
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-ink-1">
               Changelog
             </h2>
           </div>
@@ -112,7 +112,7 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
             type="button"
             onClick={onClose}
             aria-label="Close changelog"
-            className="rounded-md p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-900 dark:text-void-400 dark:hover:bg-void-800 dark:hover:text-void-100"
+            className="rounded-md p-1.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-1"
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
               <path
@@ -129,7 +129,7 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {loading && (
             <div className="flex items-center justify-center py-16">
-              <div className="font-mono text-xs uppercase tracking-widest text-void-400 dark:text-void-500">
+              <div className="font-mono text-xs text-ink-3">
                 Loading…
               </div>
             </div>
@@ -143,10 +143,10 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
 
           {!loading && !error && data && data.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.22em] text-void-400 dark:text-void-600">
+              <div className="mb-2 font-mono text-[10px] tracking-[0.22em] text-ink-3">
                 No entries
               </div>
-              <p className="text-sm text-void-500 dark:text-void-400">
+              <p className="text-sm text-ink-3">
                 The changelog is empty. Future releases will appear here.
               </p>
             </div>
@@ -156,7 +156,7 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
             <ol className="relative space-y-9">
               {/* Timeline rail */}
               <div
-                className="absolute left-[7px] top-2 bottom-2 w-px bg-gradient-to-b from-neon-blue-400/50 via-void-300 to-transparent dark:from-neon-blue-400/40 dark:via-void-700"
+                className="absolute left-[7px] top-2 bottom-2 w-px bg-gradient-to-b from-accent/50 via-void-300 to-transparent dark:via-void-700"
                 aria-hidden
               />
 
@@ -166,26 +166,26 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
                   <div
                     className={`absolute left-0 top-[6px] h-[15px] w-[15px] rounded-full border-2 ${
                       idx === 0
-                        ? 'border-neon-blue-400 bg-neon-blue-400/20'
-                        : 'border-void-300 bg-white dark:border-void-600 dark:bg-void-900'
+                        ? 'border-accent bg-accent/20'
+                        : 'border-line-strong bg-surface-1'
                     }`}
                     aria-hidden
                   >
                     {idx === 0 && (
-                      <div className="absolute inset-[2px] animate-pulse rounded-full bg-neon-blue-400/70" />
+                      <div className="absolute inset-[2px] animate-pulse rounded-full bg-accent/70" />
                     )}
                   </div>
 
                   {/* Version header */}
                   <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span className="font-mono text-lg font-semibold text-void-900 dark:text-void-100">
+                    <span className="font-mono text-lg font-semibold text-ink-1">
                       v{version.version}
                     </span>
-                    <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-void-500 dark:text-void-500">
+                    <span className="font-mono text-[11px] tracking-[0.15em] text-ink-3">
                       {formatDate(version.date)}
                     </span>
                     {idx === 0 && (
-                      <span className="rounded border border-neon-blue-400/50 bg-neon-blue-400/15 px-1.5 py-[2px] font-mono text-[9px] font-medium uppercase tracking-[0.15em] text-neon-blue-600 dark:text-neon-blue-400">
+                      <span className="rounded border border-accent/50 bg-accent/15 px-1.5 py-[2px] font-mono text-[9px] font-medium tracking-[0.15em] text-accent">
                         Latest
                       </span>
                     )}
@@ -196,11 +196,11 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
                     {version.changes.map((change, ci) => (
                       <li key={ci} className="flex items-start gap-3">
                         <span
-                          className={`mt-[2px] inline-flex w-20 shrink-0 items-center justify-center rounded border px-1.5 py-[3px] font-mono text-[10px] font-medium uppercase tracking-wider ${TYPE_STYLES[change.type]}`}
+                          className={`mt-[2px] inline-flex w-20 shrink-0 items-center justify-center rounded border px-1.5 py-[3px] font-mono text-[10px] font-medium ${TYPE_STYLES[change.type]}`}
                         >
                           {TYPE_LABELS[change.type]}
                         </span>
-                        <span className="text-sm leading-relaxed text-void-700 dark:text-void-300">
+                        <span className="text-sm leading-relaxed text-ink-2">
                           {change.description}
                         </span>
                       </li>
@@ -213,14 +213,14 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-center gap-2 border-t border-void-200 bg-void-50 px-6 py-3 dark:border-void-800 dark:bg-void-900/50">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-void-500 dark:text-void-500">
+        <div className="flex items-center justify-center gap-2 border-t border-line bg-surface-2 px-6 py-3">
+          <span className="font-mono text-[10px] tracking-[0.18em] text-ink-3">
             Press
           </span>
-          <kbd className="rounded border border-void-300 bg-white px-1.5 py-[1px] font-mono text-[10px] text-void-700 dark:border-void-700 dark:bg-void-850 dark:text-void-300">
+          <kbd className="rounded border border-line-strong bg-surface-1 px-1.5 py-[1px] font-mono text-[10px] text-ink-2">
             Esc
           </kbd>
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-void-500 dark:text-void-500">
+          <span className="font-mono text-[10px] tracking-[0.18em] text-ink-3">
             to close
           </span>
         </div>

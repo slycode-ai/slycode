@@ -6,5 +6,5 @@ export declare function todayDateString(): string;
 export declare function buildGeneratedFilename(opts: {
     text: string;
     voiceId: string | null;
-    format: 'ogg' | 'mp3';
+    format: 'ogg' | 'mp3' | 'wav';
 }): string;

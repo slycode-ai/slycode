@@ -111,10 +111,10 @@ export function LastReplyControl({ bridgeUrl, sessionName }: Props) {
         aria-label={isPlayingThis ? 'Playing the last spoken reply' : 'Replay the last spoken reply'}
         className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-all disabled:opacity-50 ${
           isPlayingThis
-            ? 'border-neon-blue-400/40 bg-neon-blue-400/15 text-neon-blue-400'
+            ? 'border-accent/40 bg-accent/15 text-accent'
             : error
               ? 'border-amber-400/40 bg-amber-400/10 text-amber-400/90'
-              : 'border-void-500/25 bg-void-700/50 text-void-400 hover:border-neon-blue-400/30 hover:bg-neon-blue-400/10 hover:text-neon-blue-400'
+              : 'border-void-500/25 bg-void-700/50 text-ink-3 hover:border-accent/30 hover:bg-accent/10 hover:text-accent'
         }`}
       >
         <svg className={`h-3 w-3 ${isPlayingThis ? 'motion-safe:animate-pulse' : ''}`} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">

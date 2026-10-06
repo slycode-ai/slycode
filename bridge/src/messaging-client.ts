@@ -7,11 +7,22 @@
  * POST /tts/render.
  */
 
+import type { SpeechHealth } from './speech-health.js';
+
 export interface MessagingHealth {
   configured: boolean;
   /** true/false from the service; null when unreachable or not configured */
   tts: boolean | null;
+  /** The speech-health DTO (feature 087); null when unreachable or from a pre-087 messaging service. */
+  speech: SpeechHealth | null;
   checkedAt: number;
+}
+
+/** Accept the DTO only when it has the fields every consumer relies on. */
+function parseSpeech(value: unknown): SpeechHealth | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<SpeechHealth>;
+  return typeof v.provider === 'string' && typeof v.ready === 'boolean' ? (v as SpeechHealth) : null;
 }
 
 export interface RenderRequest {
@@ -53,7 +64,7 @@ export class MessagingClient {
 
   /** Cached readiness probe: at most one request per 15 s. */
   async health(now = Date.now()): Promise<MessagingHealth> {
-    if (!this.baseUrl) return { configured: false, tts: null, checkedAt: now };
+    if (!this.baseUrl) return { configured: false, tts: null, speech: null, checkedAt: now };
     if (this.healthCache && now - this.healthCache.checkedAt < HEALTH_CACHE_MS) return this.healthCache;
     if (this.healthInFlight) return this.healthInFlight;
     this.healthInFlight = this.probe(now).finally(() => { this.healthInFlight = null; });
@@ -66,10 +77,12 @@ export class MessagingClient {
     try {
       const res = await fetch(`${this.baseUrl}/health`, { signal: ctrl.signal });
       const body = res.ok ? await res.json().catch(() => null) : null;
-      const tts = body && typeof body.tts === 'boolean' ? body.tts : null;
-      this.healthCache = { configured: true, tts, checkedAt: now };
+      const speech = parseSpeech(body?.speech);
+      // Prefer the DTO's readiness; fall back to the legacy boolean (pre-087 service).
+      const tts = speech ? speech.ready : body && typeof body.tts === 'boolean' ? body.tts : null;
+      this.healthCache = { configured: true, tts, speech, checkedAt: now };
     } catch {
-      this.healthCache = { configured: true, tts: null, checkedAt: now };
+      this.healthCache = { configured: true, tts: null, speech: null, checkedAt: now };
     } finally {
       clearTimeout(timer);
     }

@@ -5,9 +5,12 @@
  * file (and speech-limits.test.ts of its test). Change both together.
  *
  * Words are counted on the raw text TTS will actually receive: whitespace
- * tokens, minus bracketed audio tags like "[pause]" (ElevenLabs v3 tags are
- * spoken as direction, not words). Characters count everything, tags
- * included, so a tag-stuffed or CJK/no-space text is still bounded.
+ * tokens, minus audio tags — square "[pause]" / "[short pause]" (the portable
+ * vocabulary, multi-word included) and the known Gemini angle tags
+ * ("<laugh>", "<short pause>") — because tags are direction, not words
+ * (feature 087). Unknown "<...>" stays text ("x < 5" is three words).
+ * Characters count everything, tags included, so a tag-stuffed or
+ * CJK/no-space text is still bounded.
  */
 export interface SpeechCount {
     words: number;

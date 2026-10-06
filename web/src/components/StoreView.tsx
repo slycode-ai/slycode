@@ -59,42 +59,42 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
     <div className="space-y-4">
       {/* Asset sections */}
       {sections.map(({ key, label, assets }) => (
-        <div key={key} className="rounded-lg border border-void-200 bg-white shadow-(--shadow-card) dark:border-void-700 dark:bg-void-850">
+        <div key={key} className="rounded-lg border border-line bg-surface-1 shadow-(--shadow-card)">
           <button
             onClick={() => toggleSection(key)}
             className="flex w-full items-center justify-between px-4 py-3"
           >
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-void-900 dark:text-void-100">{label}</h3>
-              <span className="rounded-full bg-void-100 px-2 py-0.5 text-xs text-void-600 dark:bg-void-700 dark:text-void-300">
+              <h3 className="text-sm font-semibold text-ink-1">{label}</h3>
+              <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-ink-2">
                 {assets.length}
               </span>
             </div>
             <svg
-              className={`h-4 w-4 text-void-400 transition-transform ${expandedSections[key] ? 'rotate-180' : ''}`}
+              className={`h-4 w-4 text-ink-3 transition-transform ${expandedSections[key] ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
           {expandedSections[key] && assets.length > 0 && (
-            <div className="border-t border-void-100 dark:border-void-700">
+            <div className="border-t border-line">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-void-200 dark:border-void-700">
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Asset</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Version</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-void-500 dark:text-void-400">Description</th>
-                    <th className="px-4 py-2 text-right text-xs font-medium text-void-500 dark:text-void-400">Actions</th>
+                  <tr className="border-b border-line">
+                    <th className="px-4 py-2 text-left text-xs font-medium text-ink-3">Asset</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-ink-3">Version</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-ink-3">Description</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-ink-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {assets.map(asset => (
-                    <tr key={asset.name} className="border-b border-void-100 dark:border-void-800">
+                    <tr key={asset.name} className="border-b border-line">
                       <td className="px-4 py-2">
                         <button
                           onClick={() => setViewingAsset(asset)}
-                          className="flex items-center gap-2 text-left font-medium text-void-900 hover:text-blue-600 dark:text-void-100 dark:hover:text-blue-400"
+                          className="flex items-center gap-2 text-left font-medium text-ink-1 hover:text-accent"
                         >
                           {asset.name}
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${typeBadgeColors[asset.type]}`}>
@@ -107,12 +107,12 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
                           )}
                         </button>
                       </td>
-                      <td className="px-4 py-2 text-void-500 dark:text-void-400">
+                      <td className="px-4 py-2 text-ink-3">
                         {asset.frontmatter?.version
                           ? `v${asset.frontmatter.version}`
                           : '-'}
                       </td>
-                      <td className="px-4 py-2 text-xs text-void-500 dark:text-void-400 max-w-xs truncate">
+                      <td className="px-4 py-2 text-xs text-ink-3 max-w-xs truncate">
                         {(asset.frontmatter?.description as string) || '-'}
                       </td>
                       <td className="px-4 py-2 text-right">
@@ -121,7 +121,7 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
                             <Tooltip content="Deploy to project">
                               <button
                                 onClick={() => setDeployTarget({ name: asset.name })}
-                                className="rounded border border-neon-blue-400/30 bg-neon-blue-400/10 px-2 py-1 text-xs font-medium text-neon-blue-400 hover:bg-neon-blue-400/20"
+                                className="rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/20"
                               >
                                 Deploy
                               </button>
@@ -149,7 +149,7 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
                             <Tooltip content="Modify with LLM assistance">
                               <button
                                 onClick={() => onAssistant('modify', asset.name, asset.type)}
-                                className="rounded border border-void-600 bg-void-800 px-2 py-1 text-xs font-medium text-void-300 hover:bg-void-700 hover:text-void-200"
+                                className="rounded border border-line-strong bg-surface-1 px-2 py-1 text-xs font-medium text-ink-2 hover:bg-surface-3 hover:text-ink-1"
                               >
                                 Modify
                               </button>
@@ -164,7 +164,7 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
             </div>
           )}
           {expandedSections[key] && assets.length === 0 && (
-            <div className="border-t border-void-100 py-4 text-center text-sm text-void-500 dark:border-void-700 dark:text-void-400">
+            <div className="border-t border-line py-4 text-center text-sm text-ink-3">
               No {label.toLowerCase()} in store
             </div>
           )}
@@ -177,15 +177,15 @@ export function StoreView({ data, onFix, onAssistant, onRefresh }: StoreViewProp
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmDelete(null); }}
         >
-          <div className="mx-4 w-full max-w-sm rounded-lg border border-void-700 bg-void-850 p-5 shadow-(--shadow-overlay)">
-            <h3 className="text-sm font-semibold text-void-100">Delete from store?</h3>
-            <p className="mt-2 text-sm text-void-400">
-              This will permanently delete <strong className="text-void-200">{confirmDelete.name}</strong> ({confirmDelete.type}) from the canonical store.
+          <div className="mx-4 w-full max-w-sm rounded-lg border border-line bg-surface-2 p-5 shadow-(--shadow-overlay)">
+            <h3 className="text-sm font-semibold text-ink-1">Delete from store?</h3>
+            <p className="mt-2 text-sm text-ink-3">
+              This will permanently delete <strong className="text-ink-1">{confirmDelete.name}</strong> ({confirmDelete.type}) from the canonical store.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDelete(null)}
-                className="rounded px-3 py-1.5 text-sm text-void-400 hover:text-void-200"
+                className="rounded px-3 py-1.5 text-sm text-ink-3 hover:text-ink-1"
               >
                 Cancel
               </button>
@@ -290,19 +290,19 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 w-full max-w-sm rounded-lg border border-void-700 bg-void-850 p-5 shadow-(--shadow-overlay)">
-        <h3 className="text-sm font-semibold text-void-100">
-          Deploy MCP: <span className="text-neon-blue-400">{mcpName}</span>
+      <div className="mx-4 w-full max-w-sm rounded-lg border border-line bg-surface-2 p-5 shadow-(--shadow-overlay)">
+        <h3 className="text-sm font-semibold text-ink-1">
+          Deploy MCP: <span className="text-accent">{mcpName}</span>
         </h3>
 
         <div className="mt-4 space-y-3">
           {/* Project picker */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-void-400">Project</label>
+            <label className="mb-1 block text-xs font-medium text-ink-3">Project</label>
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
-              className="w-full rounded-md border border-void-700 bg-void-900 px-3 py-2 text-sm text-void-200 focus:border-neon-blue-400/50 focus:outline-none"
+              className="w-full rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink-1 focus:border-accent/50 focus:outline-none"
             >
               <option value="">Select project...</option>
               {projects.map(p => (
@@ -313,7 +313,7 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
 
           {/* Provider picker */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-void-400">Provider</label>
+            <label className="mb-1 block text-xs font-medium text-ink-3">Provider</label>
             <div className="flex gap-1">
               {providers.map(p => (
                 <button
@@ -321,8 +321,8 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
                   onClick={() => setSelectedProvider(p.id)}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     selectedProvider === p.id
-                      ? 'border border-neon-blue-400/40 bg-neon-blue-400/20 text-neon-blue-400'
-                      : 'border border-void-700 text-void-400 hover:border-void-600 hover:text-void-200'
+                      ? 'border border-accent/40 bg-accent/20 text-accent'
+                      : 'border border-line text-ink-3 hover:border-line-strong hover:text-ink-1'
                   }`}
                 >
                   {p.label}
@@ -335,8 +335,8 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
           {result && (
             <div className={`rounded-md border p-2 text-xs ${
               result.success
-                ? 'border-green-400/30 bg-green-400/10 text-green-400'
-                : 'border-red-400/30 bg-red-400/10 text-red-400'
+                ? 'border-green-400/30 bg-green-400/10 text-st-done'
+                : 'border-red-400/30 bg-red-400/10 text-danger-text'
             }`}>
               {result.message}
             </div>
@@ -346,14 +346,14 @@ function McpDeployDialog({ mcpName, onClose, onDeployed }: {
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded px-3 py-1.5 text-sm text-void-400 hover:text-void-200"
+            className="rounded px-3 py-1.5 text-sm text-ink-3 hover:text-ink-1"
           >
             Cancel
           </button>
           <button
             onClick={handleDeploy}
             disabled={!selectedProject || deploying}
-            className="rounded bg-neon-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {deploying ? 'Deploying...' : 'Deploy'}
           </button>

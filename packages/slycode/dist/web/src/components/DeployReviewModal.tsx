@@ -56,17 +56,17 @@ const FATE_BADGE: Record<DeployPlanFile['fate'], { label: string; cls: string; t
   },
   unchanged: {
     label: 'unchanged',
-    cls: 'bg-void-100 text-void-500 dark:bg-void-800 dark:text-void-400',
+    cls: 'bg-surface-2 text-ink-3',
     title: 'Already identical — copying changes nothing',
   },
   keep: {
     label: 'kept',
-    cls: 'bg-void-100 text-void-500 dark:bg-void-800 dark:text-void-400',
+    cls: 'bg-surface-2 text-ink-3',
     title: "Not in the skill's updatable list — the project's existing copy is never overwritten",
   },
   skipped: {
     label: 'skipped',
-    cls: 'bg-void-100 text-void-400 dark:bg-void-800 dark:text-void-500',
+    cls: 'bg-surface-2 text-ink-3',
     title: 'Symlinked source entry — the copy refuses it',
   },
 };
@@ -173,25 +173,25 @@ export function DeployReviewModal({ title, subtitle, changes, onConfirm, onClose
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-void-200 bg-white shadow-(--shadow-overlay) dark:border-void-700 dark:bg-void-850">
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-surface-1 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-void-200 px-5 py-4 dark:border-void-700">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-neon-blue-100 dark:bg-neon-blue-900/30">
-              <svg className="h-5 w-5 text-neon-blue-600 dark:text-neon-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent">
+              <svg className="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6M9 8h6M5 20h14a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v14a1 1 0 001 1z" />
               </svg>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-void-900 dark:text-void-100">{title}</h3>
-              <p className="text-sm text-void-500 dark:text-void-400">
+              <h3 className="text-lg font-semibold text-ink-1">{title}</h3>
+              <p className="text-sm text-ink-3">
                 {subtitle ?? 'Nothing is written until you apply. Kept files are never overwritten.'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-700 dark:hover:bg-void-800 dark:hover:text-void-200"
+            className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
             aria-label="Close"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -216,10 +216,10 @@ export function DeployReviewModal({ title, subtitle, changes, onConfirm, onClose
             /* Loading skeleton */
             <div className="space-y-3" aria-label="Loading deploy plan">
               {[0, 1, 2].map(i => (
-                <div key={i} className="animate-pulse rounded-lg border border-void-200 p-4 dark:border-void-700">
-                  <div className="h-4 w-48 rounded bg-void-200 dark:bg-void-700" />
-                  <div className="mt-3 h-3 w-full rounded bg-void-100 dark:bg-void-800" />
-                  <div className="mt-2 h-3 w-2/3 rounded bg-void-100 dark:bg-void-800" />
+                <div key={i} className="animate-pulse rounded-lg border border-line p-4">
+                  <div className="h-4 w-48 rounded bg-surface-3" />
+                  <div className="mt-3 h-3 w-full rounded bg-surface-2" />
+                  <div className="mt-2 h-3 w-2/3 rounded bg-surface-2" />
                 </div>
               ))}
             </div>
@@ -231,12 +231,12 @@ export function DeployReviewModal({ title, subtitle, changes, onConfirm, onClose
                   <div key={`${head.assetType}:${head.assetName}:${head.action}`}>
                     {/* Asset heading */}
                     <div className="mb-2 flex items-center gap-2">
-                      <span className="font-mono text-sm font-semibold text-void-900 dark:text-void-100">{head.assetName}</span>
-                      <span className="rounded bg-void-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-void-500 dark:bg-void-800 dark:text-void-400">
+                      <span className="font-mono text-sm font-semibold text-ink-1">{head.assetName}</span>
+                      <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
                         {head.assetType}
                       </span>
                       {head.action === 'remove' && (
-                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-600 dark:bg-red-900/40 dark:text-red-400">
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-900/40 dark:text-red-400">
                           remove
                         </span>
                       )}
@@ -254,7 +254,7 @@ export function DeployReviewModal({ title, subtitle, changes, onConfirm, onClose
                   </div>
                 );
               })}
-              <p className="text-[11px] text-void-400 dark:text-void-500">
+              <p className="text-[11px] text-ink-3">
                 Existing project files that aren&apos;t part of the store skill are never removed.
               </p>
             </div>
@@ -262,21 +262,21 @@ export function DeployReviewModal({ title, subtitle, changes, onConfirm, onClose
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-void-200 px-5 py-3 dark:border-void-700">
-          <span className="text-xs text-void-500 dark:text-void-400">
+        <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-3">
+          <span className="text-xs text-ink-3">
             {targets ? `${surviving.length} of ${targets.length} change${targets.length !== 1 ? 's' : ''} selected` : ''}
           </span>
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
-              className="rounded px-4 py-1.5 text-sm text-void-600 hover:text-void-900 dark:text-void-400 dark:hover:text-void-200"
+              className="rounded px-4 py-1.5 text-sm text-ink-2 hover:text-ink-1"
             >
               Cancel
             </button>
             <button
               onClick={handleApply}
               disabled={applying || !targets || surviving.length === 0}
-              className="rounded bg-neon-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500 disabled:opacity-50"
+              className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent disabled:opacity-50"
             >
               {applying
                 ? 'Applying...'
@@ -304,12 +304,12 @@ function TargetRow({ target, excluded, onToggle }: {
         ? 'border-red-300 dark:border-red-500/40'
         : target.conflict && excluded
           ? 'border-amber-300 dark:border-amber-500/40'
-          : 'border-void-200 dark:border-void-700'
+          : 'border-line'
     } ${excluded ? 'opacity-55' : ''}`}>
       {/* Target line */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-void-800 dark:text-void-200">{target.projectName}</span>
+          <span className="truncate text-sm font-medium text-ink-1">{target.projectName}</span>
           <span
             className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
             style={{ color: pc.color, backgroundColor: pc.bg, border: `1px solid ${pc.border}` }}
@@ -318,7 +318,7 @@ function TargetRow({ target, excluded, onToggle }: {
           </span>
           {target.targetDir && (
             <Tooltip content={target.targetDir}>
-              <span className="hidden truncate font-mono text-[11px] text-void-400 dark:text-void-500 sm:inline">
+              <span className="hidden truncate font-mono text-[11px] text-ink-3 sm:inline">
                 {target.targetDir}
               </span>
             </Tooltip>
@@ -326,7 +326,7 @@ function TargetRow({ target, excluded, onToggle }: {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {!target.error && !target.upToDate && target.files.length > 0 && (
-            <span className="hidden text-[11px] text-void-500 dark:text-void-400 md:inline">{summarize(target.files)}</span>
+            <span className="hidden text-[11px] text-ink-3 md:inline">{summarize(target.files)}</span>
           )}
           {target.error ? (
             <span className="text-[11px] font-medium text-red-500 dark:text-red-400">excluded</span>
@@ -336,7 +336,7 @@ function TargetRow({ target, excluded, onToggle }: {
               className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
                 excluded
                   ? 'border-amber-400/60 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/20'
-                  : 'border-void-300 text-void-500 hover:bg-void-100 dark:border-void-600 dark:text-void-400 dark:hover:bg-void-800'
+                  : 'border-line-strong text-ink-3 hover:bg-surface-3'
               }`}
             >
               {excluded ? 'Include anyway (overwrite newer copy)' : 'Exclude'}
@@ -345,7 +345,7 @@ function TargetRow({ target, excluded, onToggle }: {
             <Tooltip content={excluded ? 'Restore this change' : 'Drop this change from the batch'} placement="left">
             <button
               onClick={onToggle}
-              className="rounded p-1 text-void-400 hover:bg-void-100 hover:text-void-700 dark:hover:bg-void-800 dark:hover:text-void-200"
+              className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-2"
               aria-label={excluded ? `Restore ${change.assetName} for ${target.projectName}` : `Exclude ${change.assetName} for ${target.projectName}`}
             >
               {excluded ? (
@@ -384,17 +384,17 @@ function TargetRow({ target, excluded, onToggle }: {
               : 'Nothing to remove — not present at the target.'}
           </p>
         ) : change.assetType === 'mcp' ? (
-          <p className="mt-2 text-xs text-void-500 dark:text-void-400">
+          <p className="mt-2 text-xs text-ink-3">
             MCP config merge into <span className="font-mono">.mcp.json</span> — existing entries are preserved.
           </p>
         ) : target.upToDate ? (
-          <p className="mt-2 text-xs text-void-400 dark:text-void-500">
+          <p className="mt-2 text-xs text-ink-3">
             Won&apos;t be changed — already up to date.
           </p>
         ) : target.files.length > 0 ? (
-          <div className="mt-2 rounded-md border border-void-200 bg-void-50 px-3 py-2 dark:border-void-700 dark:bg-void-900/60">
+          <div className="mt-2 rounded-md border border-line bg-surface-2 px-3 py-2">
             {!target.exists && (
-              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400/80">New install</p>
+              <p className="mb-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400/80">New install</p>
             )}
             <div className="font-mono text-xs">
               {target.files.map((f, i) => {

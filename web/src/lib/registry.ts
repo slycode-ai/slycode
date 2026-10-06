@@ -10,6 +10,8 @@ import { execSync } from 'child_process';
 import path from 'path';
 import { atomicWriteFile } from './atomic-write';
 import type {
+  AttentionItem,
+  UpcomingRun,
   Registry,
   Project,
   ProjectWithBacklog,
@@ -316,17 +318,51 @@ export async function loadDashboardData(): Promise<DashboardData> {
   // Count kanban backlog cards across all projects
   let totalBacklogItems = 0;
   let activeItems = 0;
+  const needsYou: AttentionItem[] = [];
+  const upcoming: UpcomingRun[] = [];
+  const nowMs = Date.now();
+  const dayAheadMs = nowMs + 24 * 60 * 60 * 1000;
   for (const project of projects) {
     if (!project.accessible) continue;
     const kanbanPath = path.join(project.path, 'documentation', 'kanban.json');
     const board = await loadJsonFile<KanbanBoard>(kanbanPath);
     if (board?.stages) {
+      // Per-project open cards per lane, matching what the board shows
+      // (automation cards live outside the lanes).
+      const onBoard = (stage: keyof typeof board.stages) =>
+        (board.stages[stage] || []).filter(c => !c.archived && !c.automation).length;
+      project.stageCounts = {
+        backlog: onBoard('backlog'),
+        design: onBoard('design'),
+        implementation: onBoard('implementation'),
+        testing: onBoard('testing'),
+        done: onBoard('done'),
+      };
       const backlogCards = (board.stages.backlog || []).filter(c => !c.archived);
       totalBacklogItems += backlogCards.length;
       // Count active work (implementation + testing stages)
       const implCards = (board.stages.implementation || []).filter(c => !c.archived);
       const testCards = (board.stages.testing || []).filter(c => !c.archived);
       activeItems += implCards.length + testCards.length;
+
+      const ref = { projectId: project.id, projectName: project.name };
+      for (const c of testCards) {
+        if (c.automation) continue;
+        needsYou.push({ ...ref, cardId: c.id, number: c.number, title: c.title, reason: 'review', at: c.updated_at });
+      }
+      for (const cards of Object.values(board.stages)) {
+        for (const c of cards || []) {
+          const a = c.automation;
+          if (!a?.enabled || c.archived) continue;
+          if (a.lastResult === 'error') {
+            needsYou.push({ ...ref, cardId: c.id, number: c.number, title: c.title, reason: 'failed-run', detail: a.lastError, at: a.lastRun });
+          }
+          const next = a.nextRun ? Date.parse(a.nextRun) : NaN;
+          if (!isNaN(next) && next >= nowMs - 60_000 && next <= dayAheadMs) {
+            upcoming.push({ ...ref, cardId: c.id, number: c.number, title: c.title, nextRun: a.nextRun! });
+          }
+        }
+      }
     }
   }
 
@@ -359,8 +395,14 @@ export async function loadDashboardData(): Promise<DashboardData> {
   }
 
   const repoRoot = getRepoRoot();
+  // Failed runs first (something broke), then reviews, newest first within each.
+  needsYou.sort((x, y) => (x.reason === y.reason ? (y.at ?? '').localeCompare(x.at ?? '') : x.reason === 'failed-run' ? -1 : 1));
+  upcoming.sort((x, y) => x.nextRun.localeCompare(y.nextRun));
+
   return {
     projects,
+    needsYou,
+    upcoming,
     totalBacklogItems,
     activeItems,
     totalOutdatedAssets,

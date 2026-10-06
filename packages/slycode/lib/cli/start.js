@@ -43,6 +43,7 @@ const workspace_1 = require("./workspace");
 const sync_1 = require("./sync");
 const symlinks_1 = require("../platform/symlinks");
 const service_detect_1 = require("../platform/service-detect");
+const service_common_1 = require("../platform/service-common");
 function isPortInUse(port, host = '127.0.0.1') {
     return new Promise((resolve) => {
         const server = net.createServer();
@@ -332,11 +333,10 @@ async function start(_args) {
                 envVars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
         }
     }
-    const hasMessagingChannel = !!(envVars.TELEGRAM_BOT_TOKEN || envVars.SLACK_TOKEN);
-    // TTS-only workspaces (feature 086): the messaging service also hosts
-    // ElevenLabs rendering for spoken terminal replies, so an ElevenLabs key
-    // alone is reason enough to start it. services.messaging=false still wins.
-    const hasTts = !!envVars.ELEVENLABS_API_KEY;
+    // TTS-only workspaces (features 086/087): the messaging service also hosts
+    // speech rendering for spoken terminal replies, so an ElevenLabs or Gemini
+    // key alone is reason enough to start it. services.messaging=false still wins.
+    const messagingNeeded = (0, service_common_1.messagingHasWork)(envVars);
     const messagingUrl = `http://127.0.0.1:${config.ports.messaging}`;
     // Determine entry points
     // In packaged mode: node_modules/slycode/dist/{service}
@@ -395,8 +395,8 @@ async function start(_args) {
             await waitForBridgeBeforeWeb(config.ports.bridge);
         }
         // Skip messaging only when it has nothing to do: no chat channel AND no TTS
-        if (svc.name === 'Messaging' && !hasMessagingChannel && !hasTts) {
-            console.log(`  ⊘ ${svc.name}: skipped (no channels or TTS configured — add TELEGRAM_BOT_TOKEN or ELEVENLABS_API_KEY to .env)`);
+        if (svc.name === 'Messaging' && !messagingNeeded) {
+            console.log(`  ⊘ ${svc.name}: skipped (no channels or TTS configured — add TELEGRAM_BOT_TOKEN, ELEVENLABS_API_KEY or GEMINI_API_KEY to .env)`);
             continue;
         }
         // Check port availability

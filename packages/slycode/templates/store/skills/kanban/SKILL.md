@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.19.0
-updated: 2026-09-09
+version: 1.21.0
+updated: 2026-10-01
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -129,6 +129,8 @@ sly-kanban notes 0274 search "blocker"
 sly-kanban notes 0274 edit 2 "Updated note text"
 sly-kanban notes 0274 delete 3
 sly-kanban notes 0274 clear
+sly-kanban notes 0274 oldest 20                     # read the oldest 20 (before summarizing)
+sly-kanban notes 0274 summarize "..." --count 20 --agent "Claude"   # fold oldest 20 into one note
 
 # Card status — short progress label visible on the card in the web UI
 sly-kanban status 0274                              # print current status
@@ -263,8 +265,6 @@ Agent notes are a shared scratchpad on each card for passing context between age
 - OpenCode: `--agent "OpenCode"`
 - Notes added from the web UI are automatically tagged as `User`
 
-**Limits:** Max 30 notes per card, max 3000 characters per note.
-
 ```bash
 # Read notes before starting
 sly-kanban notes 0274 list
@@ -275,6 +275,29 @@ sly-kanban notes 0274 add "Completed API routes, tests passing. Frontend still n
 # Flag a blocker
 sly-kanban notes 0274 add "Build fails on node 18 — needs --experimental flag for crypto" --agent "Codex"
 ```
+
+### Limits and the hard cap
+
+- **3000 characters** per note.
+- **30 notes**: soft threshold. Every `add` from here on prints a suggestion to summarize. The add still succeeds.
+- **100 notes**: **hard cap**. `add` is refused (exit 1, `Error: note NOT added — card … is at the 100-note hard cap.`) until older notes are folded. The add that takes a card to 100 warns that the *next* add will fail.
+
+**Check that the add worked.** Run `notes add` without piping it through `tail`, `head` or `grep`. A pipe hides the exit code, and trimmed output can hide the error. Confirm the output contains `Added note #N`. Anything else means the note was **not** saved. Recover it or report it. Never move on as if it were saved.
+
+**Recovery at the cap** (or earlier, when the soft suggestion appears):
+
+```bash
+# 1. Read what you're about to fold
+sly-kanban notes 0274 oldest 20
+
+# 2. Replace those 20 with ONE summary note (max 3000 chars)
+sly-kanban notes 0274 summarize "Summary of 25 May – 12 Jun: ..." --count 20 --agent "Claude"
+
+# 3. Re-run the add that failed
+sly-kanban notes 0274 add "..." --agent "Claude"
+```
+
+`summarize` always folds the oldest N notes, so the block may already hold an earlier `[Summary]` note. Carry its points forward, because it gets replaced too. Keep what a later reader needs: decisions, fixes, open issues, recurring themes. Compress routine status lines into trends. `summarize` records the folded count and date range on the summary note. Never use `clear` or `delete` to get under the cap, because that loses the history.
 
 ## Integration with Onboard Action
 
@@ -562,22 +585,27 @@ sly-kanban create --title "Nightly test run" --type chore --automation
 sly-kanban update 0274 --automation true
 sly-kanban update 0274 --automation false
 
-# Configure automation (partial updates — only specified fields change)
-sly-kanban automation 0274 configure --schedule "0 6 * * *" --prompt "Run all tests" --provider claude
-sly-kanban automation 0274 configure --schedule "0 9 * * 1"    # just the schedule
-sly-kanban automation 0274 configure --prompt "New prompt"      # just the prompt
-sly-kanban automation 0274 configure --fresh-session true
-sly-kanban automation 0274 configure --report-messaging true
+# Configure automation (partial updates — only specified fields change).
+# Subcommand FIRST, then the card: `automation configure 0274`, not `automation 0274 configure`.
+sly-kanban automation configure 0274 --schedule "0 6 * * *" --provider claude
+sly-kanban automation configure 0274 --schedule "0 9 * * 1"    # just the schedule
+sly-kanban automation configure 0274 --fresh-session true    # new conversation every run
+sly-kanban automation configure 0274 --fresh-every 7          # resume, but start fresh once the conversation is 7 days old
+sly-kanban automation configure 0274 --fresh-session false   # resume forever (default; also clears --fresh-every)
+sly-kanban automation configure 0274 --report-messaging true
+
+# The prompt IS the card description — there is no --prompt flag (it would be ignored)
+sly-kanban update 0274 --description "Run all tests"
 
 # Enable / disable
-sly-kanban automation 0274 enable
-sly-kanban automation 0274 disable
+sly-kanban automation enable 0274
+sly-kanban automation disable 0274
 
 # Manual trigger (calls bridge API directly)
-sly-kanban automation 0274 run
+sly-kanban automation run 0274
 
 # View automation status
-sly-kanban automation 0274 status
+sly-kanban automation status 0274
 
 # List all automation cards
 sly-kanban automation list
@@ -590,6 +618,7 @@ sly-kanban automation list --tag "deploy"
 - Schedule uses cron expressions (recurring) or ISO datetime (one-shot)
 - One-shot automations auto-disable after firing, config preserved
 - "Report via messaging" toggle appends instructions for the agent to send results
+- Fresh session has three modes: every run, never, or every N days (`--fresh-every N`, 1–365). In every-N-days mode a run starts fresh once the current conversation is N calendar days old (scheduler timezone) and resumes otherwise; scheduled runs, web Run now and `automation run` all apply it. The age comes from the bridge's conversation start, which only a fresh start or a link/relink to a different conversation moves. The run header says whether the session is fresh or resumed and when the next fresh start is due.
 
 ## Cross-Card Prompt Execution
 

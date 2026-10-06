@@ -32,7 +32,7 @@ const typeBadgeColors: Record<string, string> = {
 const statusIcons: Record<AssetCellStatus, { icon: string; color: string }> = {
   current: { icon: '\u2713', color: 'text-green-500' },
   outdated: { icon: '\u26A0', color: 'text-amber-500' },
-  missing: { icon: '\u2715', color: 'text-void-400' },
+  missing: { icon: '\u2715', color: 'text-ink-3' },
 };
 
 
@@ -48,7 +48,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
 
   if (rows.length === 0) {
     return (
-      <p className="py-4 text-center text-sm text-void-500 dark:text-void-400">
+      <p className="py-4 text-center text-sm text-ink-3">
         No assets found
       </p>
     );
@@ -105,14 +105,14 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-void-200 dark:border-void-700">
-              <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left text-xs font-medium text-void-500 dark:bg-void-850 dark:text-void-400">
+            <tr className="border-b border-line">
+              <th className="sticky left-0 z-10 bg-surface-1 px-3 py-2 text-left text-xs font-medium text-ink-3">
                 Asset
               </th>
               {projects.map(p => (
                 <th
                   key={p.id}
-                  className="px-3 py-2 text-center text-xs font-medium text-void-500 dark:text-void-400"
+                  className="px-3 py-2 text-center text-xs font-medium text-ink-3"
                 >
                   {p.name}
                 </th>
@@ -139,12 +139,12 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                   }`}
                 >
                   {/* Asset name column */}
-                  <td className="sticky left-0 z-10 bg-white dark:bg-void-850">
+                  <td className="sticky left-0 z-10 bg-surface-1">
                     <div className="flex items-center gap-2 px-3 py-2">
                       {isImported ? (
                         <button
                           onClick={() => { setViewingProjectId(undefined); setViewingAsset(row); }}
-                          className="text-left font-medium text-void-900 hover:text-blue-600 dark:text-void-100 dark:hover:text-blue-400"
+                          className="text-left font-medium text-ink-1 hover:text-accent"
                         >
                           {row.name}
                         </button>
@@ -156,7 +156,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                               setViewingProjectId(sourceCell?.projectId);
                               setViewingAsset(row);
                             }}
-                            className="text-left font-medium text-void-600 hover:text-blue-600 dark:text-void-400 dark:hover:text-blue-400"
+                            className="text-left font-medium text-ink-2 hover:text-accent"
                           >
                             {row.name}
                           </button>
@@ -194,7 +194,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                               )[0];
                               onImport(row.name, row.type, best.projectId);
                             }}
-                            className="rounded border border-blue-400/30 bg-blue-400/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-400/20 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-400 dark:hover:bg-blue-400/20"
+                            className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/20 dark:border-blue-400/30 dark:bg-blue-400/10 dark:hover:bg-blue-400/20"
                           >
                             {'\u2191'} Update Store
                           </button>
@@ -206,7 +206,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                         ignoredAssets.has(ignoreKeyFn(row.name, row.type)) ? (
                           <button
                             onClick={() => onUnignore(row.name, row.type)}
-                            className="rounded-md border border-void-300 bg-void-100 px-3 py-1 text-xs font-medium text-void-500 hover:bg-void-200 dark:border-void-700 dark:bg-void-800 dark:text-void-400 dark:hover:bg-void-700"
+                            className="rounded-md border border-line-strong bg-surface-2 px-3 py-1 text-xs font-medium text-ink-3 hover:bg-surface-3"
                           >
                             Unignore
                           </button>
@@ -214,7 +214,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                           <Tooltip content="Hide from Not in Store">
                             <button
                               onClick={() => onIgnore(row.name, row.type)}
-                              className="rounded-md border border-void-300 bg-void-50 px-3 py-1 text-xs font-medium text-void-400 hover:bg-void-100 dark:border-void-700 dark:bg-void-800/50 dark:text-void-500 dark:hover:bg-void-700"
+                              className="rounded-md border border-line-strong bg-surface-2 px-3 py-1 text-xs font-medium text-ink-3 hover:bg-surface-3"
                             >
                               Ignore
                             </button>
@@ -244,7 +244,7 @@ export function AssetMatrix({ rows, projects, pendingChanges, onQueueChange, onI
                     const isProjectAhead = cell.status === 'outdated' &&
                       compareVersions(cell.projectVersion, cell.masterVersion) > 0;
                     const { icon, color } = isProjectAhead
-                      ? { icon: '\u2191', color: 'text-blue-500' }
+                      ? { icon: '\u2191', color: 'text-accent' }
                       : statusIcons[cell.status];
 
                     let bgClass = '';

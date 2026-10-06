@@ -1,5 +1,5 @@
 var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/atlas/symbols/route.js")
-R.c("server/chunks/[root-of-the-server]__0k_v0uz._.js")
+R.c("server/chunks/[root-of-the-server]__0cyi6ce._.js")
 R.c("server/chunks/[root-of-the-server]__1pxy-px._.js")
 R.c("server/chunks/node_modules_next_1zc5q0a._.js")
 R.c("server/chunks/[root-of-the-server]__15bjnu5._.js")

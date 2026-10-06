@@ -41,7 +41,7 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
   if (snapshot === null) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">Codebase Atlas</p>
+        <p className="font-mono text-[11px] text-(--cm-faint)">Codebase Atlas</p>
         <p className="animate-pulse font-mono text-[12px] text-(--cm-muted)">reading atlas…</p>
       </div>
     );
@@ -56,7 +56,7 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
     <div className="flex h-full flex-col">
       <div className={drawerExpanded ? 'hidden' : 'min-h-0 flex-1 overflow-y-auto p-6 pb-3'}>
         <div className="mx-auto max-w-[1100px]">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">Codebase Atlas · zoom level 0</p>
+        <p className="font-mono text-[11px] text-(--cm-faint)">Codebase Atlas · zoom level 0</p>
         <h1 className="mb-5 flex items-baseline text-balance text-lg font-semibold text-(--cm-text)">
           System map
           <span className="ml-3 font-mono text-[11px] font-normal text-(--cm-muted)">
@@ -67,7 +67,7 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
               <button
                 onClick={onRunFirstScan}
                 disabled={firstScanBusy}
-                className="rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[10.5px] font-normal uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
+                className="rounded-md border border-(--cm-line2) px-2.5 py-1 font-mono text-[11px] font-normal text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas) disabled:opacity-50"
               >
                 {firstScanBusy ? 'starting…' : '⟳ Refresh atlas'}
               </button>
@@ -103,11 +103,11 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
                 <h3 className="flex items-center gap-2 text-[14px] font-semibold text-(--cm-text)">
                   <span className="h-2 w-2 rounded-full" style={{ background: 'var(--hue)', boxShadow: '0 0 8px var(--hue)' }} />
                   {area.name}
-                  {area.pinned && <Tooltip content="Pinned — name survives refreshes"><span className="text-[10px] text-(--cm-faint)">📌</span></Tooltip>}
+                  {area.pinned && <Tooltip content="Pinned — name survives refreshes"><span className="text-[11px] text-(--cm-faint)">📌</span></Tooltip>}
                 </h3>
-                <p className="mt-0.5 font-mono text-[10px] text-(--cm-faint)">{area.paths.join(' · ')}</p>
-                {area.summary && <p className="mt-2 text-[11.5px] leading-relaxed text-(--cm-muted)">{area.summary}</p>}
-                <div className="mt-2.5 flex items-center gap-2.5 font-mono text-[10px] text-(--cm-faint)">
+                <p className="mt-0.5 font-mono text-[11px] text-(--cm-faint)">{area.paths.join(' · ')}</p>
+                {area.summary && <p className="mt-2 text-[12px] leading-relaxed text-(--cm-muted)">{area.summary}</p>}
+                <div className="mt-2.5 flex items-center gap-2.5 font-mono text-[11px] text-(--cm-faint)">
                   <Tooltip content={`${fresh?.churn ?? 0} commits touched this area (14 days)`}>
                     <span className="flex items-center gap-[3px]">
                       {[1, 2, 3, 4, 5].map(i => (
@@ -122,7 +122,7 @@ export function AtlasMap({ snapshot, selection, onEnterArea, onSelectArea, onOpe
           })}
         </div>
 
-        <div className="mt-4 flex justify-center gap-5 font-mono text-[10px] text-(--cm-faint)">
+        <div className="mt-4 flex justify-center gap-5 font-mono text-[11px] text-(--cm-faint)">
           <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-[2px] bg-emerald-500/50" /> analysis fresh</span>
           <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-[2px] border border-(--cm-changed) bg-amber-500/15" /> amber border — drifted since analysis</span>
           <span>▪ churn, last 14 days</span>
@@ -192,10 +192,10 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
           <>
             <div className="mb-1.5 flex items-center gap-2.5">
               <span className="h-2 w-2 rounded-full" style={{ background: area.color }} />
-              <span className="text-[13.5px] font-semibold text-(--cm-text)">{area.name}</span>
-              <span className="font-mono text-[10px] text-(--cm-faint)">{area.paths.join(' · ')}</span>
+              <span className="text-[14px] font-semibold text-(--cm-text)">{area.name}</span>
+              <span className="font-mono text-[11px] text-(--cm-faint)">{area.paths.join(' · ')}</span>
               <span
-                className={`rounded px-1.5 py-px font-sans text-[9px] font-semibold uppercase tracking-[0.08em] ${
+                className={`rounded px-1.5 py-px font-sans text-[11px] font-semibold ${
                   !fresh || !fresh.hasNode || fresh.stale
                     ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                     : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
@@ -207,14 +207,14 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 <Tooltip content="Back to project overview & key flows" placement="bottom">
                   <button
                     onClick={onDeselect}
-                    className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
+                    className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--cm-atlas) hover:text-(--cm-atlas)"
                   >
                     ‹ overview
                   </button>
                 </Tooltip>
                 <button
                   onClick={() => onEnterArea(area.id)}
-                  className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-muted) transition-all hover:border-(--hue,var(--cm-atlas))"
+                  className="rounded-md border border-(--cm-line2) px-2 py-1 font-mono text-[11px] text-(--cm-muted) transition-all hover:border-(--hue,var(--cm-atlas))"
                   style={{ ['--hue' as string]: area.color ?? 'var(--cm-atlas)' }}
                 >
                   Zoom in ⤵
@@ -231,7 +231,7 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
               </span>
             </div>
             <div className="flex min-h-0 flex-1 gap-6">
-              <div className="min-w-0 flex-[2] overflow-y-auto pr-2 text-[12.5px] leading-relaxed text-(--cm-muted)">
+              <div className="min-w-0 flex-[2] overflow-y-auto pr-2 text-[13px] leading-relaxed text-(--cm-muted)">
                 {(node?.explanation ?? 'No AI analysis for this area yet — the next refresh will write one.')
                   .split(/\n{2,}/)
                   .map((para, i) => (
@@ -240,17 +240,17 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
               </div>
               {node && node.key_files.length > 0 && (
                 <div className="w-[320px] min-w-0 flex-none overflow-y-auto">
-                  <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key files</p>
+                  <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Key files</p>
                   {node.key_files.slice(0, 8).map(k => (
                     <Tooltip key={k.path} content={k.path}>
                       <button
                         onClick={() => onOpenFile(k.path)}
                         className="block w-full rounded px-1.5 py-1 text-left hover:bg-(--cm-panel3)"
                       >
-                        <span className="block truncate font-mono text-[10.5px] text-(--cm-muted)">
+                        <span className="block truncate font-mono text-[11px] text-(--cm-muted)">
                           {k.path.split('/').slice(-2).join('/')}
                         </span>
-                        <span className="block text-[10px] leading-snug text-(--cm-faint)">{k.role}</span>
+                        <span className="block text-[11px] leading-snug text-(--cm-faint)">{k.role}</span>
                       </button>
                     </Tooltip>
                   ))}
@@ -270,7 +270,7 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 <button
                   key={id}
                   onClick={() => setTouchedTab(id)}
-                  className={`flex items-center gap-1.5 px-2.5 pb-1.5 pt-0.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                  className={`flex items-center gap-1.5 px-2.5 pb-1.5 pt-0.5 font-mono text-[11px] transition-colors ${
                     tab === id
                       ? 'text-(--cm-text) shadow-[inset_0_-2px_0_var(--cm-atlas)]'
                       : 'text-(--cm-faint) hover:text-(--cm-muted)'
@@ -291,13 +291,13 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                     <Tooltip content="Mark read — the next digest starts from here" placement="bottom">
                       <button
                         onClick={markRead}
-                        className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110"
+                        className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-1 font-mono text-[11px] text-(--cm-atlas) transition-all hover:brightness-110"
                       >
                         ✓ Mark read
                       </button>
                     </Tooltip>
                   ) : (
-                    <span className="font-mono text-[9.5px] text-(--cm-faint)">read · anchor advanced</span>
+                    <span className="font-mono text-[11px] text-(--cm-faint)">read · anchor advanced</span>
                   )
                 )}
                 <Tooltip content={expanded ? 'Close full view — back to the map' : 'Expand info panel to full view'} placement="bottom">
@@ -316,8 +316,8 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
             {tab === 'overview' && (
               <div className="flex min-h-0 flex-1 gap-8">
                 <div className="flex min-w-0 flex-[2] flex-col">
-                  <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Project overview · click an area for its explanation</p>
-                  <div className="min-h-0 flex-1 overflow-y-auto pr-2 text-[12.5px] leading-relaxed text-(--cm-muted)">
+                  <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Project overview · click an area for its explanation</p>
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-2 text-[13px] leading-relaxed text-(--cm-muted)">
                     {(root.project_overview ?? 'No project overview yet.').split(/\n{2,}/).map((para, i) => (
                       <p key={i} className="mb-2.5 last:mb-0">{para}</p>
                     ))}
@@ -325,7 +325,7 @@ function AtlasDrawer({ snapshot, selection, onOpenFile, onEnterArea, expanded, o
                 </div>
                 {root.flows && root.flows.length > 0 && (
                   <div className="flex min-w-0 flex-[2] flex-col">
-                    <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Key flows</p>
+                    <p className="mb-1 font-mono text-[11px] text-(--cm-faint)">Key flows</p>
                     <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-2">
                       {root.flows.map((f, i) => {
                         const from = root.areas.find(a => a.id === f.from);
@@ -385,7 +385,7 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
           >
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <h4 className="flex items-center gap-1.5 text-[12.5px] font-semibold text-(--cm-text)">
+                <h4 className="flex items-center gap-1.5 text-[13px] font-semibold text-(--cm-text)">
                   {area && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: area.color }} />}
                   <span className="min-w-0">{tour.title}</span>
                 </h4>
@@ -397,7 +397,7 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
                 )}
               </div>
               {stale && (
-                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-px font-sans text-[8.5px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-px font-sans text-[11px] font-semibold text-amber-600 dark:text-amber-400">
                   stale
                 </span>
               )}
@@ -405,7 +405,7 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
             <div className="mt-2 flex items-center gap-1.5">
               <button
                 onClick={() => onStartTour?.(tour.id)}
-                className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110"
+                className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[11px] text-(--cm-atlas) transition-all hover:brightness-110"
               >
                 ▶ Start
               </button>
@@ -417,7 +417,7 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
                 >
                   <button
                     onClick={() => onRefreshTour(tour.id)}
-                    className={`rounded-md border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-all ${
+                    className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-all ${
                       stale
                         ? 'border-amber-500/50 text-amber-600 hover:brightness-110 dark:text-amber-400'
                         : 'border-(--cm-line2) text-(--cm-muted) hover:border-(--cm-atlas) hover:text-(--cm-atlas)'
@@ -427,7 +427,7 @@ function ToursTab({ snapshot, tours, onStartTour, onRefreshTour, onCreateTour }:
                   </button>
                 </Tooltip>
               )}
-              <span className="ml-auto font-mono text-[9.5px] text-(--cm-faint)">
+              <span className="ml-auto font-mono text-[11px] text-(--cm-faint)">
                 {tour.steps.length} steps · {relTime(tour.updated_at)}
               </span>
             </div>
@@ -452,7 +452,7 @@ function CreateTourCard({ onCreate, soleCard }: { onCreate: (request: string) =>
   };
   return (
     <div className="flex flex-col rounded-[9px] border border-dashed border-(--cm-line2) bg-transparent p-3 transition-colors focus-within:border-(--cm-atlas)">
-      <p className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">
+      <p className="mb-1.5 font-mono text-[11px] text-(--cm-faint)">
         + New tour{soleCard ? ' — none yet' : ''}
       </p>
       <textarea
@@ -472,11 +472,11 @@ function CreateTourCard({ onCreate, soleCard }: { onCreate: (request: string) =>
         <button
           onClick={submit}
           disabled={!request.trim()}
-          className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-40"
+          className="rounded-md border border-(--cm-atlas) bg-(--cm-atlas-dim) px-2.5 py-0.5 font-mono text-[11px] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-40"
         >
           ✦ Create
         </button>
-        <span className="font-mono text-[9px] text-(--cm-faint)">the Atlas researches & writes it · Ctrl+Enter</span>
+        <span className="font-mono text-[11px] text-(--cm-faint)">the Atlas researches & writes it · Ctrl+Enter</span>
       </div>
     </div>
   );
@@ -486,7 +486,7 @@ function FreshTag({ fresh }: { fresh?: { hasNode: boolean; stale: boolean } }) {
   const stale = !fresh || !fresh.hasNode || fresh.stale;
   return (
     <span
-      className={`ml-auto rounded px-1.5 py-px font-sans text-[9px] font-semibold uppercase tracking-[0.08em] ${
+      className={`ml-auto rounded px-1.5 py-px font-sans text-[11px] font-semibold ${
         stale ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
       }`}
     >
@@ -498,7 +498,7 @@ function FreshTag({ fresh }: { fresh?: { hasNode: boolean; stale: boolean } }) {
 function FirstScanEmptyState({ onRun, busy, invalid }: { onRun: () => void; busy: boolean; invalid?: string[] }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">Codebase Atlas</p>
+      <p className="font-mono text-[11px] text-(--cm-faint)">Codebase Atlas</p>
       <h2 className="text-lg font-semibold text-(--cm-text)">No atlas yet</h2>
       {invalid ? (
         <p className="max-w-md font-mono text-[11px] text-(--cm-stale)">atlas.json is invalid: {invalid.join('; ')}</p>
@@ -512,11 +512,11 @@ function FirstScanEmptyState({ onRun, busy, invalid }: { onRun: () => void; busy
       <button
         onClick={onRun}
         disabled={busy}
-        className="rounded-lg border border-(--cm-atlas) bg-(--cm-atlas-dim) px-5 py-2 font-mono text-[12px] uppercase tracking-[0.08em] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-50"
+        className="rounded-lg border border-(--cm-atlas) bg-(--cm-atlas-dim) px-5 py-2 font-mono text-[12px] text-(--cm-atlas) transition-all hover:brightness-110 disabled:opacity-50"
       >
         {busy ? 'Starting…' : 'Run first scan'}
       </button>
-      <p className="font-mono text-[10.5px] text-(--cm-faint)">Explorer, search, symbols, and git work without it — left rail.</p>
+      <p className="font-mono text-[11px] text-(--cm-faint)">Explorer, search, symbols, and git work without it — left rail.</p>
     </div>
   );
 }

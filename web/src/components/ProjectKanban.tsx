@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { ProjectWithBacklog, KanbanCard, KanbanStage, KanbanStages, BridgeStats, Priority, ChangedCard } from '@/lib/types';
@@ -11,6 +12,7 @@ import { createPendingSave, type PendingSave } from '@/lib/pending-save';
 import { usePolling } from '@/hooks/usePolling';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { KanbanColumn } from './KanbanColumn';
+import { MobileStageBar } from './MobileStageBar';
 import { CardModal } from './CardModal';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 import { AutomationsScreen } from './AutomationsScreen';
@@ -132,6 +134,38 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   // elements are excluded by target filtering so existing click / native-DnD /
   // text-selection behavior is preserved.
   const boardScrollRef = useRef<HTMLDivElement>(null);
+
+  // The board header's rule takes the lane colours, each one peaking over the
+  // centre of its lane. Lane centres are published as --lane-c1..5 on <html>
+  // (the header is a sibling component) and tracked through resize and
+  // horizontal scroll.
+  useEffect(() => {
+    if (showAutomations) return;
+    const scroller = boardScrollRef.current;
+    const row = scroller?.firstElementChild as HTMLElement | null;
+    if (!scroller || !row) return;
+    const root = document.documentElement;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        Array.from(row.children).forEach((lane, i) => {
+          const r = lane.getBoundingClientRect();
+          root.style.setProperty(`--lane-c${i + 1}`, `${Math.round(r.left + r.width / 2)}px`);
+        });
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(row);
+    scroller.addEventListener('scroll', update, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      scroller.removeEventListener('scroll', update);
+      for (let i = 1; i <= 5; i++) root.style.removeProperty(`--lane-c${i}`);
+    };
+  }, [showAutomations, isLoaded]);
   const panStateRef = useRef<{
     startX: number;
     startScrollLeft: number;
@@ -215,6 +249,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     preferExisting?: boolean;
   } | null>(null);
   const [shortcutErr, setShortcutErr] = useState<string | null>(null);
+  // Undo for one-click stage moves from the card modal (pipeline / stage select).
+  // A single click in the pipeline once sent a card to Backlog unnoticed.
+  const [moveUndo, setMoveUndo] = useState<{
+    cardId: string; number?: number; toStage: KanbanStage;
+    fromStage: KanbanStage; fromOrder: number; fromStatus?: KanbanCard['status'];
+  } | null>(null);
+  const moveUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedShortcutParamsRef = useRef(false);
 
   // Context menu state
@@ -1071,6 +1112,56 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
     }
   };
 
+  // Card-modal moves (stage pipeline, stage select): move at once, then offer
+  // an undo for 8 s that restores the previous stage, position and status line.
+  const MOVE_UNDO_MS = 8000;
+  const handleModalMove = (cardId: string, newStage: KanbanStage) => {
+    let from: { stage: KanbanStage; card: KanbanCard } | null = null;
+    for (const s of STAGE_ORDER) {
+      const found = stages[s].find((c) => c.id === cardId);
+      if (found) { from = { stage: s, card: found }; break; }
+    }
+    if (!from || from.stage === newStage) return;
+    handleMoveCard(cardId, newStage);
+    if (moveUndoTimerRef.current) clearTimeout(moveUndoTimerRef.current);
+    setMoveUndo({
+      cardId, number: from.card.number, toStage: newStage,
+      fromStage: from.stage, fromOrder: from.card.order, fromStatus: from.card.status,
+    });
+    moveUndoTimerRef.current = setTimeout(() => setMoveUndo(null), MOVE_UNDO_MS);
+  };
+
+  const undoModalMove = () => {
+    const u = moveUndo;
+    if (!u) return;
+    if (moveUndoTimerRef.current) clearTimeout(moveUndoTimerRef.current);
+    setMoveUndo(null);
+    // A positional save keeps the disk card (and the server drops status on a
+    // stage change), so a status line to restore has to travel as an edit.
+    if (u.fromStatus) editedCardIdsRef.current.add(u.cardId);
+    else movedCardIdsRef.current.add(u.cardId);
+    setStages((prev) => {
+      let card: KanbanCard | null = null;
+      const next = { ...prev };
+      for (const s of STAGE_ORDER) {
+        const found = prev[s].find((c) => c.id === u.cardId);
+        if (found) { card = found; next[s] = prev[s].filter((c) => c.id !== u.cardId); break; }
+      }
+      if (!card) return prev;
+      const restored: KanbanCard = {
+        ...card,
+        order: u.fromOrder,
+        updated_at: new Date().toISOString(),
+        ...(u.fromStatus ? { status: u.fromStatus } : {}),
+      };
+      next[u.fromStage] = [...next[u.fromStage], restored];
+      return next;
+    });
+    if (selectedCardId === u.cardId) setSelectedStage(u.fromStage);
+  };
+
+  useEffect(() => () => { if (moveUndoTimerRef.current) clearTimeout(moveUndoTimerRef.current); }, []);
+
   // Context menu handler
   const handleCardContextMenu = useCallback((card: KanbanCard, stage: KanbanStage, e: React.MouseEvent) => {
     e.preventDefault();
@@ -1164,11 +1255,11 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             label: 'Copy',
             items: [
               ...(card.number != null
-                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { navigator.clipboard.writeText(formatCardNumber(card.number!)); } }]
+                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { copyText(formatCardNumber(card.number!)); } }]
                 : []),
-              { label: 'Card ID', onClick: () => { navigator.clipboard.writeText(card.id); } },
-              { label: 'Title', onClick: () => { navigator.clipboard.writeText(card.title); } },
-              { label: 'Description', onClick: () => { navigator.clipboard.writeText(card.description || ''); } },
+              { label: 'Card ID', onClick: () => { copyText(card.id); } },
+              { label: 'Title', onClick: () => { copyText(card.title); } },
+              { label: 'Description', onClick: () => { copyText(card.description || ''); } },
             ],
           },
         ],
@@ -1243,11 +1334,11 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             label: 'Copy',
             items: [
               ...(card.number != null
-                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { navigator.clipboard.writeText(formatCardNumber(card.number!)); } }]
+                ? [{ label: `Card number (${formatCardNumber(card.number)})`, onClick: () => { copyText(formatCardNumber(card.number!)); } }]
                 : []),
-              { label: 'Card ID', onClick: () => { navigator.clipboard.writeText(card.id); } },
-              { label: 'Title', onClick: () => { navigator.clipboard.writeText(card.title); } },
-              { label: 'Description', onClick: () => { navigator.clipboard.writeText(card.description || ''); } },
+              { label: 'Card ID', onClick: () => { copyText(card.id); } },
+              { label: 'Title', onClick: () => { copyText(card.title); } },
+              { label: 'Description', onClick: () => { copyText(card.description || ''); } },
             ],
           },
         ],
@@ -1338,10 +1429,20 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
   if (!isLoaded) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="text-void-500">Loading kanban...</div>
+        <div className="text-ink-3">Loading kanban...</div>
       </div>
     );
   }
+
+  // Cards each lane shows (archived view swaps in archived cards; automation
+  // cards live on the automations screen, not in the lanes).
+  const laneCards = Object.fromEntries(STAGE_CONFIG.map((sc) => [
+    sc.id,
+    [...stages[sc.id]]
+      .filter((card) => showArchived ? card.archived === true : (!card.archived && !card.automation))
+      .sort((a, b) => a.order - b.order),
+  ])) as Record<KanbanStage, KanbanCard[]>;
+  const laneCounts = Object.fromEntries(STAGE_CONFIG.map((sc) => [sc.id, laneCards[sc.id].length])) as Record<KanbanStage, number>;
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -1354,14 +1455,14 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
       {/* Save status indicator - absolute positioned */}
       <div className="absolute top-1 right-4 z-10 flex gap-3">
         {externalUpdate && (
-          <span className="text-xs text-blue-600 dark:text-blue-400">
+          <span className="text-xs text-accent">
             ↻ Updated externally
           </span>
         )}
         <span className={`text-xs transition-opacity ${
           saveStatus === 'idle' ? 'opacity-0 duration-500' :
           saveStatus === 'saved' ? 'opacity-60 text-green-600 dark:text-green-400 duration-500' :
-          saveStatus === 'saving' ? 'opacity-60 text-void-500 dark:text-void-400 duration-150' :
+          saveStatus === 'saving' ? 'opacity-60 text-ink-3 duration-150' :
           'opacity-100 text-red-600 dark:text-red-400 duration-150'
         }`}>
           {saveStatus === 'saving' ? '●' :
@@ -1417,7 +1518,13 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             }}
           />
         ) : (
-          /* Kanban Board */
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <MobileStageBar
+            stages={STAGE_CONFIG}
+            counts={laneCounts}
+            scrollRef={boardScrollRef}
+          />
+          {/* Kanban Board */}
           <div
             ref={boardScrollRef}
             onPointerDown={handleBoardPointerDown}
@@ -1440,9 +1547,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
                 <KanbanColumn
                   key={stageConfig.id}
                   stage={stageConfig}
-                  cards={[...stages[stageConfig.id]]
-                    .filter((card) => showArchived ? card.archived === true : (!card.archived && !card.automation))
-                    .sort((a, b) => a.order - b.order)}
+                  cards={laneCards[stageConfig.id]}
                   cardSessions={cardSessions}
                   activeCards={activeCards}
                   unseenCards={unseenCards}
@@ -1453,6 +1558,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
                 />
               ))}
             </div>
+          </div>
           </div>
         )}
 
@@ -1466,7 +1572,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
             onClose={handleCloseModal}
             onUpdate={handleUpdateCard}
             onFlushSave={isCreatingCard ? undefined : flushPendingSave}
-            onMove={handleMoveCard}
+            onMove={handleModalMove}
             onDelete={handleDeleteCard}
             isCreateMode={isCreatingCard}
             onCreate={isCreatingCard ? handleCreateCard : undefined}
@@ -1480,6 +1586,26 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           />
         )}
       </div>
+
+      {/* Undo for a card-modal stage move — above the modal overlay (z-50) */}
+      {moveUndo && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-surface-1 py-2 pl-4 pr-2 text-[13px] text-ink-1 shadow-(--shadow-overlay)"
+        >
+          <span>
+            Moved {moveUndo.number !== undefined && <span className="font-mono">{formatCardNumber(moveUndo.number)}</span>} to{' '}
+            <span className="font-medium">{STAGE_CONFIG.find((s) => s.id === moveUndo.toStage)?.label ?? moveUndo.toStage}</span>
+          </span>
+          <button
+            type="button"
+            onClick={undoModalMove}
+            className="rounded-md px-2.5 py-1 text-[13px] font-medium text-accent transition-colors hover:bg-accent/10 focus-visible:bg-accent/10 focus-visible:outline-none"
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       {/* Shortcut-not-found toast */}
       {shortcutErr && (
@@ -1521,11 +1647,11 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
           if (contextDeleteCard) handleContextDelete(contextDeleteCard.id);
         }}
         title="Delete Card"
-        message={contextDeleteCard ? <>Are you sure you want to permanently delete <span className="font-medium text-void-900 dark:text-void-200">&quot;{contextDeleteCard.title}&quot;</span>? This action cannot be undone.</> : ''}
+        message={contextDeleteCard ? <>Are you sure you want to permanently delete <span className="font-medium text-ink-1">&quot;{contextDeleteCard.title}&quot;</span>? This action cannot be undone.</> : ''}
       />
 
       {/* Copyright notice — centered under backlog column (w-72 + p-4 offset) */}
-      <div className="pointer-events-none absolute bottom-[1.2px] left-4 w-72 text-center text-[10px] text-void-400 dark:text-void-600">
+      <div className="pointer-events-none absolute bottom-[1.2px] left-4 w-72 text-center text-[10px] text-ink-3">
         &copy; 2026 SlyCode (slycode.ai). All rights reserved.
       </div>
     </div>

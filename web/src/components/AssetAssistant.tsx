@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useState, useEffect } from 'react';
 import type { ProviderId, AssetType } from '@/lib/types';
 
@@ -68,7 +69,7 @@ export function AssetAssistant({
   async function handleCopy() {
     if (!prompt) return;
     try {
-      await navigator.clipboard.writeText(prompt);
+      await copyText(prompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* fallback */ }
@@ -100,12 +101,12 @@ export function AssetAssistant({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-void-700 bg-void-850 shadow-(--shadow-overlay)">
+      <div className="mx-4 flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-line bg-surface-1 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-void-700 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
-            <h3 className="text-lg font-semibold text-void-100">{title}</h3>
-            <p className="mt-0.5 text-sm text-void-400">
+            <h3 className="text-lg font-semibold text-ink-1">{title}</h3>
+            <p className="mt-0.5 text-sm text-ink-3">
               {isCreate
                 ? 'Design a new asset with LLM assistance'
                 : 'Modify an existing asset with LLM assistance'}
@@ -113,7 +114,7 @@ export function AssetAssistant({
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-void-400 hover:bg-void-800 hover:text-void-200"
+            className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -130,7 +131,7 @@ export function AssetAssistant({
               {/* Asset type selector */}
               {isCreate && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-void-400">Asset Type</label>
+                  <label className="mb-1 block text-xs font-medium text-ink-3">Asset Type</label>
                   <div className="flex gap-1">
                     {assetTypeOptions.map(t => (
                       <button
@@ -138,8 +139,8 @@ export function AssetAssistant({
                         onClick={() => setSelectedType(t.id)}
                         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                           selectedType === t.id
-                            ? 'border border-neon-blue-400/40 bg-neon-blue-400/20 text-neon-blue-400'
-                            : 'border border-void-700 text-void-400 hover:border-void-600 hover:text-void-200'
+                            ? 'border border-accent/40 bg-accent/20 text-accent'
+                            : 'border border-line text-ink-3 hover:border-line-strong hover:text-ink-1'
                         }`}
                       >
                         {t.label}
@@ -151,14 +152,14 @@ export function AssetAssistant({
 
               {/* Name */}
               <div>
-                <label className="mb-1 block text-xs font-medium text-void-400">Name</label>
+                <label className="mb-1 block text-xs font-medium text-ink-3">Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={!isCreate}
                   placeholder="e.g. code-review, testing-helper"
-                  className="w-full rounded-md border border-void-700 bg-void-900 px-3 py-2 text-sm text-void-200 placeholder-void-500 focus:border-neon-blue-400/50 focus:outline-none disabled:opacity-60"
+                  className="w-full rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent/50 focus:outline-none disabled:opacity-60"
                   data-voice-target
                 />
               </div>
@@ -166,7 +167,7 @@ export function AssetAssistant({
               {/* Description (create) or Changes (modify) */}
               {isCreate ? (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-void-400">
+                  <label className="mb-1 block text-xs font-medium text-ink-3">
                     What should this {selectedType} do?
                   </label>
                   <textarea
@@ -176,13 +177,13 @@ export function AssetAssistant({
                       ? "Name or URL of the MCP server package (e.g. @anthropic/mcp-server-filesystem, github.com/org/mcp-server)..."
                       : "Describe the purpose, behavior, and key features..."}
                     rows={5}
-                    className="w-full rounded-md border border-void-700 bg-void-900 px-3 py-2 text-sm text-void-200 placeholder-void-500 focus:border-neon-blue-400/50 focus:outline-none"
+                    className="w-full rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent/50 focus:outline-none"
                     data-voice-target
                   />
                 </div>
               ) : (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-void-400">
+                  <label className="mb-1 block text-xs font-medium text-ink-3">
                     What changes do you want?
                   </label>
                   <textarea
@@ -190,7 +191,7 @@ export function AssetAssistant({
                     onChange={(e) => setChanges(e.target.value)}
                     placeholder="Describe what to change, add, or improve... (leave empty for general review)"
                     rows={5}
-                    className="w-full rounded-md border border-void-700 bg-void-900 px-3 py-2 text-sm text-void-200 placeholder-void-500 focus:border-neon-blue-400/50 focus:outline-none"
+                    className="w-full rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink-1 placeholder:text-ink-3 focus:border-accent/50 focus:outline-none"
                     data-voice-target
                   />
                 </div>
@@ -200,7 +201,7 @@ export function AssetAssistant({
               <button
                 onClick={generatePrompt}
                 disabled={!canGenerate}
-                className="rounded-md border border-neon-blue-400/40 bg-neon-blue-400/15 px-4 py-2 text-sm font-medium text-neon-blue-400 hover:bg-neon-blue-400/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-md border border-accent/40 bg-accent/15 px-4 py-2 text-sm font-medium text-accent hover:bg-accent/25 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Generate Prompt
               </button>
@@ -209,16 +210,16 @@ export function AssetAssistant({
 
           {loading && (
             <div className="flex items-center justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-void-600 border-t-neon-blue-400" />
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-line-strong border-t-neon-blue-400" />
             </div>
           )}
 
           {error && (
             <div className="space-y-3">
-              <div className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-400">{error}</div>
+              <div className="rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-danger-text">{error}</div>
               <button
                 onClick={() => { setError(null); setPrompt(null); }}
-                className="text-sm text-void-400 hover:text-void-200"
+                className="text-sm text-ink-3 hover:text-ink-1"
               >
                 Back
               </button>
@@ -227,21 +228,21 @@ export function AssetAssistant({
 
           {prompt && (
             <div className="space-y-3">
-              <p className="text-sm text-void-300">
+              <p className="text-sm text-ink-2">
                 {isCreate ? 'Creation' : 'Modification'} prompt ready:
               </p>
               <textarea
                 readOnly
                 value={prompt}
-                className="h-64 w-full rounded-md border border-void-700 bg-void-900 p-3 font-mono text-xs text-void-300 focus:outline-none"
+                className="h-64 w-full rounded-md border border-line bg-surface-2 p-3 font-mono text-xs text-ink-2 focus:outline-none"
               />
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 border-t border-void-700 px-5 py-3">
-          <button onClick={onClose} className="rounded px-4 py-1.5 text-sm text-void-400 hover:text-void-200">
+        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
+          <button onClick={onClose} className="rounded px-4 py-1.5 text-sm text-ink-3 hover:text-ink-1">
             {prompt ? 'Close' : 'Cancel'}
           </button>
           {prompt && (
@@ -249,14 +250,14 @@ export function AssetAssistant({
               <button
                 onClick={handleCopy}
                 className={`rounded px-3 py-1.5 text-sm font-medium ${
-                  copied ? 'bg-green-400/20 text-green-400' : 'bg-void-800 text-void-300 hover:bg-void-700'
+                  copied ? 'bg-green-400/20 text-st-done' : 'bg-surface-1 text-ink-2 hover:bg-surface-3'
                 }`}
               >
                 {copied ? 'Copied!' : 'Copy'}
               </button>
               <button
                 onClick={handleRunInTerminal}
-                className="rounded bg-neon-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-neon-blue-500"
+                className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent"
               >
                 Run in Terminal
               </button>

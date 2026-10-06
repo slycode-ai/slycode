@@ -313,12 +313,12 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
     }
 
     return (
-      <div className="flex items-center justify-between border-b border-void-200 px-6 py-4 dark:border-void-700">
+      <div className="flex items-center justify-between border-b border-line px-6 py-4">
         <div className="flex items-center gap-3">
           {nav.level !== 'list' && (
             <button
               onClick={goBack}
-              className="rounded p-1 hover:bg-void-100 dark:hover:bg-void-700"
+              className="rounded p-1 hover:bg-surface-3"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -330,7 +330,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
 
         <div className="flex items-center gap-3">
           {saveStatus === 'saving' && (
-            <span className="text-sm text-void-500">Saving...</span>
+            <span className="text-sm text-ink-3">Saving...</span>
           )}
           {saveStatus === 'saved' && (
             <span className="text-sm text-green-600 dark:text-green-400">Saved</span>
@@ -343,7 +343,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
           <Tooltip content="Refresh commands" placement="bottom">
             <button
               onClick={() => loadData(true)}
-              className="rounded p-1 hover:bg-void-100 dark:hover:bg-void-700"
+              className="rounded p-1 hover:bg-surface-3"
               aria-label="Refresh commands"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -354,7 +354,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
 
           <button
             onClick={onClose}
-            className="rounded p-1 hover:bg-void-100 dark:hover:bg-void-700"
+            className="rounded p-1 hover:bg-surface-3"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -370,7 +370,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
     if (loading) {
       return (
         <div className="flex h-full items-center justify-center">
-          <span className="text-void-500">Loading configuration...</span>
+          <span className="text-ink-3">Loading configuration...</span>
         </div>
       );
     }
@@ -386,7 +386,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
     if (!commandsConfig || !classes) {
       return (
         <div className="flex h-full items-center justify-center">
-          <span className="text-void-500">No configuration found</span>
+          <span className="text-ink-3">No configuration found</span>
         </div>
       );
     }
@@ -396,13 +396,13 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
         return (
           <div className="flex flex-col h-full">
             {/* Tab bar */}
-            <div className="flex border-b border-void-200 dark:border-void-700 px-6">
+            <div className="flex border-b border-line px-6">
               <button
                 onClick={() => setListTab('commands')}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   listTab === 'commands'
-                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-void-500 hover:text-void-700 dark:hover:text-void-300'
+                    ? 'border-accent text-accent'
+                    : 'border-transparent text-ink-3 hover:text-ink-2'
                 }`}
               >
                 Commands
@@ -411,8 +411,8 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
                 onClick={() => setListTab('classes')}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   listTab === 'classes'
-                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-void-500 hover:text-void-700 dark:hover:text-void-300'
+                    ? 'border-accent text-accent'
+                    : 'border-transparent text-ink-3 hover:text-ink-2'
                 }`}
               >
                 Classes
@@ -420,10 +420,10 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
               {actionUpdateCount > 0 && onShowActionUpdates && (
                 <button
                   onClick={onShowActionUpdates}
-                  className="ml-auto px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-neon-blue-500 hover:text-neon-blue-400 flex items-center gap-1.5"
+                  className="ml-auto px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-accent hover:text-accent flex items-center gap-1.5"
                 >
                   Updates
-                  <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-neon-blue-500 px-1.5 text-[11px] font-bold text-white">
+                  <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">
                     {actionUpdateCount}
                   </span>
                 </button>
@@ -492,17 +492,17 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
   // Render assistant panel with actual terminal
   const renderAssistantPanel = () => (
     <div
-      className={`border-t border-void-200 dark:border-void-700 transition-all duration-300 ${
+      className={`border-t border-line transition-all duration-300 ${
         assistantExpanded ? 'h-[60%]' : 'h-12'
       }`}
     >
       <button
         onClick={() => setAssistantExpanded(!assistantExpanded)}
-        className="flex w-full items-center justify-between px-6 py-3 hover:bg-void-50 dark:hover:bg-void-800"
+        className="flex w-full items-center justify-between px-6 py-3 hover:bg-surface-3"
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Action Assistant</span>
-          <span className="text-xs text-void-400">(Terminal for configuring actions)</span>
+          <span className="text-xs text-ink-3">(Terminal for configuring actions)</span>
         </div>
         <svg
           className={`h-4 w-4 transition-transform ${assistantExpanded ? 'rotate-180' : ''}`}
@@ -556,7 +556,7 @@ export function SlyActionConfigModal({ onClose, projectId: _projectId = '', proj
       }}
     >
       <div
-        className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-(--shadow-overlay) dark:bg-void-900"
+        className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden rounded-xl bg-surface-1 shadow-(--shadow-overlay)"
         onClick={(e) => e.stopPropagation()}
       >
         {renderHeader()}
@@ -650,7 +650,7 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
           <div key={group} className="mb-4">
             <button
               onClick={() => toggleGroup(group)}
-              className="flex items-center gap-2 w-full text-left py-2 px-3 bg-void-100 dark:bg-void-800 rounded-t-lg hover:bg-void-200 dark:hover:bg-void-700"
+              className="flex items-center gap-2 w-full text-left py-2 px-3 bg-surface-2 rounded-t-lg hover:bg-surface-3"
             >
               <svg
                 className={`h-4 w-4 transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
@@ -661,13 +661,13 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               <span className="font-medium text-sm">{group}</span>
-              <span className="text-xs text-void-500">({cmds.length})</span>
+              <span className="text-xs text-ink-3">({cmds.length})</span>
             </button>
 
             {!isCollapsed && (
-              <table className="w-full border border-t-0 border-void-200 dark:border-void-700 rounded-b-lg overflow-hidden">
+              <table className="w-full border border-t-0 border-line rounded-b-lg overflow-hidden">
                 <thead>
-                  <tr className="border-b border-void-200 text-left text-xs text-void-500 dark:border-void-700 bg-void-50 dark:bg-void-800/50">
+                  <tr className="border-b border-line text-left text-xs text-ink-3 bg-surface-2">
                     <th className="py-2 px-3 font-medium">Name</th>
                     <th className="py-2 px-3 font-medium">Label</th>
                     <th className="py-2 px-3 font-medium">Placement</th>
@@ -681,7 +681,7 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
                       <tr
                         key={id}
                         onClick={() => onSelectCommand(id)}
-                        className="cursor-pointer border-b border-void-100 hover:bg-void-50 dark:border-void-800 dark:hover:bg-void-800 last:border-b-0"
+                        className="cursor-pointer border-b border-line hover:bg-surface-3 last:border-b-0"
                       >
                         <td className="py-2 px-3 font-mono text-xs">{id}</td>
                         <td className="py-2 px-3 text-sm relative group">
@@ -698,7 +698,7 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
                           </span>
                         </td>
                         <td className="py-2 px-3 text-right">
-                          <svg className="inline h-3 w-3 text-void-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="inline h-3 w-3 text-ink-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                           </svg>
                         </td>
@@ -713,38 +713,38 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
       })}
 
       {showNewCommand ? (
-        <div className="mt-4 p-4 border border-void-300 dark:border-void-600 rounded-lg bg-void-50 dark:bg-void-800">
+        <div className="mt-4 p-4 border border-line-strong rounded-lg bg-surface-2">
           <h3 className="text-sm font-medium mb-3">Create New Command</h3>
           <div className="flex gap-3 mb-3">
             <div className="flex-1">
-              <label className="block text-xs text-void-500 mb-1">Command ID</label>
+              <label className="block text-xs text-ink-3 mb-1">Command ID</label>
               <input
                 type="text"
                 value={newCommandId}
                 onChange={(e) => setNewCommandId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
                 placeholder="my-command"
-                className="w-full rounded border border-void-300 px-2 py-1.5 text-sm font-mono dark:border-void-600 dark:bg-void-700"
+                className="w-full rounded border border-line-strong px-2 py-1.5 text-sm font-mono dark:bg-void-700"
                 data-voice-target
                 autoFocus
               />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-void-500 mb-1">Label</label>
+              <label className="block text-xs text-ink-3 mb-1">Label</label>
               <input
                 type="text"
                 value={newCommandLabel}
                 onChange={(e) => setNewCommandLabel(e.target.value)}
                 placeholder="My Command"
-                className="w-full rounded border border-void-300 px-2 py-1.5 text-sm dark:border-void-600 dark:bg-void-700"
+                className="w-full rounded border border-line-strong px-2 py-1.5 text-sm dark:bg-void-700"
                 data-voice-target
               />
             </div>
             <div className="w-40">
-              <label className="block text-xs text-void-500 mb-1">Group</label>
+              <label className="block text-xs text-ink-3 mb-1">Group</label>
               <select
                 value={newCommandGroup}
                 onChange={(e) => setNewCommandGroup(e.target.value)}
-                className="w-full rounded border border-void-300 px-2 py-1.5 text-sm dark:border-void-600 dark:bg-void-700"
+                className="w-full rounded border border-line-strong px-2 py-1.5 text-sm dark:bg-void-700"
               >
                 <option value="">Ungrouped</option>
                 {existingGroups.map(g => (
@@ -756,14 +756,14 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
           <div className="flex justify-end gap-2">
             <button
               onClick={() => setShowNewCommand(false)}
-              className="rounded px-3 py-1.5 text-sm hover:bg-void-200 dark:hover:bg-void-600"
+              className="rounded px-3 py-1.5 text-sm hover:bg-surface-3"
             >
               Cancel
             </button>
             <button
               onClick={handleCreateCommand}
               disabled={!newCommandId.trim() || !newCommandLabel.trim()}
-              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:bg-primary/90 disabled:opacity-50"
             >
               Create
             </button>
@@ -773,7 +773,7 @@ function CommandsTable({ commands, onSelectCommand, onCreateCommand, existingGro
         <div className="mt-4 flex justify-end">
           <button
             onClick={() => setShowNewCommand(true)}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary hover:bg-primary/90"
           >
             + New Command
           </button>
@@ -844,7 +844,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
 
   return (
     <div className="p-6 space-y-3">
-      <p className="text-xs text-void-400 mb-4">
+      <p className="text-xs text-ink-3 mb-4">
         Assign commands to terminal classes and drag to reorder. The order here determines the button order in the UI.
       </p>
 
@@ -854,11 +854,11 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
         const unassigned = allCommandIds.filter(id => !assigned.includes(id));
 
         return (
-          <div key={cls.id} className="border border-void-200 dark:border-void-700 rounded-lg overflow-hidden">
+          <div key={cls.id} className="border border-line rounded-lg overflow-hidden">
             {/* Accordion header */}
             <button
               onClick={() => setExpandedClass(isExpanded ? null : cls.id)}
-              className="flex items-center justify-between w-full px-4 py-3 bg-void-50 dark:bg-void-800 hover:bg-void-100 dark:hover:bg-void-700 text-left"
+              className="flex items-center justify-between w-full px-4 py-3 bg-surface-2 hover:bg-surface-3 text-left"
             >
               <div className="flex items-center gap-2">
                 <svg
@@ -870,22 +870,22 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
                 <span className="font-medium text-sm">{cls.name}</span>
-                <span className="text-xs text-void-400 font-mono">({cls.id})</span>
+                <span className="text-xs text-ink-3 font-mono">({cls.id})</span>
               </div>
-              <span className="text-xs text-void-500">
+              <span className="text-xs text-ink-3">
                 {assigned.length} command{assigned.length !== 1 ? 's' : ''}
               </span>
             </button>
 
             {/* Expanded content */}
             {isExpanded && (
-              <div className="border-t border-void-200 dark:border-void-700">
+              <div className="border-t border-line">
                 {assigned.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-void-400 italic">
+                  <div className="px-4 py-3 text-sm text-ink-3 italic">
                     No commands assigned
                   </div>
                 ) : (
-                  <ul className="divide-y divide-void-100 dark:divide-void-800">
+                  <ul className="divide-y divide-line">
                     {assigned.map((cmdId, index) => {
                       const cmd = commands[cmdId];
                       const isDragging = dragState?.classId === cls.id && dragState.fromIndex === index;
@@ -901,10 +901,10 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                           onDragEnd={handleDragEnd}
                           className={`flex items-center gap-2 px-4 py-2 text-sm ${
                             isDragging ? 'opacity-30' : ''
-                          } ${isDragOver ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-void-50 dark:hover:bg-void-800'}`}
+                          } ${isDragOver ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-surface-3'}`}
                         >
                           {/* Drag handle */}
-                          <span className="cursor-grab text-void-400 hover:text-void-600 dark:hover:text-void-300 select-none">
+                          <span className="cursor-grab text-ink-3 hover:text-ink-2 select-none">
                             <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                               <circle cx="9" cy="6" r="1.5" />
                               <circle cx="15" cy="6" r="1.5" />
@@ -916,10 +916,10 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                           </span>
 
                           {/* Order number */}
-                          <span className="text-xs text-void-400 w-5 text-right">{index + 1}.</span>
+                          <span className="text-xs text-ink-3 w-5 text-right">{index + 1}.</span>
 
                           {/* Command info */}
-                          <span className="font-mono text-xs text-void-500">{cmdId}</span>
+                          <span className="font-mono text-xs text-ink-3">{cmdId}</span>
                           <span className="text-void-300 dark:text-void-600">-</span>
                           <span className="flex-1 truncate">{cmd?.label || cmdId}</span>
 
@@ -936,7 +936,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                           <Tooltip content="Remove from this class">
                             <button
                               onClick={() => removeCommand(cls.id, cmdId)}
-                              className="rounded p-0.5 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+                              className="rounded p-0.5 text-ink-3 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                               aria-label="Remove from this class"
                             >
                               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -951,7 +951,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                 )}
 
                 {/* Add command dropdown */}
-                <div className="px-4 py-2 border-t border-void-100 dark:border-void-800">
+                <div className="px-4 py-2 border-t border-line">
                   {addingTo === cls.id ? (
                     <div className="flex items-center gap-2">
                       <select
@@ -961,7 +961,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                           if (e.target.value) addCommand(cls.id, e.target.value);
                         }}
                         onBlur={() => setAddingTo(null)}
-                        className="flex-1 rounded border border-void-300 px-2 py-1 text-sm dark:border-void-600 dark:bg-void-800"
+                        className="flex-1 rounded border border-line-strong px-2 py-1 text-sm dark:bg-void-800"
                       >
                         <option value="" disabled>Select command...</option>
                         {(() => {
@@ -989,7 +989,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                       </select>
                       <button
                         onClick={() => setAddingTo(null)}
-                        className="text-xs text-void-500 hover:text-void-700 dark:hover:text-void-300"
+                        className="text-xs text-ink-3 hover:text-ink-2"
                       >
                         Cancel
                       </button>
@@ -998,7 +998,7 @@ function ClassAssignments({ commands, classAssignments, classes, onUpdate }: Cla
                     <button
                       onClick={() => setAddingTo(cls.id)}
                       disabled={unassigned.length === 0}
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1 text-xs text-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1113,28 +1113,28 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
       {/* Row 1: Identity */}
       <div className="flex gap-3 mb-3">
         <div className="w-36 flex-shrink-0">
-          <label className="block text-xs font-medium text-void-500 mb-1">Name</label>
+          <label className="block text-xs font-medium text-ink-3 mb-1">Name</label>
           <input
             type="text"
             value={commandId}
             readOnly
-            className="w-full rounded border border-void-300 bg-void-50 px-2 py-1.5 font-mono text-sm dark:border-void-600 dark:bg-void-800"
+            className="w-full rounded border border-line-strong bg-surface-2 px-2 py-1.5 font-mono text-sm"
           />
         </div>
         <div className="w-32 flex-shrink-0">
-          <label className="block text-xs font-medium text-void-500 mb-1">Label</label>
+          <label className="block text-xs font-medium text-ink-3 mb-1">Label</label>
           <input
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onFocus={() => onEditingChange?.(true)}
             onBlur={() => onEditingChange?.(false)}
-            className="w-full rounded border border-void-300 px-2 py-1.5 text-sm dark:border-void-600 dark:bg-void-800"
+            className="w-full rounded border border-line-strong px-2 py-1.5 text-sm dark:bg-void-800"
             data-voice-target
           />
         </div>
         <div className="w-36 flex-shrink-0 relative">
-          <label className="block text-xs font-medium text-void-500 mb-1">Group</label>
+          <label className="block text-xs font-medium text-ink-3 mb-1">Group</label>
           <input
             type="text"
             value={group}
@@ -1142,11 +1142,11 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
             onFocus={() => { setShowGroupDropdown(true); onEditingChange?.(true); }}
             onBlur={() => { setTimeout(() => setShowGroupDropdown(false), 150); onEditingChange?.(false); }}
             placeholder="Ungrouped"
-            className="w-full rounded border border-void-300 px-2 py-1.5 text-sm dark:border-void-600 dark:bg-void-800"
+            className="w-full rounded border border-line-strong px-2 py-1.5 text-sm dark:bg-void-800"
             data-voice-target
           />
           {showGroupDropdown && existingGroups.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-void-800 border border-void-300 dark:border-void-600 rounded shadow-(--shadow-overlay) z-10 max-h-32 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-surface-1 border border-line-strong rounded shadow-(--shadow-overlay) z-10 max-h-32 overflow-y-auto">
               {existingGroups.map((g) => (
                 <button
                   key={g}
@@ -1156,7 +1156,7 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
                     setGroup(g);
                     setShowGroupDropdown(false);
                   }}
-                  className="w-full text-left px-2 py-1 text-sm hover:bg-void-100 dark:hover:bg-void-700"
+                  className="w-full text-left px-2 py-1 text-sm hover:bg-surface-3"
                 >
                   {g}
                 </button>
@@ -1165,33 +1165,33 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
           )}
         </div>
         <div className="flex-1">
-          <label className="block text-xs font-medium text-void-500 mb-1">Description</label>
+          <label className="block text-xs font-medium text-ink-3 mb-1">Description</label>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             onFocus={() => onEditingChange?.(true)}
             onBlur={() => onEditingChange?.(false)}
-            className="w-full rounded border border-void-300 px-2 py-1.5 text-sm dark:border-void-600 dark:bg-void-800"
+            className="w-full rounded border border-line-strong px-2 py-1.5 text-sm dark:bg-void-800"
             data-voice-target
           />
         </div>
       </div>
 
       {/* Row 2: Placement + Scope (compact inline) */}
-      <div className="flex items-center gap-4 mb-3 py-2 px-3 rounded-lg bg-void-50 dark:bg-void-800/50 border border-void-100 dark:border-void-700/50">
+      <div className="flex items-center gap-4 mb-3 py-2 px-3 rounded-lg bg-surface-2 border border-line/50">
         {/* Placement toggle group */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-void-500 uppercase tracking-wide">Placement</span>
-          <div className="flex rounded-md border border-void-200 dark:border-void-600 overflow-hidden">
+          <span className="text-xs font-medium text-ink-3">Placement</span>
+          <div className="flex rounded-md border border-line overflow-hidden">
             {PLACEMENT_OPTIONS.map((opt) => (
               <button
                 key={opt.id}
                 onClick={() => setPlacement(opt.id)}
                 className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                   placement === opt.id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white hover:bg-void-50 dark:bg-void-800 dark:hover:bg-void-700 text-void-600 dark:text-void-300'
+                    ? 'bg-primary text-on-primary'
+                    : 'bg-surface-1 hover:bg-surface-3 text-ink-2'
                 }`}
               >
                 {opt.label}
@@ -1201,18 +1201,18 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
         </div>
 
         {/* Divider */}
-        <div className="h-5 w-px bg-void-200 dark:bg-void-600" />
+        <div className="h-5 w-px bg-surface-3" />
 
         {/* Scope */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-void-500 uppercase tracking-wide">Scope</span>
-          <div className="flex rounded-md border border-void-200 dark:border-void-600 overflow-hidden">
+          <span className="text-xs font-medium text-ink-3">Scope</span>
+          <div className="flex rounded-md border border-line overflow-hidden">
             <button
               onClick={() => setScope('global')}
               className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                 scope === 'global'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white hover:bg-void-50 dark:bg-void-800 dark:hover:bg-void-700 text-void-600 dark:text-void-300'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-1 hover:bg-surface-3 text-ink-2'
               }`}
             >
               All Projects
@@ -1221,8 +1221,8 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
               onClick={() => setScope('specific')}
               className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                 scope === 'specific'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white hover:bg-void-50 dark:bg-void-800 dark:hover:bg-void-700 text-void-600 dark:text-void-300'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-1 hover:bg-surface-3 text-ink-2'
               }`}
             >
               Specific
@@ -1234,7 +1234,7 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
             <>
               <button
                 onClick={() => setProjectsExpanded(!projectsExpanded)}
-                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent"
               >
                 {selectedProjects.length > 0
                   ? `${selectedProjects.length} project${selectedProjects.length !== 1 ? 's' : ''}`
@@ -1261,8 +1261,8 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
               key={project}
               className={`flex items-center gap-1 rounded border px-2 py-0.5 cursor-pointer text-xs ${
                 selectedProjects.includes(project)
-                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                  : 'border-void-200 hover:bg-void-50 dark:border-void-700'
+                  ? 'border-accent bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-line hover:bg-void-50'
               }`}
             >
               <input
@@ -1280,9 +1280,9 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
       {/* Prompt Template */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="flex items-center justify-between mb-1">
-          <label className="text-xs font-medium text-void-500">Prompt Template</label>
+          <label className="text-xs font-medium text-ink-3">Prompt Template</label>
           <div className="flex gap-1.5">
-            <span className="text-xs text-void-400 mr-1">Insert:</span>
+            <span className="text-xs text-ink-3 mr-1">Insert:</span>
             {TEMPLATE_VARIABLES.map((v) => (
               <button
                 key={v.key}
@@ -1300,7 +1300,7 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
           onChange={(e) => setPromptText(e.target.value)}
           onFocus={() => onEditingChange?.(true)}
           onBlur={() => onEditingChange?.(false)}
-          className="flex-1 w-full rounded-lg border border-void-300 px-3 py-2 text-sm dark:border-void-600 dark:bg-void-800 resize-none font-mono"
+          className="flex-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm dark:bg-void-800 resize-none font-mono"
           placeholder="Enter the prompt template for this command..."
           data-voice-target
         />
@@ -1322,7 +1322,7 @@ function CommandEdit({ commandId, command, existingGroups, availableProjects, on
             </button>
             <button
               onClick={() => setShowDeleteConfirm(false)}
-              className="rounded bg-void-200 px-3 py-1.5 text-sm font-medium text-void-700 hover:bg-void-300 dark:bg-void-700 dark:text-void-200 dark:hover:bg-void-600"
+              className="rounded bg-surface-3 px-3 py-1.5 text-sm font-medium text-ink-2 hover:bg-surface-3"
             >
               Cancel
             </button>

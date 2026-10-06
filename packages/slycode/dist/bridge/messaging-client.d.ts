@@ -6,10 +6,13 @@
  * the TTS readiness probe behind GET /speaker and, in the speak route, for
  * POST /tts/render.
  */
+import type { SpeechHealth } from './speech-health.js';
 export interface MessagingHealth {
     configured: boolean;
     /** true/false from the service; null when unreachable or not configured */
     tts: boolean | null;
+    /** The speech-health DTO (feature 087); null when unreachable or from a pre-087 messaging service. */
+    speech: SpeechHealth | null;
     checkedAt: number;
 }
 export interface RenderRequest {

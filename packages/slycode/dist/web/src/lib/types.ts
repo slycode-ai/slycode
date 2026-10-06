@@ -102,6 +102,7 @@ export interface AutomationConfig {
   scheduleType: 'recurring' | 'one-shot';
   provider: string;                        // Provider ID from providers.json
   freshSession: boolean;                   // Kill and recreate session each run
+  freshSessionDays?: number;               // Card #0373: with freshSession false, start fresh once the conversation is this many calendar days old (absent = never)
   workingDirectory?: string;               // Override card's project directory
   reportViaMessaging: boolean;             // Auto-append messaging instructions to prompt
   lastRun?: string;                        // ISO timestamp of last kickoff
@@ -154,6 +155,17 @@ export interface DeliveryInfo {
 }
 
 /**
+ * Why an automation run started fresh or resumed (card #0373):
+ * - always / never: the freshSession setting decided it
+ * - age: the conversation reached freshSessionDays, so this run starts fresh
+ * - within-window: resumed; the conversation is younger than freshSessionDays
+ * - age-unknown: fresh; the session record has no usable start time
+ * - no-session: no session record, so the bridge starts a new conversation anyway
+ * - probe-failed: the bridge could not be asked, so the run resumes as usual
+ */
+export type AutomationFreshReason = 'always' | 'never' | 'age' | 'within-window' | 'age-unknown' | 'no-session' | 'probe-failed';
+
+/**
  * One automation run, as appended to ~/.slycode/logs/automation.log.
  *
  * Lives here rather than in scheduler.ts because the run-history UI is a client
@@ -169,6 +181,10 @@ export interface AutomationLogEntry {
   provider: string;
   sessionName: string;
   fresh: boolean;
+  /** Why the run was fresh or resumed (card #0373). Absent on entries written before it. */
+  freshReason?: AutomationFreshReason;
+  /** Start of the conversation the run resumed or replaced, when the bridge knew it. */
+  conversationStartedAt?: string;
   bridgeRequest: { status: number; resumed?: boolean; pid?: number; error?: string } | null;
   livenessCheck: { type: string; result: string; delayMs?: number; exitCode?: number; exitedAt?: string } | null;
   delivery?: DeliveryInfo | null;
@@ -717,10 +733,37 @@ export interface ProjectWithBacklog extends Project {
   platforms?: PlatformDetection;
   lastActivity?: string | null;
   activeSessions?: number;
+  /** Open (non-archived, non-automation) cards per lane — dashboard tiles. */
+  stageCounts?: { backlog: number; design: number; implementation: number; testing: number; done: number };
+}
+
+/** A card waiting on the owner — dashboard "Needs you" strip. */
+export interface AttentionItem {
+  projectId: string;
+  projectName: string;
+  cardId: string;
+  number?: number;
+  title: string;
+  /** review = sitting in Testing; failed-run = automation whose last kickoff errored */
+  reason: 'review' | 'failed-run';
+  detail?: string;
+  at?: string;
+}
+
+/** An enabled automation due within the next 24 hours — dashboard "Next 24 hours" strip. */
+export interface UpcomingRun {
+  projectId: string;
+  projectName: string;
+  cardId: string;
+  number?: number;
+  title: string;
+  nextRun: string;
 }
 
 export interface DashboardData {
   projects: ProjectWithBacklog[];
+  needsYou?: AttentionItem[];
+  upcoming?: UpcomingRun[];
   totalBacklogItems: number;
   activeItems: number;
   totalOutdatedAssets?: number;

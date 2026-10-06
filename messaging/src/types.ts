@@ -30,8 +30,12 @@ export interface Channel {
   /** Send a raw text message without formatting (preserves special chars like brackets) */
   sendTextRaw(text: string): Promise<void>;
 
-  /** Send a voice message to the user (buffer-based, used by the TTS path) */
-  sendVoice(audio: Buffer): Promise<{ messageId: number }>;
+  /**
+   * Send a voice message to the user (buffer-based, used by the TTS path).
+   * `format` labels the upload: OGG/Opus (default) or MP3 (the fallback when
+   * OGG encoding fails — Telegram shows both as a voice bubble).
+   */
+  sendVoice(audio: Buffer, format?: 'ogg' | 'mp3'): Promise<{ messageId: number }>;
 
   /**
    * Send a media file (audio/video/document/voice) by file path.
@@ -64,10 +68,16 @@ export interface Channel {
   sendChatAction(action: string): Promise<void>;
 
   /** Display a voice list with selection UI (optional) */
-  sendVoiceList?(voices: { id: string; name: string; description: string }[]): Promise<void>;
+  sendVoiceList?(voices: { id: string; name: string; description: string; kind?: 'prebuilt' | 'library' | 'custom'; expiresAt?: string }[], meta?: { provider: string; revision: number }): Promise<void>;
 
   /** Register handler for voice selection (inline buttons, etc.) */
-  onVoiceSelect?(handler: (voiceId: string, voiceName: string) => void): void;
+  /**
+   * `pick` identifies the list the button came from (feature 087): its
+   * provider and switch revision, and `stale` when a newer list replaced it or
+   * the button predates the binding. Handlers must reject stale or
+   * cross-provider picks instead of writing them into the active provider.
+   */
+  onVoiceSelect?(handler: (voiceId: string, voiceName: string, pick: VoicePick) => void): void;
 
   /** Register a generic callback handler for inline button presses */
   onCallback(prefix: string, handler: (data: string) => void): void;
@@ -99,6 +109,16 @@ export interface ServiceConfig {
   bridgeUrl: string;
 }
 
+/** Where a picked voice came from (Telegram voice list binding, feature 087). */
+export interface VoicePick {
+  provider: string | null;
+  revision: number | null;
+  stale: boolean;
+  /** Designed voices carry their kind and expiry so a pick keeps expiry warnings (phase 4 fix loop). */
+  kind?: 'prebuilt' | 'library' | 'custom';
+  expiresAt?: string;
+}
+
 export interface VoiceConfig {
   sttBackend: 'openai' | 'local' | 'aws-transcribe';
   openaiApiKey: string;
@@ -110,6 +130,16 @@ export interface VoiceConfig {
   elevenlabsApiKey: string;
   elevenlabsVoiceId: string;
   elevenlabsSpeed: number;
+  /** Gemini TTS (feature 087). Empty string = not configured. */
+  geminiApiKey: string;
+  geminiTtsModel: string;
+  geminiTtsVoice: string;
+  /** Raw TTS_PROVIDER from .env — the install default when no explicit switch is stored. */
+  ttsProviderEnv: string;
+  /** Provider-neutral speaking speed (TTS_SPEED, else ELEVENLABS_SPEED, else 1); 0.7–1.2. */
+  ttsSpeed: number;
+  /** Preferred language for Gemini voice search ranking (GEMINI_TTS_LANGUAGE, default "en"). */
+  geminiTtsLanguage: string;
 }
 
 // --- Terminal Targeting ---

@@ -26,42 +26,14 @@ interface KanbanColumnProps {
   onAddCardClick?: () => void;
 }
 
-const colorClasses: Record<string, { header: string; headerText: string; count: string; border: string; texture: string }> = {
-  zinc: {
-    header: 'bg-void-200 dark:bg-void-700 shadow-[inset_0_2px_6px_rgba(100,100,110,0.2),inset_0_-1px_3px_rgba(100,100,110,0.12)] dark:shadow-[inset_0_2px_6px_rgba(30,30,40,0.5),inset_0_-1px_3px_rgba(30,30,40,0.35),inset_0_1px_0_rgba(255,255,255,0.06)]',
-    headerText: 'text-void-500 dark:text-void-200',
-    count: 'bg-void-300/80 text-void-500 dark:bg-void-600 dark:text-void-200',
-    border: 'border-b-[3px] border-void-400 dark:border-void-400',
-    texture: 'lane-texture',
-  },
-  purple: {
-    header: 'bg-neon-blue-100/80 dark:from-neon-blue-900/60 dark:to-neon-blue-950/40 dark:bg-gradient-to-r shadow-[inset_0_2px_6px_rgba(0,120,180,0.18),inset_0_-1px_3px_rgba(0,120,180,0.1)] dark:shadow-[inset_0_2px_6px_rgba(0,60,100,0.55),inset_0_-1px_3px_rgba(0,60,100,0.35),inset_0_1px_0_rgba(0,191,255,0.06)]',
-    headerText: 'text-void-600 dark:text-neon-blue-300',
-    count: 'bg-neon-blue-200/60 text-void-600 dark:bg-neon-blue-800/60 dark:text-neon-blue-200',
-    border: 'border-b-[3px] border-neon-blue-400/70 dark:border-neon-blue-400/70',
-    texture: 'lane-texture',
-  },
-  blue: {
-    header: 'bg-neon-blue-100 dark:from-neon-blue-800/50 dark:to-neon-blue-900/40 dark:bg-gradient-to-r shadow-[inset_0_2px_6px_rgba(0,100,160,0.2),inset_0_-1px_3px_rgba(0,100,160,0.12)] dark:shadow-[inset_0_2px_6px_rgba(0,50,90,0.55),inset_0_-1px_3px_rgba(0,50,90,0.35),inset_0_1px_0_rgba(0,191,255,0.06)]',
-    headerText: 'text-void-600 dark:text-neon-blue-200',
-    count: 'bg-neon-blue-200/60 text-void-600 dark:bg-neon-blue-700/60 dark:text-neon-blue-100',
-    border: 'border-b-[3px] border-neon-blue-500/60 dark:border-neon-blue-400/70',
-    texture: 'lane-texture',
-  },
-  yellow: {
-    header: 'bg-[#ff6a33]/10 dark:from-[#ff6a33]/15 dark:to-[#ff6a33]/5 dark:bg-gradient-to-r shadow-[inset_0_2px_6px_rgba(180,60,0,0.15),inset_0_-1px_3px_rgba(180,60,0,0.08)] dark:shadow-[inset_0_2px_6px_rgba(100,30,0,0.5),inset_0_-1px_3px_rgba(100,30,0,0.3),inset_0_1px_0_rgba(255,106,51,0.06)]',
-    headerText: 'text-void-600 dark:text-[#ff8a60]',
-    count: 'bg-[#ff6a33]/12 text-void-600 dark:bg-[#ff6a33]/20 dark:text-[#ffc0a0]',
-    border: 'border-b-[3px] border-[#ff6a33]/50 dark:border-[#ff6a33]/60',
-    texture: 'lane-texture',
-  },
-  green: {
-    header: 'bg-green-100/80 dark:from-green-900/50 dark:to-green-950/30 dark:bg-gradient-to-r shadow-[inset_0_2px_6px_rgba(0,100,50,0.18),inset_0_-1px_3px_rgba(0,100,50,0.1)] dark:shadow-[inset_0_2px_6px_rgba(0,50,25,0.55),inset_0_-1px_3px_rgba(0,50,25,0.35),inset_0_1px_0_rgba(34,197,94,0.06)]',
-    headerText: 'text-void-600 dark:text-green-300',
-    count: 'bg-green-200/60 text-void-600 dark:bg-green-800/50 dark:text-green-200',
-    border: 'border-b-[3px] border-green-500/60 dark:border-green-400/60',
-    texture: 'lane-texture',
-  },
+// Stage identity is a 2px rule at the top of the lane (stage hues live in
+// globals.css: --st-*). Design and Implementation are deliberately different hues.
+const colorClasses: Record<string, { rule: string; texture: string }> = {
+  zinc: { rule: 'bg-st-backlog text-st-backlog', texture: 'lane-texture' },
+  purple: { rule: 'bg-st-design text-st-design', texture: 'lane-texture' },
+  blue: { rule: 'bg-st-impl text-st-impl', texture: 'lane-texture' },
+  yellow: { rule: 'bg-st-test text-st-test', texture: 'lane-texture' },
+  green: { rule: 'bg-st-done text-st-done', texture: 'lane-texture' },
 };
 
 // Auto-scroll configuration
@@ -116,6 +88,24 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
     }
     window.dispatchEvent(new Event(DONE_TAGS_EVENT));
   }, []);
+
+  // Shipping moment: flash the Done lane's stage rule when a new card arrives.
+  // Imperative class toggle (no state) so it never re-renders the lane.
+  const ruleRef = useRef<HTMLDivElement>(null);
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(cards.map((c) => c.id));
+    const seen = seenIdsRef.current;
+    seenIdsRef.current = ids;
+    if (!isDone || !seen) return;
+    const arrived = cards.some((c) => !seen.has(c.id));
+    const rule = ruleRef.current;
+    if (arrived && rule) {
+      rule.classList.remove('lane-flash');
+      void rule.offsetWidth; // restart the animation
+      rule.classList.add('lane-flash');
+    }
+  }, [cards, isDone]);
 
   // Use effect to set up the animation loop
   useEffect(() => {
@@ -245,38 +235,59 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
     setDropIndex(null);
   };
 
+  const workingCount = cards.reduce((n, c) => n + (activeCards.has(c.id) ? 1 : 0), 0);
+
   return (
     <div
-      className="flex min-w-[85vw] sm:min-w-72 max-w-[85vw] sm:max-w-96 flex-1 flex-shrink-0 snap-start flex-col rounded-lg border-2 border-t-[rgba(140,170,220,0.55)] border-l-[rgba(140,170,220,0.55)] border-b-[rgba(80,110,180,0.45)] border-r-[rgba(80,110,180,0.45)] bg-[#d8e1f0] shadow-[0_1px_3px_rgba(0,0,0,0.25),inset_0_3px_6px_-2px_rgba(255,255,255,0.6),inset_3px_0_6px_-2px_rgba(255,255,255,0.4),inset_0_-3px_6px_-2px_rgba(60,90,160,0.2),inset_-3px_0_6px_-2px_rgba(60,90,160,0.15)] dark:border-2 dark:border-void-700 dark:bg-void-850 dark:shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
+      className={`lane lane-${stage.id} relative flex min-w-[85vw] sm:min-w-72 max-w-[85vw] sm:max-w-96 flex-1 flex-shrink-0 snap-start flex-col rounded-xl border border-line bg-surface-2`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Column Header */}
-      <div className={`light-clean grain depth-glow flex items-center justify-between rounded-t-lg px-3 py-2.5 ${colors.header} ${colors.border}`}>
-        <h3 className={`font-semibold drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] dark:drop-shadow-[0_2px_3px_rgba(0,0,0,0.7)] ${colors.headerText}`}>
-          {stage.label}
-        </h3>
-        <div className="flex items-center gap-1.5">
+      {/* Stage edge: the lane's top edge in its stage hue; the wash (.lane) fades down from it */}
+      <div ref={ruleRef} className={`pointer-events-none absolute -inset-x-px -top-px h-[3px] rounded-t-xl ${colors.rule}`} aria-hidden />
+
+      {/* Column Header — fixed height: the lane wash (.lane in globals.css, --lane-head-h) is sized to it */}
+      <div className="flex h-11 shrink-0 items-center gap-2 px-3 pt-1">
+        <h3 className="text-[13px] font-semibold leading-5 text-ink-1">{stage.label}</h3>
+        <span className="lane-count font-mono text-[11px] font-medium tabular-nums">{cards.length}</span>
+        <div className="ml-auto flex items-center gap-1">
+          {workingCount > 0 && (
+            <Tooltip content={`${workingCount} agent${workingCount !== 1 ? 's' : ''} working in this lane`} placement="bottom">
+              <span className="flex items-center gap-1.5 rounded bg-live/10 px-1.5 text-[11px] font-medium leading-[18px] text-live-text">
+                <span className="live-dot" />
+                {workingCount}
+              </span>
+            </Tooltip>
+          )}
           {isDone && (
             <Tooltip content={showDoneTags ? 'Hide tags on Done cards' : 'Show tags on Done cards'} placement="bottom">
               <button
                 type="button"
                 onClick={toggleDoneTags}
                 aria-pressed={showDoneTags}
-                className={`rounded-full border px-1.5 py-0.5 font-[family-name:var(--font-jetbrains-mono)] text-[10px] leading-none transition-colors ${
-                  showDoneTags
-                    ? 'border-green-500/60 bg-green-500/15 text-green-700 dark:border-green-400/50 dark:bg-green-400/15 dark:text-green-300'
-                    : 'border-void-400/40 bg-transparent text-void-500 hover:border-green-500/50 hover:text-green-700 dark:border-void-500/40 dark:text-void-400 dark:hover:border-green-400/40 dark:hover:text-green-300'
+                className={`rounded px-1.5 text-[11px] leading-[18px] transition-colors ${
+                  showDoneTags ? 'bg-surface-3 text-ink-1' : 'text-ink-3 hover:text-ink-1'
                 }`}
               >
-                tags
+                Tags
               </button>
             </Tooltip>
           )}
-          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${colors.count}`}>
-            {cards.length}
-          </span>
+          {onAddCardClick && (
+            <Tooltip content={`Add card to ${stage.label}`} placement="bottom">
+              <button
+                type="button"
+                onClick={onAddCardClick}
+                aria-label={`Add card to ${stage.label}`}
+                className="flex h-6 w-6 items-center justify-center rounded text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-1"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                </svg>
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
 
@@ -291,11 +302,13 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
       >
         {cards.length === 0 ? (
           <div
-            className="rounded-lg border-2 border-dashed border-void-200 p-4 text-center text-sm text-void-400 dark:border-void-700 dark:text-void-600"
+            className="rounded-lg px-4 py-6 text-center text-[13px] leading-5 text-ink-3"
             onDragOver={handleDragOver}
             onDrop={handleEmptyDrop}
           >
-            Drop here
+            Nothing in {stage.label}.
+            <br />
+            <span className="text-[12px]">Drag a card here.</span>
           </div>
         ) : (
           <>
@@ -303,7 +316,7 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
               <div key={card.id}>
                 {/* Drop indicator before card */}
                 {dropIndex === index && (
-                  <div className="mb-2 h-1 rounded-full bg-neon-blue-400 transition-all" />
+                  <div className="mb-2 h-0.5 rounded-full bg-accent transition-all" />
                 )}
                 <div
                   onDragOver={(e) => handleCardDragOver(e, index)}
@@ -328,23 +341,24 @@ export function KanbanColumn({ stage, cards, cardSessions, activeCards, unseenCa
             ))}
             {/* Drop indicator at the end */}
             {dropIndex === cards.length && (
-              <div className="mt-2 h-1 rounded-full bg-neon-blue-400 transition-all" />
+              <div className="mt-2 h-0.5 rounded-full bg-accent transition-all" />
             )}
           </>
         )}
       </div>
 
-      {/* Add Card Button - pinned to bottom, outside scroll area */}
-      {onAddCardClick && (
-        <div className="p-2 pt-0">
+      {/* Add card — Backlog only, pinned to the lane bottom where new work starts */}
+      {onAddCardClick && stage.id === 'backlog' && (
+        <div className="px-2 pb-2">
           <button
+            type="button"
             onClick={onAddCardClick}
-            className="flex w-full items-center justify-center gap-1 rounded-lg border-2 border-dashed border-void-200 py-2 text-sm text-void-400 transition-colors hover:border-neon-blue-400/30 hover:text-neon-blue-400 dark:border-void-700 dark:text-void-500 dark:hover:border-neon-blue-400/30 dark:hover:text-neon-blue-400"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line-strong py-2 text-[13px] font-medium text-ink-3 transition-colors hover:border-ink-3 hover:bg-surface-1 hover:text-ink-1"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
             </svg>
-            Add Card
+            Add card
           </button>
         </div>
       )}

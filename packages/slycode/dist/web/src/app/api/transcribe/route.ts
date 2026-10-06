@@ -224,7 +224,7 @@ export async function POST(request: Request) {
     const file = await toFile(buffer, `recording.${ext}`, { type: audioFile.type });
     const transcription = await client.audio.transcriptions.create({
       file,
-      model: 'whisper-1',
+      model: 'gpt-transcribe',
     });
 
     return NextResponse.json({ text: transcription.text });

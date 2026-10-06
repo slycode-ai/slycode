@@ -78,7 +78,7 @@ export function DbSchemaView({ projectId, focusTable }: DbSchemaViewProps) {
   return (
     <div ref={containerRef} className="h-full overflow-y-auto p-6">
       <div className="mx-auto max-w-[1100px]">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">Database schema</p>
+        <p className="font-mono text-[11px] text-(--cm-faint)">Database schema</p>
         <h1 className="mb-1 text-lg font-semibold text-(--cm-text)">
           Tables & relationships
           <span className="ml-3 font-mono text-[11px] font-normal text-(--cm-muted)">
@@ -86,12 +86,12 @@ export function DbSchemaView({ projectId, focusTable }: DbSchemaViewProps) {
           </span>
         </h1>
         {annotations?.summary && (
-          <div className="mb-4 max-w-[760px] text-[12.5px] leading-relaxed text-(--cm-muted)">
+          <div className="mb-4 max-w-[760px] text-[13px] leading-relaxed text-(--cm-muted)">
             {annotations.summary.split(/\n{2,}/).map((p, i) => <p key={i} className="mb-2 last:mb-0">{p}</p>)}
           </div>
         )}
         {!annotations && (
-          <p className="mb-4 font-mono text-[10.5px] text-(--cm-faint)">
+          <p className="mb-4 font-mono text-[11px] text-(--cm-faint)">
             structure is live introspection — AI annotations arrive with the next atlas refresh
           </p>
         )}
@@ -99,7 +99,7 @@ export function DbSchemaView({ projectId, focusTable }: DbSchemaViewProps) {
         {introspection.sources.map(src => (
           <section key={src.path} className="mb-7">
             <h2 className="mb-2.5 flex items-baseline gap-2 font-mono text-[11px] text-(--cm-muted)">
-              <span className="rounded bg-(--cm-panel3) px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.1em] text-(--cm-atlas)">
+              <span className="rounded bg-(--cm-panel3) px-1.5 py-px text-[11px] font-semibold text-(--cm-atlas)">
                 {KIND_LABEL[src.kind]}
               </span>
               {src.path}
@@ -134,7 +134,7 @@ function TableCard({ table, annotation, onJump }: {
       data-db-table={table.name}
       className="cm-card rounded-[10px] border border-(--cm-line2) bg-(--cm-panel2) p-3 shadow-[inset_3px_0_0_var(--cm-atlas)]"
     >
-      <h3 className="font-mono text-[12.5px] font-semibold text-(--cm-text)">{table.name}</h3>
+      <h3 className="font-mono text-[13px] font-semibold text-(--cm-text)">{table.name}</h3>
       {annotation?.summary && (
         <p className="mt-1 text-[11px] leading-snug text-(--cm-muted)">{annotation.summary}</p>
       )}
@@ -144,7 +144,7 @@ function TableCard({ table, annotation, onJump }: {
           const note = annotation?.columns?.[col.name];
           return (
             <Tooltip key={col.name} content={note}>
-            <div className="flex items-baseline gap-1.5 font-mono text-[10.5px]">
+            <div className="flex items-baseline gap-1.5 font-mono text-[11px]">
               <span className={col.pk ? 'text-(--cm-atlas)' : 'text-(--cm-muted)'}>
                 {col.pk ? '●' : '·'} {col.name}
               </span>
@@ -153,7 +153,7 @@ function TableCard({ table, annotation, onJump }: {
                 <Tooltip content={`references ${fk.refTable}${fk.refColumn ? '.' + fk.refColumn : ''}`}>
                   <button
                     onClick={() => onJump(fk.refTable)}
-                    className="ml-auto rounded bg-(--cm-atlas-dim) px-1 py-px text-[9px] text-(--cm-atlas) transition-all hover:brightness-125"
+                    className="ml-auto rounded bg-(--cm-atlas-dim) px-1 py-px text-[11px] text-(--cm-atlas) transition-all hover:brightness-125"
                   >
                     → {fk.refTable}
                   </button>
@@ -188,7 +188,7 @@ function RelationsStrip({ introspection, annotations, onJump }: {
   if (rows.size === 0) return null;
   return (
     <section className="mt-2 border-t border-(--cm-line) pt-3">
-      <p className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-(--cm-faint)">Relationships</p>
+      <p className="mb-1.5 font-mono text-[11px] text-(--cm-faint)">Relationships</p>
       <div className="space-y-1">
         {[...rows.values()].map((r, i) => (
           <div key={i} className="font-mono text-[11px] leading-snug">
@@ -206,7 +206,7 @@ function RelationsStrip({ introspection, annotations, onJump }: {
 function CenterNote({ title, note, pulse }: { title: string; note: string; pulse?: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-(--cm-faint)">{title}</p>
+      <p className="font-mono text-[11px] text-(--cm-faint)">{title}</p>
       <p className={`max-w-md font-mono text-[12px] text-(--cm-muted) ${pulse ? 'animate-pulse' : ''}`}>{note}</p>
     </div>
   );

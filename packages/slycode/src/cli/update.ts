@@ -6,7 +6,7 @@ import { resolveWorkspaceOrExit, resolveConfig, getStateDir, type SlyCodeConfig 
 import { refreshUpdates, refreshActionUpdates, refreshProviders, refreshTerminalClasses } from './sync';
 import { SERVICES, detectRunMode, type RunMode } from '../platform/service-detect';
 import { linkClis } from '../platform/symlinks';
-import { loadEnvFile, getEnabledServices } from '../platform/service-common';
+import { loadEnvFile, getEnabledServices, messagingHasWork } from '../platform/service-common';
 
 function isPortInUse(port: number, host: string = '127.0.0.1'): Promise<boolean> {
   return new Promise((resolve) => {
@@ -63,11 +63,11 @@ async function verifyServicesUp(
   const envVars = loadEnvFile(workspace);
 
   // Mirror install-time enablement logic so we don't warn on services that were
-  // intentionally skipped (e.g. messaging without a channel token).
+  // intentionally skipped (e.g. messaging with no channel token and no TTS key).
   const enabled: { name: string; port: number }[] = [];
   for (const svc of SERVICES) {
     if (!config.services[svc]) continue;
-    if (svc === 'messaging' && !envVars.TELEGRAM_BOT_TOKEN && !envVars.SLACK_TOKEN) continue;
+    if (svc === 'messaging' && !messagingHasWork(envVars)) continue;
     enabled.push({ name: svc, port: config.ports[svc] });
   }
 

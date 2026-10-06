@@ -45,6 +45,8 @@ export interface RelayCaption {
 export interface RelayAvailability {
   messagingRunning: boolean | null;
   tts: boolean | null;
+  /** Why speech isn't ready, from the messaging speech-health DTO (feature 087). */
+  ttsReason?: string | null;
 }
 
 export interface RelayState {

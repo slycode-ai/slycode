@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/lib/clipboard';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Shortcut, ShortcutsFile, KanbanCard, KanbanStages, ProviderId } from '@/lib/types';
@@ -299,16 +300,16 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
-      <div className="flex h-[90vh] w-[90vw] max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-(--shadow-overlay) dark:bg-void-900">
+      <div className="flex h-[90vh] w-[90vw] max-w-3xl flex-col overflow-hidden rounded-xl bg-surface-1 shadow-(--shadow-overlay)">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-void-200 px-6 py-4 dark:border-void-700">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-void-900 dark:text-void-50">Quick-launch Shortcuts</h2>
-            <p className="text-xs text-void-500 dark:text-void-400">Project: {projectName}</p>
+            <h2 className="text-lg font-semibold text-ink-1">Quick-launch Shortcuts</h2>
+            <p className="text-xs text-ink-3">Project: {projectName}</p>
           </div>
           <button
             onClick={handleClose}
-            className="rounded-md p-1 text-void-500 hover:bg-void-100 hover:text-void-800 dark:text-void-400 dark:hover:bg-void-800 dark:hover:text-void-200"
+            className="rounded-md p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
             aria-label="Close"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -317,14 +318,14 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 text-sm text-void-800 dark:text-void-200">
+        <div className="flex-1 overflow-y-auto px-6 py-5 text-sm text-ink-1">
           {loading ? (
-            <div className="text-center text-void-500">Loading…</div>
+            <div className="text-center text-ink-3">Loading…</div>
           ) : (
             <>
               {/* Project tag */}
               <section className="mb-6">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-void-500 dark:text-void-400">Project tag</label>
+                <label className="mb-1 block text-xs font-semibold text-ink-3">Project tag</label>
                 <div className="flex items-center gap-2">
                   <input
                     value={tag}
@@ -334,7 +335,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                     className={`w-32 rounded-md border bg-white px-2 py-1.5 font-mono text-sm dark:bg-void-800 ${
                       liveTagError || tagError
                         ? 'border-red-400 focus:outline-none focus:ring-2 focus:ring-red-300'
-                        : 'border-void-300 focus:border-neon-blue-400 focus:outline-none focus:ring-2 focus:ring-neon-blue-200 dark:border-void-700'
+                        : 'border-line-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent'
                     }`}
                   />
                   {showSuggestion && (
@@ -352,12 +353,12 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                 {(liveTagError || tagError) && (
                   <p className="mt-1 text-xs text-red-600 dark:text-red-400">{liveTagError || tagError}</p>
                 )}
-                <p className="mt-2 text-xs text-void-500 dark:text-void-400">
+                <p className="mt-2 text-xs text-ink-3">
                   1–6 lowercase alphanumeric. Must be unique across all projects.
                 </p>
-                <div className="mt-3 rounded-md border border-void-200 bg-void-50 px-3 py-2 text-xs dark:border-void-700 dark:bg-void-800/50">
-                  <p className="font-medium text-void-700 dark:text-void-200">Examples with tag <span className="font-mono">{exampleTag}</span>:</p>
-                  <ul className="mt-1 space-y-0.5 text-void-600 dark:text-void-400">
+                <div className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs">
+                  <p className="font-medium text-ink-2">Examples with tag <span className="font-mono">{exampleTag}</span>:</p>
+                  <ul className="mt-1 space-y-0.5 text-ink-2">
                     <li>Project terminal → <span className="font-mono">{exampleTag}</span> (Telegram) or <span className="font-mono">/project/{projectId}/{exampleTag}</span> (web — opens with terminal expanded)</li>
                     <li>Card #5 → <span className="font-mono">{exampleTag}-5</span> (Telegram) or <span className="font-mono">/project/{projectId}/5</span> (web)</li>
                     <li>Saved shortcut <span className="font-mono">grog</span> → <span className="font-mono">{exampleTag}-grog</span> or <span className="font-mono">/project/{projectId}/grog</span></li>
@@ -369,16 +370,16 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
               {/* Shortcuts list */}
               <section>
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-void-500 dark:text-void-400">Saved shortcuts</h3>
+                  <h3 className="text-xs font-semibold text-ink-3">Saved shortcuts</h3>
                   <button
                     onClick={addDraft}
-                    className="rounded-md border border-neon-blue-400/40 bg-neon-blue-400/10 px-2.5 py-1 text-xs font-medium text-neon-blue-500 hover:bg-neon-blue-400/20"
+                    className="rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20"
                   >
                     + Add shortcut
                   </button>
                 </div>
                 {drafts.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-void-300 px-3 py-4 text-center text-xs text-void-500 dark:border-void-700 dark:text-void-400">
+                  <p className="rounded-md border border-dashed border-line-strong px-3 py-4 text-center text-xs text-ink-3">
                     No shortcuts yet. Click “Add shortcut” to create one.
                   </p>
                 ) : (
@@ -432,7 +433,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                         <div
                           key={d._key}
                           className={`rounded-md border bg-void-50 dark:bg-void-800/40 ${
-                            labelErr ? 'border-red-400/60' : 'border-void-200 dark:border-void-700'
+                            labelErr ? 'border-red-400/60' : 'border-line'
                           }`}
                         >
                           {/* Collapsed-row header — always rendered, doubles as the
@@ -442,7 +443,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                             <button
                               type="button"
                               onClick={toggleCollapse}
-                              className="flex flex-1 items-center gap-2 text-left text-sm text-void-700 hover:text-neon-blue-500 dark:text-void-200"
+                              className="flex flex-1 items-center gap-2 text-left text-sm text-ink-2 hover:text-accent"
                             >
                               <svg
                                 className={`h-3 w-3 flex-shrink-0 transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
@@ -452,19 +453,19 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                               >
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                               </svg>
-                              <span className="font-mono text-neon-blue-500">
+                              <span className="font-mono text-accent">
                                 {d.label || '(unnamed)'}
                               </span>
-                              <span className="truncate text-void-500 dark:text-void-400">→ {cardLabel}</span>
+                              <span className="truncate text-ink-3">→ {cardLabel}</span>
                               {d.prompt && (
                                 <Tooltip content={d.prompt}>
-                                  <span className="hidden text-[11px] text-void-400 sm:inline">
+                                  <span className="hidden text-[11px] text-ink-3 sm:inline">
                                     · prompt set
                                   </span>
                                 </Tooltip>
                               )}
                               {d.provider && (
-                                <span className="hidden rounded-sm bg-void-200 px-1 text-[10px] uppercase text-void-700 sm:inline dark:bg-void-700 dark:text-void-300">
+                                <span className="hidden rounded-sm bg-surface-3 px-1 text-[10px] text-ink-2 sm:inline">
                                   {d.provider}
                                 </span>
                               )}
@@ -497,7 +498,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); removeDraft(d._key); }}
-                              className="rounded-md p-1 text-void-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
+                              className="rounded-md p-1 text-ink-3 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
                               aria-label="Delete shortcut"
                             >
                               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -509,27 +510,27 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
 
                           {/* Expanded body */}
                           {!isCollapsed && (
-                            <div className="border-t border-void-200 px-3 py-3 dark:border-void-700">
+                            <div className="border-t border-line px-3 py-3">
                               <div className="grid gap-2 sm:grid-cols-2">
                                 {/* Label */}
                                 <div>
-                                  <label className="block text-[10px] font-semibold uppercase text-void-500">Label</label>
+                                  <label className="block text-[10px] font-semibold text-ink-3">Label</label>
                                   <input
                                     value={d.label}
                                     onChange={(e) => updateDraft(d._key, { label: e.target.value.toLowerCase() })}
                                     className={`w-full rounded-md border bg-white px-2 py-1 font-mono text-sm dark:bg-void-900 ${
-                                      labelErr ? 'border-red-400' : 'border-void-300 dark:border-void-700'
+                                      labelErr ? 'border-red-400' : 'border-line-strong'
                                     }`}
                                   />
                                   {labelErr && <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400">{labelErr}</p>}
                                 </div>
                                 {/* Card picker */}
                                 <div>
-                                  <label className="block text-[10px] font-semibold uppercase text-void-500">Card</label>
+                                  <label className="block text-[10px] font-semibold text-ink-3">Card</label>
                                   <select
                                     value={d.cardId}
                                     onChange={(e) => updateDraft(d._key, { cardId: e.target.value })}
-                                    className="w-full truncate rounded-md border border-void-300 bg-white px-2 py-1 text-sm dark:border-void-700 dark:bg-void-900"
+                                    className="w-full truncate rounded-md border border-line-strong bg-surface-1 px-2 py-1 text-sm"
                                   >
                                     <option value="">— pick a card —</option>
                                     {cards.map((c) => (
@@ -541,11 +542,11 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                                 </div>
                                 {/* Provider */}
                                 <div>
-                                  <label className="block text-[10px] font-semibold uppercase text-void-500">Provider (optional)</label>
+                                  <label className="block text-[10px] font-semibold text-ink-3">Provider (optional)</label>
                                   <select
                                     value={d.provider || ''}
                                     onChange={(e) => updateDraft(d._key, { provider: (e.target.value || undefined) as ProviderId | undefined })}
-                                    className="w-full rounded-md border border-void-300 bg-white px-2 py-1 text-sm dark:border-void-700 dark:bg-void-900"
+                                    className="w-full rounded-md border border-line-strong bg-surface-1 px-2 py-1 text-sm"
                                   >
                                     {PROVIDERS.map((p) => (
                                       <option key={p.id} value={p.id}>{p.label}</option>
@@ -554,7 +555,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                                 </div>
                                 {/* Prefer existing toggle */}
                                 <div className="flex items-end">
-                                  <label className="flex items-center gap-2 text-xs text-void-700 dark:text-void-300">
+                                  <label className="flex items-center gap-2 text-xs text-ink-2">
                                     <input
                                       type="checkbox"
                                       checked={!!d.preferExistingSession}
@@ -566,12 +567,12 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                                 </div>
                                 {/* Prompt */}
                                 <div className="sm:col-span-2">
-                                  <label className="block text-[10px] font-semibold uppercase text-void-500">Starter prompt (optional)</label>
+                                  <label className="block text-[10px] font-semibold text-ink-3">Starter prompt (optional)</label>
                                   <textarea
                                     value={d.prompt || ''}
                                     onChange={(e) => updateDraft(d._key, { prompt: e.target.value })}
                                     rows={2}
-                                    className="w-full resize-y rounded-md border border-void-300 bg-white px-2 py-1 text-sm dark:border-void-700 dark:bg-void-900"
+                                    className="w-full resize-y rounded-md border border-line-strong bg-surface-1 px-2 py-1 text-sm"
                                     placeholder="Fired against the chosen provider when the shortcut opens."
                                   />
                                 </div>
@@ -596,7 +597,7 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-void-200 px-6 py-3 dark:border-void-700">
+        <div className="flex items-center justify-between border-t border-line px-6 py-3">
           <span className="text-xs">
             {savedAt ? (
               <span className="text-emerald-600 dark:text-emerald-400">Saved.</span>
@@ -606,13 +607,13 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
                 Unsaved changes
               </span>
             ) : (
-              <span className="text-void-500">&nbsp;</span>
+              <span className="text-ink-3">&nbsp;</span>
             )}
           </span>
           <div className="flex gap-2">
             <button
               onClick={handleClose}
-              className="rounded-md border border-void-300 px-3 py-1.5 text-sm text-void-700 hover:bg-void-100 dark:border-void-600 dark:text-void-200 dark:hover:bg-void-800"
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-3"
             >
               Close
             </button>
@@ -621,8 +622,8 @@ export function ShortcutsConfigModal({ onClose, projectId, projectName }: Shortc
               disabled={saving || hasErrors || !isDirty}
               className={`rounded-md px-4 py-1.5 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 isDirty && !hasErrors
-                  ? 'bg-neon-blue-500 shadow-[0_0_12px_rgba(0,191,255,0.45)] hover:bg-neon-blue-600'
-                  : 'bg-neon-blue-500 hover:bg-neon-blue-600'
+                  ? 'bg-accent hover:bg-accent'
+                  : 'bg-accent hover:bg-accent'
               }`}
             >
               {saving ? 'Saving…' : 'Save'}
@@ -649,18 +650,16 @@ function CopyChip({ label, value, title }: { label: string; value: string; title
         // The button can sit inside a clickable header (the collapse toggle).
         // Stop propagation so clicking copy doesn't also collapse/expand.
         e.stopPropagation();
-        navigator.clipboard.writeText(value).then(
-          () => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
-          },
-          () => { /* clipboard unavailable */ },
-        );
+        void copyText(value).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
       }}
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
         copied
           ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-600 dark:text-emerald-400'
-          : 'border-void-300 bg-white text-void-600 hover:border-neon-blue-400 hover:bg-neon-blue-400/10 hover:text-neon-blue-500 dark:border-void-700 dark:bg-void-900 dark:text-void-300'
+          : 'border-line-strong bg-surface-1 text-ink-2 hover:border-accent hover:bg-accent/10 hover:text-accent'
       }`}
     >
       {/* Icon flips between clipboard and check; label stays fixed so the

@@ -76,12 +76,12 @@ export function UpdatesView({
   // Empty state
   if (entries.length === 0 && justAccepted.size === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-void-200 bg-white py-16 dark:border-void-700 dark:bg-void-850">
-        <svg className="mb-3 h-10 w-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <div className="flex flex-col items-center justify-center rounded-lg border border-line bg-surface-1 py-16">
+        <svg className="mb-3 h-10 w-10 text-st-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <p className="text-sm font-medium text-void-400 dark:text-void-400">All skills are up to date</p>
-        <p className="mt-1 text-xs text-void-400 dark:text-void-500">No updates available</p>
+        <p className="text-sm font-medium text-ink-3">All skills are up to date</p>
+        <p className="mt-1 text-xs text-ink-3">No updates available</p>
       </div>
     );
   }
@@ -117,12 +117,12 @@ export function UpdatesView({
                 {/* Header row */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <svg className="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="h-5 w-5 text-st-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                     <div>
-                      <span className="text-sm font-medium text-emerald-300">{entry.name}</span>
-                      <span className="ml-2 text-xs text-emerald-400/70">
+                      <span className="text-sm font-medium text-st-done">{entry.name}</span>
+                      <span className="ml-2 text-xs text-st-done/70">
                         Updated to v{entry.availableVersion}
                       </span>
                     </div>
@@ -131,16 +131,16 @@ export function UpdatesView({
                       per-file fates against every installed project/provider,
                       so no blind SKILL.md-only / All-files decision here. */}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-void-400">Push to all projects?</span>
+                    <span className="text-xs text-ink-3">Push to all projects?</span>
                     <button
                       onClick={() => { onPushToProjects(entry); clearAccepted(); }}
-                      className="rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-400/25"
+                      className="rounded-md border border-emerald-400/40 bg-emerald-400/15 px-3 py-1 text-xs font-medium text-st-done hover:bg-emerald-400/25"
                     >
                       Review push…
                     </button>
                     <button
                       onClick={() => { clearAccepted(); onPushDeclined?.(); }}
-                      className="rounded-md border border-void-600 bg-void-800 px-3 py-1 text-xs font-medium text-void-300 hover:bg-void-700"
+                      className="rounded-md border border-line-strong bg-surface-1 px-3 py-1 text-xs font-medium text-ink-2 hover:bg-surface-3"
                     >
                       Skip
                     </button>
@@ -154,13 +154,13 @@ export function UpdatesView({
             <div
               key={key}
               data-skill-focus={entry.name}
-              className="rounded-lg border border-void-200 bg-white p-4 dark:border-void-700 dark:bg-void-850"
+              className="rounded-lg border border-line bg-surface-1 p-4"
             >
               <div className="flex items-start justify-between gap-4">
                 {/* Info */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-void-900 dark:text-void-100">
+                    <span className="text-sm font-semibold text-ink-1">
                       {entry.name}
                     </span>
                     {entry.status === 'update' ? (
@@ -173,7 +173,7 @@ export function UpdatesView({
                       </span>
                     )}
                     {entry.skillMdOnly ? (
-                      <span className="text-[10px] text-void-400 dark:text-void-500">
+                      <span className="text-[10px] text-ink-3">
                         SKILL.md only
                       </span>
                     ) : (
@@ -184,7 +184,7 @@ export function UpdatesView({
                       </Tooltip>
                     )}
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-void-500 dark:text-void-400">
+                  <div className="mt-1 flex items-center gap-2 text-xs text-ink-3">
                     {entry.status === 'update' ? (
                       <span>v{entry.currentVersion} → v{entry.availableVersion}</span>
                     ) : (
@@ -192,7 +192,7 @@ export function UpdatesView({
                     )}
                   </div>
                   {entry.description && (
-                    <p className="mt-1.5 text-xs text-void-500 dark:text-void-400 line-clamp-2">
+                    <p className="mt-1.5 text-xs text-ink-3 line-clamp-2">
                       {entry.description}
                     </p>
                   )}
@@ -201,7 +201,7 @@ export function UpdatesView({
                       without a SKILL.md change */}
                   {entry.status === 'update' && (entry.changedFiles?.length ?? 0) > 0 && (
                     <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-void-400 dark:text-void-500">
+                      <span className="text-[10px] font-medium text-ink-3">
                         Changed
                       </span>
                       {entry.changedFiles.map(file => {
@@ -211,9 +211,9 @@ export function UpdatesView({
                             <span
                               className={`font-mono text-[11px] ${
                                 file === 'SKILL.md'
-                                  ? 'text-void-500 dark:text-void-400'
+                                  ? 'text-ink-3'
                                   : seedOnly
-                                    ? 'text-void-400 dark:text-void-500'
+                                    ? 'text-ink-3'
                                     : 'text-amber-600 dark:text-amber-400/90'
                               }`}
                             >
@@ -233,7 +233,7 @@ export function UpdatesView({
                   <button
                     onClick={() => handlePreview(entry)}
                     aria-label="Preview changes"
-                    className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-500 transition-colors hover:bg-void-100 hover:text-void-700 dark:border-void-600 dark:bg-void-800 dark:hover:bg-void-700 dark:hover:text-void-200"
+                    className="rounded-md border border-line-strong bg-surface-2 p-1.5 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink-2"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -249,7 +249,7 @@ export function UpdatesView({
                     onClick={() => handleAccept(entry)}
                     disabled={isAccepting}
                     aria-label={entry.status === 'update' ? `Update to v${entry.availableVersion}` : 'Import skill'}
-                    className="rounded-md border border-emerald-400/40 bg-emerald-400/15 p-1.5 text-emerald-400 transition-colors hover:bg-emerald-400/25 disabled:opacity-50"
+                    className="rounded-md border border-emerald-400/40 bg-emerald-400/15 p-1.5 text-st-done transition-colors hover:bg-emerald-400/25 disabled:opacity-50"
                   >
                     {isAccepting ? (
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-600 border-t-emerald-300" />
@@ -267,7 +267,7 @@ export function UpdatesView({
                   <button
                     onClick={() => handleDismiss(entry)}
                     aria-label="Dismiss this version"
-                    className="rounded-md border border-void-300 bg-void-50 p-1.5 text-void-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:border-void-600 dark:bg-void-800 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                    className="rounded-md border border-line-strong bg-surface-2 p-1.5 text-ink-3 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

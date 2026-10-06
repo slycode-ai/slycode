@@ -21,7 +21,7 @@ export function ResultDeck({ event, onOpen, onDismiss }: ResultDeckProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-(--cm-panel)">
       <div className="flex items-center gap-2 border-b border-(--cm-line) bg-(--cm-atlas-dim) px-3 py-2">
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-(--cm-atlas)">✦ Atlas deck</span>
+        <span className="font-mono text-[11px] text-(--cm-atlas)">✦ Atlas deck</span>
         <Tooltip content={deck.title} placement="bottom">
           <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-(--cm-text)">{deck.title}</span>
         </Tooltip>
@@ -29,7 +29,7 @@ export function ResultDeck({ event, onOpen, onDismiss }: ResultDeckProps) {
           <button onClick={onDismiss} aria-label="Dismiss" className="font-mono text-[12px] text-(--cm-faint) hover:text-(--cm-text)">✕</button>
         </Tooltip>
       </div>
-      {event.note && <p className="border-b border-(--cm-line) px-3 py-1.5 text-[11.5px] text-(--cm-muted)">{event.note}</p>}
+      {event.note && <p className="border-b border-(--cm-line) px-3 py-1.5 text-[12px] text-(--cm-muted)">{event.note}</p>}
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {deck.items.map((item, i) => (
           <button
@@ -41,11 +41,11 @@ export function ResultDeck({ event, onOpen, onDismiss }: ResultDeckProps) {
               {item.file}
               {item.line ? <span className="text-(--cm-atlas)">:{item.line}</span> : null}
             </span>
-            {item.note && <span className="mt-0.5 block text-[10.5px] leading-snug text-(--cm-muted)">{item.note}</span>}
+            {item.note && <span className="mt-0.5 block text-[11px] leading-snug text-(--cm-muted)">{item.note}</span>}
           </button>
         ))}
       </div>
-      <p className="border-t border-(--cm-line) px-3 py-1 font-mono text-[9px] text-(--cm-faint)">
+      <p className="border-t border-(--cm-line) px-3 py-1 font-mono text-[11px] text-(--cm-faint)">
         {deck.items.length} locations · click to jump · breadcrumb ← returns
       </p>
     </div>

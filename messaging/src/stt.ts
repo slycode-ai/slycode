@@ -62,7 +62,7 @@ async function transcribeOpenAI(filePath: string, apiKey: string): Promise<strin
 
   const transcription = await client.audio.transcriptions.create({
     file: fs.createReadStream(filePath),
-    model: 'whisper-1',
+    model: 'gpt-transcribe',
   });
 
   return transcription.text;

@@ -4,12 +4,18 @@ import { useState, useEffect, useCallback } from 'react';
 import type { AutomationConfig as AutomationConfigType, AutomationLogEntry } from '@/lib/types';
 import { cronToHumanReadable, isoToDatetimeLocal, datetimeLocalToIso } from '@/lib/cron-utils';
 import { formatDateTime } from '@/lib/date-format';
+import {
+  FRESH_DAYS_DEFAULT, FRESH_DAYS_MAX, FRESH_DAYS_MIN, calendarDaysBetween, formatDateKey, freshMode,
+  isValidFreshDays, localDateKey, resolveFreshness, type FreshnessSession,
+} from '@/lib/automation-freshness';
 
 interface AutomationConfigProps {
   config: AutomationConfigType;
   cardId: string;
   projectId: string;
   onChange: (config: AutomationConfigType) => void;
+  /** The automation provider's bridge session: undefined while unknown, null when there is none (card #0373). */
+  session?: FreshnessSession | null;
 }
 
 type Frequency = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'interval';
@@ -114,6 +120,29 @@ interface ProviderOption {
 
 const RUN_HISTORY_LIMIT = 20;
 
+function daysAgoText(days: number): string {
+  if (days <= 0) return 'today';
+  return days === 1 ? '1 day ago' : `${days} days ago`;
+}
+
+/** Expanded run-history value for "Fresh session" (card #0373). Older entries have no reason. */
+function describeFreshRun(run: AutomationLogEntry, timeZone: string): string {
+  const age = run.conversationStartedAt
+    ? calendarDaysBetween(new Date(run.conversationStartedAt), new Date(run.timestamp), timeZone)
+    : null;
+  const ageText = age === null ? null : `${age} day${age === 1 ? '' : 's'} old`;
+  switch (run.freshReason) {
+    case 'always': return 'yes (every run)';
+    case 'age': return ageText ? `yes (conversation was ${ageText})` : 'yes (conversation reached its limit)';
+    case 'age-unknown': return 'yes (conversation start unknown)';
+    case 'within-window': return ageText ? `no (conversation ${ageText})` : 'no';
+    case 'no-session': return 'new conversation (no earlier session)';
+    case 'probe-failed': return 'no (could not check the session age)';
+    case 'never': return ageText ? `no (conversation ${ageText})` : 'no';
+    default: return run.fresh ? 'yes' : 'no';
+  }
+}
+
 /** Humanise a run duration: 840 -> "0.8s", 64200 -> "1m 4s". */
 function formatElapsed(ms: number | undefined): string {
   if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '—';
@@ -125,12 +154,19 @@ function formatElapsed(ms: number | undefined): string {
   return `${m}m ${s}s`;
 }
 
-export function AutomationConfig({ config, cardId, projectId, onChange }: AutomationConfigProps) {
+export function AutomationConfig({ config, cardId, projectId, onChange, session }: AutomationConfigProps) {
   const [showAdvancedCron, setShowAdvancedCron] = useState(false);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [runNowLoading, setRunNowLoading] = useState(false);
   const [runNowResult, setRunNowResult] = useState<'success' | 'error' | null>(null);
   const [timezoneAbbr, setTimezoneAbbr] = useState<string>('');
+  const [timezone, setTimezone] = useState<string>('UTC');
+  // Typed value for "Every N days" — kept apart from config so the field can be
+  // cleared mid-edit; only valid whole numbers reach config.
+  const [freshDaysDraft, setFreshDaysDraft] = useState<string>(String(config.freshSessionDays ?? FRESH_DAYS_DEFAULT));
+  useEffect(() => {
+    if (isValidFreshDays(config.freshSessionDays)) setFreshDaysDraft(String(config.freshSessionDays));
+  }, [config.freshSessionDays]);
   const [runs, setRuns] = useState<AutomationLogEntry[]>([]);
   const [runsLoaded, setRunsLoaded] = useState(false);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
@@ -168,7 +204,10 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
       .catch(() => {});
     fetch('/api/scheduler')
       .then(res => res.ok ? res.json() : null)
-      .then(data => { if (data?.abbreviation) setTimezoneAbbr(data.abbreviation); })
+      .then(data => {
+        if (data?.abbreviation) setTimezoneAbbr(data.abbreviation);
+        if (data?.timezone) setTimezone(data.timezone);
+      })
       .catch(() => {});
   }, []);
 
@@ -195,8 +234,27 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
 
   const humanReadable = cronToHumanReadable(config.schedule, config.scheduleType, 'Not set', timezoneAbbr || undefined);
 
-  const inputClass = 'rounded border border-void-300 bg-white px-2 py-1 text-sm text-void-700 focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400/30 dark:border-void-600 dark:bg-void-800 dark:text-void-300';
-  const labelClass = 'text-xs font-medium text-void-500 dark:text-void-400';
+  const mode = freshMode(config);
+  const segOn = 'bg-orange-500 text-white';
+  const segOff = 'bg-surface-3 text-ink-2 hover:bg-surface-3';
+  // When the current conversation started and, in every-N-days mode, when the
+  // next fresh start is due. Same rule the scheduler applies (card #0373).
+  const sessionAgeText = (() => {
+    if (mode === 'always' || session === undefined) return null;
+    if (session === null) return 'No conversation yet. The next run starts one.';
+    const now = new Date();
+    const d = resolveFreshness(config, { ok: true, session }, now, timezone);
+    if (!d.conversationStartedAt || d.ageDays === undefined) {
+      return mode === 'interval' ? 'Conversation start unknown. The next run starts fresh.' : null;
+    }
+    const started = `Conversation started ${formatDateKey(localDateKey(new Date(d.conversationStartedAt), timezone), now)}, ${daysAgoText(d.ageDays)}.`;
+    if (mode === 'never') return started;
+    if (d.fresh) return `${started} The next run starts fresh.`;
+    return `${started} Next fresh start: the first run on or after ${formatDateKey(d.nextFreshDate!, now)}.`;
+  })();
+
+  const inputClass = 'rounded border border-line-strong bg-surface-1 px-2 py-1 text-sm text-ink-2 focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400/30';
+  const labelClass = 'text-xs font-medium text-ink-3';
 
   return (
     <div className="space-y-4">
@@ -215,7 +273,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             className={`rounded-l-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               config.scheduleType === 'recurring'
                 ? 'bg-orange-500 text-white'
-                : 'bg-void-200 text-void-600 hover:bg-void-300 dark:bg-void-700 dark:text-void-400 dark:hover:bg-void-600'
+                : 'bg-surface-3 text-ink-2 hover:bg-surface-3'
             }`}
           >
             Recurring
@@ -225,7 +283,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             className={`rounded-r-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               config.scheduleType === 'one-shot'
                 ? 'bg-orange-500 text-white'
-                : 'bg-void-200 text-void-600 hover:bg-void-300 dark:bg-void-700 dark:text-void-400 dark:hover:bg-void-600'
+                : 'bg-surface-3 text-ink-2 hover:bg-surface-3'
             }`}
           >
             One-shot
@@ -347,7 +405,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                       className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                         builder.days.includes(i)
                           ? 'bg-orange-500 text-white'
-                          : 'bg-void-200 text-void-600 hover:bg-void-300 dark:bg-void-700 dark:text-void-400'
+                          : 'bg-surface-3 text-ink-2 hover:bg-void-300'
                       }`}
                     >
                       {label}
@@ -377,7 +435,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             <div>
               <button
                 onClick={() => setShowAdvancedCron(!showAdvancedCron)}
-                className="text-xs text-void-500 hover:text-orange-500 dark:text-void-400"
+                className="text-xs text-ink-3 hover:text-orange-500"
               >
                 {showAdvancedCron ? 'Hide' : 'Show'} advanced (cron)
               </button>
@@ -411,7 +469,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
               className={inputClass}
             />
             {timezoneAbbr && (
-              <span className="text-xs text-void-500 dark:text-void-400">({timezoneAbbr})</span>
+              <span className="text-xs text-ink-3">({timezoneAbbr})</span>
             )}
           </div>
         )}
@@ -423,7 +481,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
 
         {/* Last run / Next run */}
         {(config.lastRun || config.nextRun) && (
-          <div className="mt-2 flex gap-4 text-xs text-void-500 dark:text-void-400">
+          <div className="mt-2 flex gap-4 text-xs text-ink-3">
             {config.lastRun && (
               <span>
                 Last run: {formatDateTime(config.lastRun)}
@@ -464,26 +522,70 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
             </select>
           </div>
 
+          {/* Fresh session: every run / every N days / never (card #0373) */}
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={labelClass}>Fresh session:</span>
+              <div className="flex items-center gap-2" role="group" aria-label="Fresh session">
+                <button
+                  type="button"
+                  aria-pressed={mode === 'always'}
+                  onClick={() => onChange({ ...config, freshSession: true, freshSessionDays: undefined })}
+                  className={`rounded-l-lg px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'always' ? segOn : segOff}`}
+                >
+                  Every run
+                </button>
+                {mode === 'interval' ? (
+                  <span className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium ${segOn}`}>
+                    Every
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={FRESH_DAYS_MIN}
+                      max={FRESH_DAYS_MAX}
+                      step={1}
+                      value={freshDaysDraft}
+                      aria-label="Days between fresh sessions"
+                      onChange={(e) => {
+                        setFreshDaysDraft(e.target.value);
+                        const n = Number(e.target.value);
+                        if (isValidFreshDays(n)) onChange({ ...config, freshSession: false, freshSessionDays: n });
+                      }}
+                      onBlur={() => setFreshDaysDraft(String(config.freshSessionDays ?? FRESH_DAYS_DEFAULT))}
+                      className="w-12 rounded bg-white/20 px-1 py-0.5 text-center text-xs text-white focus:outline-none focus:ring-1 focus:ring-white/70 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    {config.freshSessionDays === 1 ? 'day' : 'days'}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-pressed={false}
+                    onClick={() => {
+                      const n = Number(freshDaysDraft);
+                      onChange({ ...config, freshSession: false, freshSessionDays: isValidFreshDays(n) ? n : FRESH_DAYS_DEFAULT });
+                    }}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${segOff}`}
+                  >
+                    Every {isValidFreshDays(Number(freshDaysDraft)) ? freshDaysDraft : FRESH_DAYS_DEFAULT} days
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={mode === 'never'}
+                  onClick={() => onChange({ ...config, freshSession: false, freshSessionDays: undefined })}
+                  className={`rounded-r-lg px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'never' ? segOn : segOff}`}
+                >
+                  Never
+                </button>
+              </div>
+            </div>
+            {sessionAgeText && (
+              <p className="mt-1.5 text-xs text-ink-3">{sessionAgeText}</p>
+            )}
+          </div>
+
           {/* Toggles row */}
           <div className="flex flex-wrap gap-4">
-            {/* Fresh session toggle */}
-            <label className="flex cursor-pointer items-center gap-2">
-              <span className={labelClass}>Fresh session:</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={config.freshSession}
-                onClick={() => onChange({ ...config, freshSession: !config.freshSession })}
-                className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
-                  config.freshSession
-                    ? 'bg-orange-500'
-                    : 'bg-void-300 dark:bg-void-600'
-                }`}
-              >
-                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${config.freshSession ? 'translate-x-4' : 'translate-x-0'}`} />
-              </button>
-            </label>
-
             {/* Report via messaging toggle */}
             <label className="flex cursor-pointer items-center gap-2">
               <span className={labelClass}>Report via messaging:</span>
@@ -495,7 +597,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                 className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
                   config.reportViaMessaging
                     ? 'bg-orange-500'
-                    : 'bg-void-300 dark:bg-void-600'
+                    : 'bg-surface-3'
                 }`}
               >
                 <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${config.reportViaMessaging ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -516,9 +618,9 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
           </div>
 
           {/* Enabled toggle + Run Now */}
-          <div className="flex items-center justify-between rounded-lg border border-orange-400/20 bg-white/50 p-2 dark:bg-void-800/50">
+          <div className="flex items-center justify-between rounded-lg border border-orange-400/20 bg-surface-1 p-2">
             <div>
-              <span className="text-sm font-medium text-void-700 dark:text-void-300">Enabled</span>
+              <span className="text-sm font-medium text-ink-2">Enabled</span>
               {!config.enabled && (
                 <p className="text-xs text-orange-600 dark:text-orange-400">This automation won&apos;t run until enabled</p>
               )}
@@ -552,7 +654,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                     ? 'border-green-400/40 bg-green-400/15 text-green-600 dark:text-green-400'
                     : runNowResult === 'error'
                       ? 'border-red-400/40 bg-red-400/15 text-red-600 dark:text-red-400'
-                      : 'border-orange-400/40 bg-orange-400/15 text-orange-600 hover:bg-orange-400/25 hover:shadow-[0_0_12px_rgba(249,115,22,0.3)] dark:text-orange-400'
+                      : 'border-orange-400/40 bg-orange-400/15 text-orange-600 hover:bg-orange-400/25 dark:text-orange-400'
                 } disabled:cursor-not-allowed disabled:opacity-50`}
               >
                 {runNowLoading ? 'Running...' : runNowResult === 'success' ? 'Triggered' : runNowResult === 'error' ? 'Failed' : 'Run Now'}
@@ -569,7 +671,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                 className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
                   config.enabled
                     ? 'bg-green-500'
-                    : 'bg-void-300 dark:bg-void-600'
+                    : 'bg-surface-3'
                 }`}
               >
                 <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${config.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -586,14 +688,14 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
           <button
             type="button"
             onClick={loadRuns}
-            className="rounded px-2 py-0.5 text-xs text-void-500 hover:bg-orange-400/10 hover:text-orange-600 dark:text-void-400 dark:hover:text-orange-400"
+            className="rounded px-2 py-0.5 text-xs text-ink-3 hover:bg-orange-400/10 hover:text-orange-600 dark:hover:text-orange-400"
           >
             Refresh
           </button>
         </div>
 
         {runs.length === 0 ? (
-          <p className="text-xs text-void-500 dark:text-void-400">
+          <p className="text-xs text-ink-3">
             {runsLoaded ? 'No runs recorded yet.' : 'Loading run history...'}
           </p>
         ) : (
@@ -605,7 +707,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
               return (
                 <div
                   key={key}
-                  className="overflow-hidden rounded-lg border border-orange-400/20 bg-white/50 dark:bg-void-800/50"
+                  className="overflow-hidden rounded-lg border border-orange-400/20 bg-surface-1"
                 >
                   <button
                     type="button"
@@ -620,13 +722,18 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                     }`}>
                       {failed ? 'Err' : 'OK'}
                     </span>
-                    <span className="text-xs text-void-700 dark:text-void-300">
+                    <span className="text-xs text-ink-2">
                       {formatDateTime(run.timestamp)}
                     </span>
-                    <span className="rounded bg-void-100 px-1.5 py-0.5 text-[11px] text-void-500 dark:bg-void-700/50 dark:text-void-400">
+                    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-3">
                       {run.trigger}
                     </span>
-                    <span className="text-[11px] text-void-500 dark:text-void-400">
+                    {run.fresh && (
+                      <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[11px] text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+                        fresh
+                      </span>
+                    )}
+                    <span className="text-[11px] text-ink-3">
                       {formatElapsed(run.elapsedMs)}
                     </span>
                     {failed && run.error && (
@@ -634,7 +741,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                         {run.error}
                       </span>
                     )}
-                    <span className="ml-auto flex-shrink-0 text-[11px] text-void-400">
+                    <span className="ml-auto flex-shrink-0 text-[11px] text-ink-3">
                       {isExpanded ? '−' : '+'}
                     </span>
                   </button>
@@ -644,7 +751,7 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                       {[
                         ['Provider', run.provider],
                         ['Session', run.sessionName],
-                        ['Fresh session', run.fresh ? 'yes' : 'no'],
+                        ['Fresh session', describeFreshRun(run, timezone)],
                         ['Bridge', run.bridgeRequest
                           ? `status ${run.bridgeRequest.status}${run.bridgeRequest.resumed ? ' (resumed)' : ''}${run.bridgeRequest.pid ? ` pid ${run.bridgeRequest.pid}` : ''}${run.bridgeRequest.error ? ` — ${run.bridgeRequest.error}` : ''}`
                           : null],
@@ -656,13 +763,13 @@ export function AutomationConfig({ config, cardId, projectId, onChange }: Automa
                           : null],
                       ].map(([label, value]) => value ? (
                         <div key={label as string} className="flex gap-2">
-                          <dt className="w-24 flex-shrink-0 text-void-500 dark:text-void-400">{label}</dt>
-                          <dd className="min-w-0 break-words text-void-700 dark:text-void-300">{value}</dd>
+                          <dt className="w-24 flex-shrink-0 text-ink-3">{label}</dt>
+                          <dd className="min-w-0 break-words text-ink-2">{value}</dd>
                         </div>
                       ) : null)}
                       {run.error && (
                         <div className="flex gap-2">
-                          <dt className="w-24 flex-shrink-0 text-void-500 dark:text-void-400">Error</dt>
+                          <dt className="w-24 flex-shrink-0 text-ink-3">Error</dt>
                           <dd className="min-w-0 break-words text-red-600 dark:text-red-400">{run.error}</dd>
                         </div>
                       )}

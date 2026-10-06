@@ -259,28 +259,31 @@ export function GlobalClaudePanel({
     >
       {/* Header bar */}
       <div
-        className={`light-clean grain depth-glow flex h-12 cursor-pointer items-center justify-between px-4 transition-all border border-b-0 border-neon-blue-800/60 bg-[#2490b5] text-white/90 dark:border-transparent dark:from-neon-blue-600 dark:via-neon-blue-800/90 dark:to-neon-blue-950/85 dark:text-white ${isExpanded ? 'rounded-none sm:rounded-t-md' : 'rounded-t-md'} ${isActive && !isExpanded ? 'active-glow-global' : ''} ${isExpanded ? 'shadow-[0_-4px_20px_-4px_rgba(0,136,179,0.25)] dark:shadow-[0_-4px_20px_-4px_rgba(0,191,255,0.4)]' : 'shadow-[0_-3px_12px_rgba(0,60,120,0.4),0_-1px_4px_rgba(0,60,120,0.25)] dark:shadow-[0_-3px_12px_rgba(0,0,0,0.7),0_-1px_4px_rgba(0,0,0,0.4)]'}`}
+        className={`relative flex h-12 cursor-pointer items-center justify-between overflow-hidden border border-b-0 border-line bg-surface-1 px-4 text-ink-1 shadow-(--shadow-overlay) transition-colors hover:bg-surface-2 ${isExpanded ? 'rounded-none sm:rounded-t-lg' : 'rounded-t-lg'}`}
         onClick={() => !isExpanded && setIsExpanded(true)}
       >
+        {isActive && <div className="live-wire" aria-hidden />}
         <div className="flex min-w-0 items-center gap-2">
-          <div className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${
-            isRunning ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.6)]' : 'bg-neon-blue-300 dark:bg-void-400'
-          }`} />
-          <span className="truncate font-semibold text-black/80 dark:text-white">{resolvedLabel}</span>
+          {isActive ? (
+            <span className="live-dot" aria-label="Agent working" />
+          ) : (
+            <span className={`h-2 w-2 flex-shrink-0 rounded-full ${isRunning ? 'bg-live' : 'bg-line-strong'}`} />
+          )}
+          <span className="truncate text-[13px] font-medium text-ink-1">{resolvedLabel}</span>
         </div>
         <div className="flex items-center gap-2">
           {isRunning && (
-            <span className="rounded bg-black/10 px-1.5 py-0.5 text-xs text-neon-blue-950 dark:bg-white/20 dark:text-white">
+            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[11px] text-ink-2">
               {sessionInfo?.status}
             </span>
           )}
-          {isExpanded && <SpeakerToggle speaker={voice.speaker} variant="onBlue" />}
+          {isExpanded && <SpeakerToggle speaker={voice.speaker} />}
           <button
             onClick={(e) => {
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-            className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/20"
+            className="rounded p-1 text-ink-3 hover:bg-surface-3 hover:text-ink-1"
           >
             <svg
               className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
@@ -296,7 +299,7 @@ export function GlobalClaudePanel({
 
       {/* Expanded panel */}
       {isExpanded && (
-        <div className="flex h-[calc(100%-3rem)] flex-col rounded-none sm:rounded-b-md border border-t-0 border-void-700 bg-[#222228] dark:bg-[#1a1a1a] shadow-(--shadow-overlay) overflow-hidden">
+        <div className="flex h-[calc(100%-3rem)] flex-col rounded-none sm:rounded-b-md border border-t-0 border-line bg-[#1b1e25] dark:bg-[#0d1014] shadow-(--shadow-overlay) overflow-hidden">
           <ClaudeTerminalPanel
             sessionName={sessionName}
             sessionNameAliases={sessionNameAliases}
