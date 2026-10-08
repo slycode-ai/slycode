@@ -36,6 +36,10 @@ function readJson(file) {
         return null;
     }
 }
+// Project status (#0381) is deliberately ignored here: sessions in a paused
+// project keep running (pausing just pauses), so their speech still needs a
+// label. The status rule lives in web/src/lib/project-status.ts (lockstep
+// copies in scripts/kanban.js and messaging/src/project-status.ts).
 function findProject(projectKey) {
     const reg = readJson(path.join(workspaceRoot(), 'projects', 'registry.json'));
     const projects = Array.isArray(reg) ? reg : reg?.projects;

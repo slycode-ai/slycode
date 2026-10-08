@@ -55,6 +55,14 @@
       "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/projects/[id]/status",
+      "regex": "^/api/projects/([^/]+?)/status(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/projects/(?<nxtPid>[^/]+?)/status(?:/)?$"
+    },
+    {
       "page": "/api/providers/[id]/models/refresh",
       "regex": "^/api/providers/([^/]+?)/models/refresh(?:/)?$",
       "routeKeys": {
@@ -459,6 +467,12 @@
       "regex": "^/api/projects/analyze(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/projects/analyze(?:/)?$"
+    },
+    {
+      "page": "/api/projects/folders",
+      "regex": "^/api/projects/folders(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/projects/folders(?:/)?$"
     },
     {
       "page": "/api/projects/reorder",

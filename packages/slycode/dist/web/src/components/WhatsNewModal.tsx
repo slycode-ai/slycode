@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
-  AudioLines, Bug, CalendarSync, ExternalLink, MessageCircle, ShieldCheck, Smartphone, Sparkles, Terminal, X, Zap,
+  AudioLines, Bug, CalendarSync, ChevronLeft, ChevronRight, ExternalLink, MessageCircle, ShieldCheck, Smartphone,
+  Sparkles, Terminal, X, Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { formatReleaseDate, shortVersion, type WhatsNewEntry, type WhatsNewIcon } from '@/lib/whats-new';
+import { formatReleaseDate, shortVersion, stepPage, type WhatsNewEntry, type WhatsNewIcon } from '@/lib/whats-new';
 import { useVisibleViewport } from '@/hooks/useVisibleViewport';
 
 // ============================================================================
@@ -68,12 +69,18 @@ const WAVE = Array.from({ length: 64 }, (_, i) => {
 const DISCORD_BTN = 'bg-[#5865F2] text-white hover:bg-[#4f5bd9]';
 const DISCORD_TILE = 'border-[#5865F2]/35 bg-[#5865F2]/12 text-[#4752c4] dark:text-[#8f98ff]';
 
+const PAGER_BTN =
+  'inline-flex h-[38px] items-center gap-1 rounded-lg border border-line px-2.5 text-[13px] text-ink-2 transition-colors ' +
+  'hover:border-line-strong hover:bg-surface-3 hover:text-ink-1 disabled:pointer-events-none disabled:opacity-40 ' +
+  'max-sm:h-11 max-sm:w-11 max-sm:justify-center max-sm:px-0';
+
 // ============================================================================
 // Modal
 // ============================================================================
 
 interface WhatsNewModalProps {
-  entry: WhatsNewEntry;
+  /** Releases, newest first. More than one adds Back/Next paging ("1 of 3", arrow keys). */
+  pages: WhatsNewEntry[];
   onClose: () => void;
   /** "Full changelog": the gate closes the splash and opens ChangelogModal. */
   onOpenChangelog: () => void;
@@ -81,11 +88,25 @@ interface WhatsNewModalProps {
   onCtaClick?: () => void;
 }
 
-export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: WhatsNewModalProps) {
+export function WhatsNewModal({ pages, onClose, onOpenChangelog, onCtaClick }: WhatsNewModalProps) {
   const headingId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const gotItRef = useRef<HTMLButtonElement>(null);
   const viewport = useVisibleViewport();
+  const [page, setPage] = useState(0);
+  const count = pages.length;
+  const entry = pages[Math.min(page, count - 1)];
+  const paged = count > 1;
+
+  function go(delta: number) {
+    const next = stepPage(page, delta, count);
+    if (next === page) return;
+    setPage(next);
+    bodyRef.current?.scrollTo({ top: 0 });
+    // The pressed button just became disabled at either end; keep focus inside the dialog.
+    if (next === 0 || next === count - 1) gotItRef.current?.focus({ preventScroll: true });
+  }
 
   // Focus "Got it" on open, restore focus on close.
   useEffect(() => {
@@ -94,12 +115,21 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
     return () => previous?.focus?.({ preventScroll: true });
   }, []);
 
-  // Escape closes; Tab stays inside the dialog.
+  // Escape closes; arrows page; Tab stays inside the dialog.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.stopPropagation();
         onClose();
+        return;
+      }
+      if (count > 1 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        setPage(p => {
+          const next = stepPage(p, e.key === 'ArrowRight' ? 1 : -1, count);
+          if (next !== p) bodyRef.current?.scrollTo({ top: 0 });
+          return next;
+        });
         return;
       }
       if (e.key !== 'Tab' || !panelRef.current) return;
@@ -112,7 +142,7 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, count]);
 
   return (
     <div
@@ -129,10 +159,23 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
       >
         {/* Hero: version and a voice waveform that draws in once */}
         <div className="relative shrink-0 border-b border-line bg-surface-2 px-5 pb-4 pt-4 sm:px-6">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
+          <div className="flex items-center gap-2 pr-12 text-[13px] font-medium text-ink-2">
             <img src="/slycode_logo_light.webp" alt="" className="h-[22px] w-[22px] object-contain mix-blend-multiply dark:hidden" />
             <img src="/slycode_logo.webp" alt="" className="hidden h-[22px] w-[22px] object-contain mix-blend-lighten dark:block" />
             SlyCode
+            {paged && (
+              // One tick per release, newest on the left; the lit one is on screen.
+              <span className="ml-auto flex items-center gap-1" aria-hidden>
+                {pages.map((p, i) => (
+                  <span
+                    key={p.version}
+                    className={`h-1 rounded-full transition-[width,background-color] duration-200 ${
+                      i === page ? 'w-5 bg-accent' : 'w-2.5 bg-line-strong'
+                    }`}
+                  />
+                ))}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -156,7 +199,7 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
                 className="h-[72px] w-full rounded-lg object-cover"
               />
             ) : (
-              <div className="whats-new-wave flex h-14 min-w-0 items-center gap-[3px] overflow-hidden sm:h-[72px]" aria-hidden>
+              <div key={entry.version} className="whats-new-wave flex h-14 min-w-0 items-center gap-[3px] overflow-hidden sm:h-[72px]" aria-hidden>
                 {WAVE.map((b, i) => (
                   <i
                     key={i}
@@ -170,7 +213,7 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-1 pt-5 sm:px-6">
+        <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-5 pb-1 pt-5 sm:px-6">
           <h2 id={headingId} className="max-w-[30ch] text-[21px] font-semibold leading-tight tracking-[-0.015em] sm:text-2xl">
             {entry.headline}
           </h2>
@@ -228,16 +271,46 @@ export function WhatsNewModal({ entry, onClose, onOpenChangelog, onCtaClick }: W
             onClick={onOpenChangelog}
             className="py-1.5 text-[13px] text-ink-2 underline-offset-[3px] transition-colors hover:text-accent hover:underline max-sm:min-h-11"
           >
-            Full changelog
+            <span className="sm:hidden">Changelog</span>
+            <span className="max-sm:hidden">Full changelog</span>
           </button>
-          <button
-            ref={gotItRef}
-            type="button"
-            onClick={onClose}
-            className="h-[38px] rounded-lg bg-primary px-5 text-sm font-semibold text-on-primary transition-[filter] hover:brightness-110 max-sm:h-11"
-          >
-            Got it
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {paged && (
+              <div role="group" aria-label="Releases" className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => go(-1)}
+                  disabled={page === 0}
+                  aria-label="Back to the newer release"
+                  className={PAGER_BTN}
+                >
+                  <ChevronLeft size={16} strokeWidth={1.75} aria-hidden />
+                  <span className="max-sm:sr-only">Back</span>
+                </button>
+                <span aria-live="polite" className="min-w-[2.75rem] text-center sm:min-w-[3.25rem] text-xs tabular-nums text-ink-3">
+                  {page + 1} of {count}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => go(1)}
+                  disabled={page === count - 1}
+                  aria-label="Next: the earlier release"
+                  className={PAGER_BTN}
+                >
+                  <span className="max-sm:sr-only">Next</span>
+                  <ChevronRight size={16} strokeWidth={1.75} aria-hidden />
+                </button>
+              </div>
+            )}
+            <button
+              ref={gotItRef}
+              type="button"
+              onClick={onClose}
+              className="h-[38px] rounded-lg bg-primary px-5 text-sm font-semibold text-on-primary transition-[filter] hover:brightness-110 max-sm:h-11"
+            >
+              Got it
+            </button>
+          </div>
         </div>
       </div>
     </div>

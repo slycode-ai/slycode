@@ -148,6 +148,15 @@ export declare class SessionManager {
     private onPtyExit;
     private handlePtyExit;
     getSessionInfo(name: string): SessionInfo | null;
+    /**
+     * The POST /sessions answer for a just-spawned session: the full session
+     * info (incl. `promptDelivery`, card #0382 — a Windows deferred prompt is
+     * 'pending' here and the caller must wait for it) with the spawn-time
+     * fields createSession knows best laid over it.
+     */
+    createdSessionInfo(name: string, fields: Partial<SessionInfo>): SessionInfo;
+    /** Card #0382: fold a submitVerified result into the session's PromptDeliveryState. */
+    private promptDeliveryFrom;
     getSessionCwd(name: string): string | null;
     getAllSessions(): SessionInfo[];
     getGroupStatus(group: string): Record<string, {
@@ -300,6 +309,15 @@ export declare class SessionManager {
      * first check and pays none of this; only an unsettled screen re-checks.
      */
     private static readonly POST_PASTE_CONFIRM_DELAYS_MS;
+    /** Startup readiness wait for deferred / resume pastes (card #0382). */
+    private static readonly READY_INPUT_TIMEOUT_MS;
+    private static readonly READY_INPUT_POLL_MS;
+    /**
+     * Re-paste over a box that still reads empty after the paste. Off on
+     * Windows: ConPTY renders a long paste seconds late, so "empty" there means
+     * "not drawn yet" and a re-paste duplicates the prompt (card #0382).
+     */
+    private static readonly REPASTE_ON_EMPTY;
     /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
     private static readonly VERIFY_SNAPSHOT_LINES;
     private verifySnapshotClassify;

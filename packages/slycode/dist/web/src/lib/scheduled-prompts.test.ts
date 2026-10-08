@@ -203,3 +203,30 @@ test('formatCountdown', () => {
   assert.equal(formatCountdown(new Date(NOW + 10_000).toISOString(), now), 'due now');
   assert.equal(formatCountdown(new Date(NOW - 2 * HOUR).toISOString(), now), '2h 0m ago');
 });
+
+// ---------------------------------------------------------------------------
+// Resume fence (card #0381)
+// ---------------------------------------------------------------------------
+
+test('fence: pending entry due before resumedAt is missed-paused, even inside the catch-up window', () => {
+  const e = entry({ fireAt: new Date(NOW - 10 * MIN).toISOString() });
+  assert.equal(classifyScheduledPrompt(e, NOW, HOST, SCHEDULED_PROMPT_LIMITS, NOW - MIN), 'missed-paused');
+});
+
+test('fence: entry due after resumedAt fires as normal', () => {
+  const e = entry({ fireAt: new Date(NOW - 30_000).toISOString() });
+  assert.equal(classifyScheduledPrompt(e, NOW, HOST, SCHEDULED_PROMPT_LIMITS, NOW - MIN), 'fire');
+});
+
+test('fence: 0 / omitted means no fence', () => {
+  const e = entry({ fireAt: new Date(NOW - 10 * MIN).toISOString() });
+  assert.equal(classifyScheduledPrompt(e, NOW, HOST, SCHEDULED_PROMPT_LIMITS, 0), 'fire');
+  assert.equal(classifyScheduledPrompt(e, NOW, HOST), 'fire');
+});
+
+test('fence: future entries, other hosts and terminal entries are unaffected', () => {
+  const fence = NOW + HOUR; // fence later than everything
+  assert.equal(classifyScheduledPrompt(entry({ fireAt: new Date(NOW + MIN).toISOString() }), NOW, HOST, SCHEDULED_PROMPT_LIMITS, fence), 'skip');
+  assert.equal(classifyScheduledPrompt(entry({ host: 'other' }), NOW, HOST, SCHEDULED_PROMPT_LIMITS, fence), 'skip');
+  assert.equal(classifyScheduledPrompt(entry({ state: 'delivered', finishedAt: new Date(NOW - MIN).toISOString() }), NOW, HOST, SCHEDULED_PROMPT_LIMITS, fence), 'skip');
+});

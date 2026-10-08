@@ -9,7 +9,7 @@ import { sanitizePersistedState } from './persisted-state-validation.js';
 import { spawnPty, writeToPty, writeChunkedToPty, CHUNKED_WRITE_SIZE, resizePty, killPty, isCommandShellSafe } from './pty-handler.js';
 import { isCommandAllowed } from './provider-registry.js';
 import { getTransport } from './transport/index.js';
-import type { SessionTransport, TransportHooks } from './transport/index.js';
+import type { SessionTransport, TransportHooks, DeliverOptions } from './transport/index.js';
 import {
   shouldArmDetection,
   chooseRelinkCandidate,
@@ -42,12 +42,14 @@ import type {
   SnapshotResult,
   VerifiedSubmitResult,
   DeliveryResult,
+  PromptDeliveryState,
 } from './types.js';
 import {
   classifyInputRegion,
   extractInputRegion,
   decideNextAction,
   countMatchingPlaceholders,
+  readyInputVerdict,
   isSubmitProvider,
   type SubmitProvider,
   type InputRegionClassification,
@@ -671,6 +673,10 @@ export class SessionManager {
           if (d && d.outcome !== 'delivered') {
             console.warn(`Reuse-path prompt delivery ${d.outcome} for ${name}${d.reason ? ` (${d.reason})` : ''}`);
           }
+          // Card #0382: carried on the session info this call returns, so a
+          // caller that POSTed a prompt learns it stranded instead of
+          // reading the 200 as "delivered".
+          existing.promptDelivery = this.promptDeliveryFrom('reuse_paste', result);
         }
         // Reattach if was detached
         if (existing.status === 'detached' && existing.pty) {
@@ -813,6 +819,7 @@ export class SessionManager {
         transportState: plan.transportState,
         activityTransitions: [],
         pendingPrompt: deferredPrompt,
+        promptDelivery: deferredPrompt ? { state: 'pending', mode: 'deferred_paste', updatedAt: now } : undefined,
       };
 
       // Persist BEFORE spawning the PTY to avoid a race condition:
@@ -875,9 +882,7 @@ export class SessionManager {
 
       console.log(`Session created: ${name} [${providerConfig?.displayName || command}] (pid: ${session.pid})${doResume ? ' [resumed]' : ''}${assignedSessionId ? ` [assigned-id ${assignedSessionId}]` : ''}`);
 
-      return {
-        name,
-        group: session.group,
+      return this.createdSessionInfo(name, {
         status: 'running',
         pid: session.pid,
         connectedClients: 0,
@@ -886,7 +891,7 @@ export class SessionManager {
         lastActive: session.lastActive,
         provider: providerId,
         skipPermissions,
-      };
+      });
     } catch (err) {
       // Clean up the 'creating' placeholder on failure
       this.sessions.delete(name);
@@ -903,7 +908,7 @@ export class SessionManager {
   /** Callbacks a transport may use; the delivery ladder and detection claim stay in the manager. */
   private transportHooks(): TransportHooks {
     return {
-      performVerifiedDelivery: (sessionName, prompt) => this.performVerifiedDelivery(sessionName, prompt),
+      performVerifiedDelivery: (sessionName, prompt, opts) => this.performVerifiedDelivery(sessionName, prompt, opts),
       startDetection: (sessionName, providerId, beforeFiles) => { void this.detectProviderSessionId(sessionName, providerId, beforeFiles); },
       claimSessionId: async (sessionName, sessionId) => { await this.claimDetectedSessionId(sessionName, sessionId, true); },
     };
@@ -1109,7 +1114,12 @@ export class SessionManager {
    */
   private async deliverPendingPrompt(name: string): Promise<void> {
     const session = this.sessions.get(name);
-    if (!session?.pendingPrompt || !session.pty) return;
+    if (!session?.pendingPrompt) return;
+    if (!session.pty) {
+      session.pendingPrompt = undefined;
+      session.promptDelivery = { state: 'failed', mode: 'deferred_paste', reason: 'session_has_no_pty', updatedAt: new Date().toISOString() };
+      return;
+    }
 
     const prompt = session.pendingPrompt;
     session.pendingPrompt = undefined;
@@ -1123,14 +1133,18 @@ export class SessionManager {
       // uses the same self-verifying primitive — it already carried the
       // chunk-scaled settle, and now also gets the pre-paste dialog check
       // (resume-time update/trust prompts) plus post-Enter verification.
-      const result = await this.submitVerified(name, { prompt, force: true });
+      // awaitReadyInput (card #0382): the provider is still starting — wait
+      // for a readable, settled input box; never paste into startup chrome.
+      const result = await this.submitVerified(name, { prompt, force: true, awaitReadyInput: true });
       const d = result.delivery;
+      session.promptDelivery = this.promptDeliveryFrom('deferred_paste', result);
       if (!result.success) {
-        console.error(`Deferred prompt delivery ${d?.outcome ?? 'failed'} for ${name}${d?.reason ? ` (${d.reason})` : ''}`);
+        console.error(`Deferred prompt delivery ${d?.outcome ?? 'failed'} for ${name}${d?.reason ? ` (${d.reason})` : ''}${d?.correlationId ? ` id=${d.correlationId}` : ''}`);
         return;
       }
       console.log(`Deferred prompt delivered to ${name} (${prompt.length} chars${d?.resends ? `, ${d.resends} Enter resend(s)` : ''})`);
     } catch (err) {
+      session.promptDelivery = { state: 'failed', mode: 'deferred_paste', reason: `exception: ${(err as Error).message}`, updatedAt: new Date().toISOString() };
       console.error(`Failed to deliver prompt to ${name}:`, err);
     }
   }
@@ -1191,6 +1205,9 @@ export class SessionManager {
       session.pendingPromptTimer = undefined;
     }
     session.pendingPrompt = undefined;
+    if (session.promptDelivery?.state === 'pending') {
+      session.promptDelivery = { ...session.promptDelivery, state: 'failed', reason: 'session_exited_before_delivery', updatedAt: exitedAt };
+    }
 
     // Cancel any in-flight GUID detection — prevent ghost claims on stopped sessions
     session.guidDetectionCancelled = true;
@@ -1323,6 +1340,29 @@ export class SessionManager {
       exitedAt: session.exitedAt,
       createdAt: session.createdAt,
       conversationStartedAt: session.conversationStartedAt || session.createdAt,
+      promptDelivery: session.promptDelivery,
+    };
+  }
+
+  /**
+   * The POST /sessions answer for a just-spawned session: the full session
+   * info (incl. `promptDelivery`, card #0382 — a Windows deferred prompt is
+   * 'pending' here and the caller must wait for it) with the spawn-time
+   * fields createSession knows best laid over it.
+   */
+  createdSessionInfo(name: string, fields: Partial<SessionInfo>): SessionInfo {
+    return { ...this.getSessionInfo(name)!, ...fields };
+  }
+
+  /** Card #0382: fold a submitVerified result into the session's PromptDeliveryState. */
+  private promptDeliveryFrom(mode: PromptDeliveryState['mode'], result: VerifiedSubmitResult): PromptDeliveryState {
+    const d = result.delivery;
+    return {
+      state: d?.outcome ?? 'failed',
+      mode,
+      reason: d ? d.reason : result.error,
+      correlationId: d?.correlationId,
+      updatedAt: new Date().toISOString(),
     };
   }
 
@@ -2293,6 +2333,15 @@ export class SessionManager {
    * first check and pays none of this; only an unsettled screen re-checks.
    */
   private static readonly POST_PASTE_CONFIRM_DELAYS_MS = [600, 900, 1200];
+  /** Startup readiness wait for deferred / resume pastes (card #0382). */
+  private static readonly READY_INPUT_TIMEOUT_MS = 45_000;
+  private static readonly READY_INPUT_POLL_MS = 1000;
+  /**
+   * Re-paste over a box that still reads empty after the paste. Off on
+   * Windows: ConPTY renders a long paste seconds late, so "empty" there means
+   * "not drawn yet" and a re-paste duplicates the prompt (card #0382).
+   */
+  private static readonly REPASTE_ON_EMPTY = os.platform() !== 'win32';
   /** Snapshot depth for input-region classification — enough rows for chrome + a wrapped paste. */
   private static readonly VERIFY_SNAPSHOT_LINES = 60;
 
@@ -2426,7 +2475,7 @@ export class SessionManager {
         void this.ensureSessionIdDetection(resolvedName);
       }
 
-      const delivery = await (await this.transportForProvider(session.provider)).deliver(session, prompt, this.transportHooks());
+      const delivery = await (await this.transportForProvider(session.provider)).deliver(session, prompt, this.transportHooks(), { awaitReadyInput: request.awaitReadyInput });
       return { success: delivery.outcome === 'delivered', sessionStatus: session.status, delivery };
     } finally {
       releaseMutex!();
@@ -2444,7 +2493,7 @@ export class SessionManager {
    * resend (bounded) → typed DeliveryResult. Never re-pastes except over a
    * provably empty input box.
    */
-  private async performVerifiedDelivery(resolvedName: string, prompt: string): Promise<DeliveryResult> {
+  private async performVerifiedDelivery(resolvedName: string, prompt: string, opts: DeliverOptions = {}): Promise<DeliveryResult> {
     const session = this.sessions.get(resolvedName)!;
     const startedAt = Date.now();
     const warnings: string[] = [];
@@ -2505,6 +2554,27 @@ export class SessionManager {
         return mk('delivered', { verified: false, mode: 'unverified_paste' }, 1, 0);
       }
 
+      // --- Startup readiness (deferred / resume path, card #0382) ---
+      // Real Windows sequence: Codex drew its composer with only a
+      // "? for shortcuts" row (unreadable), the old flow pasted anyway, then
+      // Codex raised its agent-sandbox dialog and the Enter went to it. Wait
+      // until the input box reads on two consecutive polls; a dialog is a
+      // hard stop; a screen that never becomes readable fails loudly.
+      if (opts.awaitReadyInput) {
+        const readyPolls: Array<InputRegionClassification | null> = [];
+        const deadline = Date.now() + SessionManager.READY_INPUT_TIMEOUT_MS;
+        let verdict: ReturnType<typeof readyInputVerdict> = 'wait';
+        for (;;) {
+          readyPolls.push(this.verifySnapshotClassify(resolvedName, null));
+          verdict = readyInputVerdict(readyPolls);
+          if (verdict !== 'wait' || Date.now() >= deadline) break;
+          await new Promise(r => setTimeout(r, SessionManager.READY_INPUT_POLL_MS));
+          if (!this.sessions.get(resolvedName)?.pty) return mk('failed', { reason: 'session_stopped' });
+        }
+        if (verdict === 'blocked') return mk('blocked', { reason: 'blocked_dialog_before_paste' });
+        if (verdict !== 'ready') return mk('failed', { reason: 'input_not_ready' });
+      }
+
       // --- Pre-paste check ---
       const pre = this.verifySnapshotClassify(resolvedName, prompt);
       if (pre === 'no_input_region') {
@@ -2516,6 +2586,10 @@ export class SessionManager {
       if (pre === 'unrecognized') {
         warnings.push('pre_paste_unrecognized');
         diag('pre_paste_unrecognized'); // chrome drift evidence — bridge.log only
+      }
+      if (opts.awaitReadyInput && (pre === 'unrecognized' || pre === null)) {
+        // Became unreadable between the readiness check and now — never paste blind.
+        return mk('failed', { reason: 'input_not_ready' });
       }
       // Layout-independent paste signal (card #0336): count placeholders that
       // corroborate our payload BEFORE pasting; a NEW occurrence afterwards
@@ -2538,12 +2612,18 @@ export class SessionManager {
       // immediately in the common case (matches on the first look).
       await paste();
       let post = this.verifySnapshotClassify(resolvedName, prompt);
+      // What the screen ACTUALLY read on the last look. `post` may be
+      // promoted to queued_ours by placeholder novelty; `rawPost` never is —
+      // an unreadable screen can never authorise Enter on the startup path
+      // (card #0382 review: a placeholder visible under an unrecognised
+      // dialog is not a readable composer).
+      let rawPost = post;
       let repasted = false;
       const confirmQueued = (): boolean => {
         if (post === 'queued_ours') return true;
         if (post !== 'no_input_region' && countMatchingPlaceholders(snapshotText(), prompt) > prePlaceholders) {
           noveltyConfirmed = true;
-          warnings.push('paste_confirmed_by_placeholder_novelty');
+          if (!warnings.includes('paste_confirmed_by_placeholder_novelty')) warnings.push('paste_confirmed_by_placeholder_novelty');
           post = 'queued_ours';
           return true;
         }
@@ -2555,18 +2635,31 @@ export class SessionManager {
           // A dialog swallowed the paste. Do NOT send Enter — it could accept it.
           return mk('blocked', { reason: 'blocked_dialog_swallowed_paste' });
         }
-        if (post === 'empty' && preWasEmptyish && !repasted) {
+        if (post === 'empty' && preWasEmptyish && !repasted && SessionManager.REPASTE_ON_EMPTY) {
           // Paste provably absent over an empty box — the one case where a
           // re-paste is safe (cannot duplicate or merge). Once only.
           warnings.push('paste_retried');
           repasted = true;
           await paste();
-          post = this.verifySnapshotClassify(resolvedName, prompt);
+          post = rawPost = this.verifySnapshotClassify(resolvedName, prompt);
           continue;
         }
         // queued_other | empty | unrecognized | null → let the screen settle, re-check.
         await new Promise(r => setTimeout(r, extraDelay));
-        post = this.verifySnapshotClassify(resolvedName, prompt);
+        post = rawPost = this.verifySnapshotClassify(resolvedName, prompt);
+      }
+      if (post === 'empty' && !SessionManager.REPASTE_ON_EMPTY) {
+        // Windows (card #0382): Codex renders a paste SECONDS late under
+        // ConPTY. Reading 'empty' meant "not drawn yet", and the old
+        // immediate re-paste merged two copies into one
+        // "[Pasted Content 5710 chars]" that matched neither → no Enter.
+        // Never re-paste here; give the render a size-scaled grace instead.
+        const lateDeadline = Date.now() + Math.min(15000, chunkCount * 2000);
+        while (post === 'empty' && Date.now() < lateDeadline) {
+          await new Promise(r => setTimeout(r, 500));
+          post = rawPost = this.verifySnapshotClassify(resolvedName, prompt);
+          if (confirmQueued()) break;
+        }
       }
       confirmQueued(); // final look after the last settle delay
 
@@ -2587,6 +2680,11 @@ export class SessionManager {
         ).text;
         const seen = regTxt.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
         return mk('failed', { reason: `paste_not_observed_over_existing_input; box="${seen}"` });
+      }
+      if (opts.awaitReadyInput && (rawPost === 'unrecognized' || rawPost === null)) {
+        // Startup path: the screen changed under the paste (e.g. a first-run
+        // dialog appeared). An Enter now could pick a dialog option — stop.
+        return mk('ambiguous', { reason: 'screen_changed_after_paste' });
       }
       // post === 'queued_ours' | 'unrecognized' | null → proceed. For
       // unrecognized/null we still send Enter: the paste DID land (or we

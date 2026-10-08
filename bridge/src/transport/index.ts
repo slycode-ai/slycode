@@ -35,4 +35,4 @@ export function getTransport(providerConfig: ProviderConfig | null | undefined):
   return getTransportById(providerConfig?.transport);
 }
 
-export type { SessionTransport, SpawnPlan, SpawnPlanInput, TransportHooks, SessionCandidate, SessionLike } from './types.js';
+export type { SessionTransport, SpawnPlan, SpawnPlanInput, TransportHooks, SessionCandidate, SessionLike, DeliverOptions } from './types.js';

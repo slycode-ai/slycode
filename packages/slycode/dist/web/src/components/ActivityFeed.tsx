@@ -42,6 +42,7 @@ const eventLabels: Record<EventType, string> = {
   skill_imported: 'Imported',
   session_started: 'Session',
   session_stopped: 'Session',
+  project_status: 'Project',
 };
 
 // Event labels are ink; only events that carry state get a state colour.
@@ -58,6 +59,7 @@ const eventColors: Record<EventType, string> = {
   skill_imported: 'text-ink-2',
   session_started: 'text-live-text',
   session_stopped: 'text-ink-3',
+  project_status: 'text-warn-text',
 };
 
 const FALLBACK_LABEL = 'Event';

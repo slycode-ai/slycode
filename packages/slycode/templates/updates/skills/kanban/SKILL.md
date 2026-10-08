@@ -1,7 +1,7 @@
 ---
 name: kanban
-version: 1.21.0
-updated: 2026-10-01
+version: 1.23.0
+updated: 2026-10-06
 description: "Manage kanban cards via CLI with commands for search, create, update, move, reorder, problem tracking, cross-agent notes, scheduled automations, cross-card prompt execution, card session management (list/relink/link/dismiss/stop), AI-set status line (manual + tiered auto-status), and structured questionnaires"
 provider: claude
 ---
@@ -30,7 +30,7 @@ Manage kanban cards via CLI: `sly-kanban <command>`
 | `respond` | Reply to a cross-card prompt (--wait callback) |
 | `session` | Manage a card's terminal sessions (list, relink, link, dismiss, stop) |
 | `areas` | List available areas |
-| `projects` | List registered projects — the refs for `--project` and each project's cross-project setting |
+| `projects` | List registered projects — the refs for `--project`, each project's cross-project setting and status; `projects status` reads/sets a project's status |
 
 ## Card Identification
 
@@ -726,6 +726,36 @@ What happens when it is accepted:
 - Both boards log a `card_prompt` event; the target card's auto-status reads `Prompt received from <project>`.
 
 `--project` cannot write to another project's card (`update`, `move`, `notes add`, …are refused). If something on that card needs changing, ask the card to do it via `prompt`. The same explicit-instruction rule as ordinary cross-card prompts applies: only target another project when a user, card description, or automation tells you to.
+
+### Project status (paused / complete / archived)
+
+Every registered project has a status: **active** (default), **paused**, **complete** or **archived**. Only an **active** project fires anything on a timer — automation cards, scheduled card sends and the atlas refresh are all *held* for the other three. Resuming skips (never replays) runs that fell due while held; each timer picks up at its next scheduled time. Running sessions are never touched by a status change.
+
+```bash
+sly-kanban projects                                   # STATUS column; active projects first
+sly-kanban projects status slycode-web                # status, since when, what it holds
+sly-kanban projects status slycode-web paused         # active | paused | complete | archived
+sly-kanban projects status slycode-web active         # resume (archived → active = restore)
+```
+
+- **Change a project's status only when the owner asks.** It stops (or restarts) that project's automations.
+- A non-active project **refuses cross-project prompts** with exit `3`, whatever its opt-in flag says: `Refused: project "X" (x) is paused.` Treat it like the opt-in refusal — stop and tell the user; resuming is their call. Reads with `--project` still work, and prompts from the project's *own* cards are not gated.
+- Things done by hand inside a held project still work (open its board, start a session, `automation run`).
+- `projects status <ref> <status>` cannot be run through `--project`.
+
+### Project folders (Den grouping)
+
+Projects can be grouped into folders in the Den (Work, Personal, Clients…). Folder collapse state lives in each browser, not the registry.
+
+```bash
+sly-kanban projects folder slycode-web "Work"         # put a project in a folder (created if new)
+sly-kanban projects folder slycode-web --none         # take it out of its folder
+sly-kanban projects folders                           # list folders with their projects (--json too)
+sly-kanban projects folders rename "Work" "Day job"   # keeps every assignment
+sly-kanban projects folders delete "Clients"          # its projects become unfiled; nothing deleted
+```
+
+Names are unique (case-insensitive), at most 40 characters. Folder writes cannot go through `--project`. Like status, organise projects only when the owner asks.
 
 ## Card Session Management
 

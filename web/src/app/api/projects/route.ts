@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { loadRegistry, saveRegistry } from '@/lib/registry';
+import { loadRegistry, mutateRegistry } from '@/lib/registry';
+import { RegistryLockError } from '@/lib/registry-lock';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -133,15 +134,27 @@ export async function POST(request: Request) {
     };
     ensureProjectSessionKey(newProject);
 
-    registry.projects.push(newProject);
-    registry.lastUpdated = new Date().toISOString();
-    await saveRegistry(registry);
+    // Fresh read under the registry lock (#0381): the scaffold above can take
+    // seconds, so the snapshot read for the duplicate check is stale by now.
+    const clash = await mutateRegistry((fresh) => {
+      const dup = fresh.projects.find((p) => p.id === projectId || p.path === resolvedPath);
+      if (dup) return dup;
+      fresh.projects.push(newProject);
+      return null;
+    });
+    if (clash) {
+      return NextResponse.json(
+        { error: `This project was registered meanwhile as '${clash.name}'` },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json({
       project: newProject,
       scaffold: scaffoldResult,
     }, { status: 201 });
   } catch (error) {
+    if (error instanceof RegistryLockError) return NextResponse.json({ error: error.message }, { status: 503 });
     console.error('Failed to create project:', error);
     return NextResponse.json(
       { error: 'Failed to create project', details: String(error) },

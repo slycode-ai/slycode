@@ -61,7 +61,7 @@ export class StateManager {
     loadProjects() {
         try {
             const data = JSON.parse(fs.readFileSync(getRegistryFile(), 'utf-8'));
-            this.state.projects = data.projects.map((p) => ({
+            this.state.projects = data.projects.map((p, i) => ({
                 id: p.id,
                 name: p.name,
                 description: p.description,
@@ -70,7 +70,12 @@ export class StateManager {
                 // If absent, session-keys helpers derive on-the-fly from path.
                 sessionKey: p.sessionKey,
                 sessionKeyAliases: p.sessionKeyAliases,
+                // #0381: status shapes the Telegram project lists; order matches the Den.
+                status: p.status,
+                order: typeof p.order === 'number' ? p.order : i,
             }));
+            // Stable sort by the Den's order (registry file order is not the display order).
+            this.state.projects.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         }
         catch (err) {
             console.warn('Could not load project registry:', err.message);

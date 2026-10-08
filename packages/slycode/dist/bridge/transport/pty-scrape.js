@@ -45,8 +45,8 @@ export class PtyScrapeTransport {
             hooks.startDetection(session.name, session.provider, plan.beforeFiles);
         }
     }
-    deliver(session, prompt, hooks) {
-        return hooks.performVerifiedDelivery(session.name, prompt);
+    deliver(session, prompt, hooks, opts) {
+        return hooks.performVerifiedDelivery(session.name, prompt, opts);
     }
     supportsDetection(providerConfig, cwd) {
         return supportsSessionDetection(providerConfig) && !!getProviderSessionDir(providerConfig.id, cwd);

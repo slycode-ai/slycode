@@ -18,7 +18,7 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { promises as fs, mkdtempSync } from 'fs';
+import { promises as fs, mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { KanbanCard } from './types';
@@ -27,9 +27,18 @@ const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'slycode-deliver-'));
 const LOG_PATH = path.join(tmpDir, 'automation.log');
 process.env.SLYCODE_AUTOMATION_LOG = LOG_PATH;
 process.env.SLYCODE_LIVENESS_CHECK_MS = '5';
+process.env.SLYCODE_DEFERRED_DELIVERY_WAIT_MS = '1000';
 process.env.BRIDGE_URL = 'http://fake-bridge';
 // Events (event-log.ts) resolve under SLYCODE_HOME — keep test writes out of the real board.
 process.env.SLYCODE_HOME = tmpDir;
+// Scheduled runs re-check their project's status in the registry right before
+// delivery (#0381) — register 'proj' as an active project so these direct
+// calls behave like a scheduler fire for a live project.
+mkdirSync(path.join(tmpDir, 'projects'), { recursive: true });
+writeFileSync(path.join(tmpDir, 'projects', 'registry.json'), JSON.stringify({
+  version: '2.1.0', lastUpdated: '',
+  projects: [{ id: 'proj', name: 'Proj', description: '', path: '/tmp/proj', hasClaudeMd: false, masterCompliant: false, areas: [], tags: [], sessionKey: 'proj', sessionKeyAliases: [] }],
+}));
 
 // tsx runs this file as CJS (no top-level await), and ESM imports are hoisted
 // above the env assignments — so the module under test is loaded with an
@@ -48,6 +57,8 @@ interface Scenario {
   submit?: { status: number; body: unknown };
   /** Response for GET /sessions/:name (liveness) */
   info?: { status: number; body: unknown };
+  /** Successive GET /sessions/:name bodies (status 200); the last repeats. Wins over `info`. */
+  infoSeq?: unknown[];
   /** Response for GET /sessions/:name/input-region */
   inputRegion?: { classification: string };
   /** Throw on POST /sessions */
@@ -88,6 +99,10 @@ before(() => {
     }
     if (method === 'GET' && url.endsWith('/input-region')) {
       return json(200, scenario.inputRegion ?? { classification: 'idle' });
+    }
+    if (method === 'GET' && url.includes('/sessions/') && scenario.infoSeq?.length) {
+      const b = scenario.infoSeq.length > 1 ? scenario.infoSeq.shift() : scenario.infoSeq[0];
+      return json(200, b);
     }
     if (method === 'GET' && url.includes('/sessions/')) {
       const r = scenario.info ?? { status: 200, body: { status: 'running' } };
@@ -206,11 +221,91 @@ test('resume: cli_arg + alive but startup dialog → blocked hard failure', asyn
   assert.match(v.error!, /update\/trust dialog/);
 });
 
-test('resume: deferred_paste (Windows) takes the same liveness path', async () => {
+test('resume: deferred_paste from a bridge without promptDelivery (pre-#0382) keeps the liveness path', async () => {
   reset({ create: { status: 200, body: { status: 'running', delivery: { ...cliArg, mode: 'deferred_paste' } } }, info: { status: 200, body: { status: 'running' } } });
   const v = await deliverToSession(BASE);
   assert.equal(v.success, true);
   assert.equal(v.livenessCheck?.type, 'checkSessionAlive');
+});
+
+// ---------------------------------------------------------------------------
+// Windows deferred paste (card #0382): the bridge's recorded outcome is the verdict
+// ---------------------------------------------------------------------------
+
+const deferred = { ...cliArg, mode: 'deferred_paste' };
+const pending = { state: 'pending', mode: 'deferred_paste', updatedAt: 'x' };
+
+test('resume: deferred_paste waits for promptDelivery → delivered → success, logged as verified', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', resumed: true, delivery: deferred, promptDelivery: pending } },
+    infoSeq: [{ status: 'running', promptDelivery: pending }, { status: 'running', promptDelivery: { state: 'delivered', mode: 'deferred_paste', updatedAt: 'y' } }],
+  });
+  const v = await deliverToSession(BASE);
+  assert.equal(v.success, true);
+  assert.equal(v.deliveryOutcome, 'delivered');
+  assert.equal(v.livenessCheck?.type, 'deferredPaste');
+  assert.equal(v.delivery?.verified, true);
+  assert.ok(!calls.some(c => c.url.endsWith('/input-region')), 'the bridge verdict replaces the liveness/dialog probes');
+});
+
+test('resume: deferred_paste blocked by a startup dialog → hard failure, outcome blocked, says NOT pasted', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', delivery: deferred, promptDelivery: pending } },
+    infoSeq: [{ status: 'running', promptDelivery: { state: 'blocked', mode: 'deferred_paste', reason: 'blocked_dialog_before_paste', correlationId: '03237d56', updatedAt: 'y' } }],
+  });
+  const v = await deliverToSession(BASE);
+  assert.equal(v.success, false);
+  assert.equal(v.failureKind, 'hard');
+  assert.equal(v.deliveryOutcome, 'blocked');
+  assert.match(v.error!, /NOT pasted/);
+  assert.match(v.error!, /03237d56/);
+});
+
+test('resume: deferred_paste ambiguous / failed → honest hard failure with the reason', async () => {
+  for (const [state, reason] of [['ambiguous', 'screen_changed_after_paste'], ['failed', 'input_not_ready']] as const) {
+    reset({
+      create: { status: 200, body: { status: 'running', delivery: deferred, promptDelivery: pending } },
+      infoSeq: [{ status: 'running', promptDelivery: { state, mode: 'deferred_paste', reason, updatedAt: 'y' } }],
+    });
+    const v = await deliverToSession(BASE);
+    assert.equal(v.success, false, state);
+    assert.equal(v.deliveryOutcome, state);
+    assert.match(v.error!, new RegExp(reason));
+    assert.equal(v.delivery?.outcome, state, 'the log records the real outcome, not the bridge placeholder "delivered"');
+  }
+});
+
+test('resume: deferred_paste still pending at the bound → ambiguous hard failure, never "started"', async () => {
+  reset({ create: { status: 200, body: { status: 'running', delivery: deferred, promptDelivery: pending } }, infoSeq: [{ status: 'running', promptDelivery: pending }] });
+  const v = await deliverToSession(BASE);
+  assert.equal(v.success, false);
+  assert.equal(v.deliveryOutcome, 'ambiguous');
+  assert.match(v.error!, /still pending/);
+});
+
+test('resume: promptDelivery only on the GET (POST answer without it) is still honoured', async () => {
+  reset({ create: { status: 200, body: { status: 'running', delivery: deferred } }, infoSeq: [{ status: 'running', promptDelivery: { state: 'failed', mode: 'deferred_paste', reason: 'session_exited_before_delivery', updatedAt: 'y' } }] });
+  const v = await deliverToSession(BASE);
+  assert.equal(v.success, false);
+  assert.match(v.error!, /session_exited_before_delivery/);
+});
+
+test('triggerAutomation (fresh, Windows deferred_paste) → waits and records a blocked start honestly', async () => {
+  reset({
+    create: { status: 200, body: { status: 'running', pid: 7, delivery: deferred, promptDelivery: pending } },
+    infoSeq: [{ status: 'running', promptDelivery: { state: 'blocked', mode: 'deferred_paste', reason: 'blocked_dialog_before_paste', updatedAt: 'y' } }],
+  });
+  const card = automationCard();
+  card.automation!.freshSession = true;
+  const r = await triggerAutomation(card, 'proj', '/tmp/proj');
+  assert.equal(r.success, false);
+  assert.equal(r.deliveryOutcome, 'blocked');
+  assert.match(r.error!, /NOT pasted/);
+  const last = await lastLogEntry();
+  assert.equal(last.outcome, 'error');
+  assert.match(last.error, /NOT pasted/);
+  assert.equal(last.livenessCheck.type, 'deferredPaste');
+  assert.equal(last.delivery.outcome, 'blocked');
 });
 
 // ---------------------------------------------------------------------------
@@ -516,3 +611,8 @@ test('fire: delivered first time, no deferrals → no deliveryNote', async () =>
   assert.equal(e.state, 'delivered');
   assert.equal(e.deliveryNote, undefined);
 });
+
+async function lastLogEntry() {
+  const lines = (await fs.readFile(LOG_PATH, 'utf-8')).trim().split('\n');
+  return JSON.parse(lines[lines.length - 1]);
+}

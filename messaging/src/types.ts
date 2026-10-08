@@ -157,6 +157,8 @@ export interface NavigationTarget {
 
 // --- Project / State ---
 
+export type ProjectStatus = 'active' | 'paused' | 'complete' | 'archived';
+
 export interface Project {
   id: string;
   name: string;
@@ -164,6 +166,10 @@ export interface Project {
   path: string;
   sessionKey?: string;
   sessionKeyAliases?: string[];
+  /** #0381 — read through projectStatus() (absent/unknown = active). */
+  status?: ProjectStatus;
+  /** Registry display order (the Den's drag order). */
+  order?: number;
 }
 
 export interface AppState {

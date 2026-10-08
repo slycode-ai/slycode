@@ -51,6 +51,8 @@ interface ProjectKanbanProps {
    * be in cold storage, which is only fetched when archived mode is on.
    */
   onRequestArchived?: () => void;
+  /** #0381: the project is not active — automations show Held, not a countdown. */
+  scheduleHeld?: boolean;
 }
 
 const STAGE_ORDER: KanbanStage[] = ['backlog', 'design', 'implementation', 'testing', 'done'];
@@ -76,7 +78,7 @@ function stagesEqual(a: KanbanStages, b: KanbanStages): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-export function ProjectKanban({ project, projectPath, showArchived = false, showAutomations = false, onAutomationToggle, onActiveAutomationsChange, onExitMode, onRefreshReady, onRequestArchived }: ProjectKanbanProps) {
+export function ProjectKanban({ project, projectPath, showArchived = false, showAutomations = false, onAutomationToggle, onActiveAutomationsChange, onExitMode, onRefreshReady, onRequestArchived, scheduleHeld = false }: ProjectKanbanProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -1474,6 +1476,7 @@ export function ProjectKanban({ project, projectPath, showArchived = false, show
         {showAutomations ? (
           /* Automations Screen */
           <AutomationsScreen
+            held={scheduleHeld}
             cards={STAGE_ORDER.flatMap((s) => stages[s].filter((c) => !!c.automation && !c.archived))}
             activeCards={activeCards}
             triggeringCards={triggeringCards}

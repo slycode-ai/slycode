@@ -1152,6 +1152,13 @@ body {
 .dark .live-wire { box-shadow: 0 0 8px rgba(62,230,168,0.55); }
 .live-wire::after { content: ''; position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); animation: live-wire-run 2.4s cubic-bezier(.2,.8,.2,1) infinite; }
 @keyframes live-wire-run { to { left: 100%; } }
+/* Held project (#0381): a still, dashed wire where the live wire would be. */
+.held-wire { position: absolute; left: 12px; right: 12px; top: 0; height: 2px; background: repeating-linear-gradient(90deg, var(--warn) 0 10px, transparent 10px 16px); pointer-events: none; z-index: 1; }
+.status-glyph { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.status-glyph-active { background: var(--live); border-radius: 9999px; }
+.status-glyph-paused { background: repeating-linear-gradient(90deg, var(--warn) 0 3px, transparent 3px 5px); }
+.status-glyph-complete { background: var(--st-done); }
+.status-glyph-archived { box-shadow: inset 0 0 0 1.5px var(--ink-3); }
 .live-dot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--live); flex: none; }
 .live-dot::after { content: ''; position: absolute; inset: -4px; border-radius: 9999px; border: 2px solid var(--live); opacity: 0; animation: live-dot-ping 2.4s cubic-bezier(.2,.8,.2,1) infinite; }
 @keyframes live-dot-ping { 0% { opacity: .7; transform: scale(.5); } 70%, 100% { opacity: 0; transform: scale(1.4); } }

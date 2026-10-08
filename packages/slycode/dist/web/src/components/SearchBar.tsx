@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { SearchResult, KanbanStage } from '@/lib/types';
+import { PROJECT_STATUS_LABELS } from '@/lib/project-status';
 
 interface SearchBarProps {
   contextProjectId?: string;
@@ -216,6 +217,9 @@ export function SearchBar({ contextProjectId, onResultClick }: SearchBarProps) {
                       : 'top-0 border-line bg-surface-2 text-ink-3'
                   }`}>
                     {projectResults[0].projectName}
+                    {projectResults[0].projectStatus && (
+                      <span className="ml-2 font-normal text-warn-text">{PROJECT_STATUS_LABELS[projectResults[0].projectStatus]}</span>
+                    )}
                   </div>
                   {projectResults.map((result, idx) => (
                     <button

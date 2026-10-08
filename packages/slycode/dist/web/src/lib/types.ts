@@ -29,6 +29,29 @@ export interface Project {
    * alias-aware lookup so existing sessions keep resolving after upgrade.
    */
   sessionKeyAliases?: string[];
+  /**
+   * Card #0381 (feature 089). Absent = 'active'. Only active projects fire
+   * timers (automations, scheduled card prompts, atlas refresh). Read through
+   * projectStatus() in lib/project-status.ts, never directly.
+   */
+  status?: ProjectStatus;
+  /** ISO — last status change. */
+  statusChangedAt?: string;
+  /**
+   * ISO — set when the project goes from non-active back to active. The
+   * scheduler skips (never replays) any fire time earlier than this.
+   */
+  resumedAt?: string;
+  /** Folder grouping in the Den (Phase B). Absent = no folder. */
+  folderId?: string;
+}
+
+export type ProjectStatus = 'active' | 'paused' | 'complete' | 'archived';
+
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  order: number;
 }
 
 export interface Registry {
@@ -36,6 +59,8 @@ export interface Registry {
   version: string;
   lastUpdated: string;
   projects: Project[];
+  /** Den folders (Phase B of feature 089). Absent = []. */
+  folders?: ProjectFolder[];
 }
 
 // ============================================================================
@@ -106,7 +131,7 @@ export interface AutomationConfig {
   workingDirectory?: string;               // Override card's project directory
   reportViaMessaging: boolean;             // Auto-append messaging instructions to prompt
   lastRun?: string;                        // ISO timestamp of last kickoff
-  lastResult?: 'success' | 'error';        // Result of last kickoff attempt
+  lastResult?: 'success' | 'error' | 'skipped'; // Result of last kickoff attempt; 'skipped' = one-shot whose fire time fell while its project was paused (#0381)
   lastError?: string;                      // Error text from the last failed kickoff; cleared on success
   nextRun?: string;                        // ISO timestamp of next scheduled run
 }
@@ -595,7 +620,8 @@ export type EventType =
   | 'skill_removed'
   | 'skill_imported'
   | 'session_started'
-  | 'session_stopped';
+  | 'session_stopped'
+  | 'project_status';
 
 export interface ActivityEvent {
   id: string;
@@ -714,6 +740,7 @@ export interface SearchResult {
   matchField: string;      // "title" | "description" | "problem" | "checklist"
   snippet: string;
   isArchived?: boolean;    // true if card is archived
+  projectStatus?: ProjectStatus; // #0381: set when the card's project is not active
 }
 
 // ============================================================================
@@ -735,6 +762,19 @@ export interface ProjectWithBacklog extends Project {
   activeSessions?: number;
   /** Open (non-archived, non-automation) cards per lane — dashboard tiles. */
   stageCounts?: { backlog: number; design: number; implementation: number; testing: number; done: number };
+  /** #0381: what a non-active project is holding back (absent for active projects). */
+  held?: HeldSummary;
+  /** #0381: archived projects come back cold — no git/assets/health/stage work was done. */
+  cold?: boolean;
+}
+
+/** Timers a non-active project is holding (#0381). */
+export interface HeldSummary {
+  automations: number;
+  scheduledPrompts: number;
+  atlas: boolean;
+  /** Fire times skipped since the status change, capped (see SKIPPED_RUN_CAP). */
+  skippedRuns: number;
 }
 
 /** A card waiting on the owner — dashboard "Needs you" strip. */
@@ -744,8 +784,8 @@ export interface AttentionItem {
   cardId: string;
   number?: number;
   title: string;
-  /** review = sitting in Testing; failed-run = automation whose last kickoff errored */
-  reason: 'review' | 'failed-run';
+  /** review = sitting in Testing; failed-run = automation whose last kickoff errored; skipped-run = one-shot skipped because its project was paused (#0381) */
+  reason: 'review' | 'failed-run' | 'skipped-run';
   detail?: string;
   at?: string;
 }
@@ -764,6 +804,10 @@ export interface DashboardData {
   projects: ProjectWithBacklog[];
   needsYou?: AttentionItem[];
   upcoming?: UpcomingRun[];
+  /** #0381: fire times in the next 24h that non-active projects are holding. */
+  heldRunsNext24h?: number;
+  /** #0381 Phase B: Den folders, in display order. */
+  folders?: ProjectFolder[];
   totalBacklogItems: number;
   activeItems: number;
   totalOutdatedAssets?: number;

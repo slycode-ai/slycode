@@ -15,6 +15,7 @@ import { promises as fs } from 'fs';
 
 import { resolveProjectRoot, ProjectResolutionError } from '@/lib/kanban-paths';
 import { loadRegistry } from '@/lib/registry';
+import { isProjectActive } from '@/lib/project-status';
 import { getBridgeUrl } from '@/lib/paths';
 import { projectKeyAlternation } from '@/lib/session-keys';
 import { computeUnseen, type UnseenCardInput, type UnseenSessionInput } from '@/lib/board-view-state';
@@ -88,6 +89,8 @@ export async function GET(request: NextRequest) {
 
       await Promise.all(
         registry.projects.map(async (project) => {
+          // The Den's "new output" counts Active projects only (#0381).
+          if (!isProjectActive(project)) { counts[project.id] = 0; return; }
           try {
             const projectRoot = await resolveProjectRoot(project.id);
             const pattern = new RegExp(`^(?:${projectKeyAlternation(project)}):(?:[^:]+:)?card:(.+)$`);

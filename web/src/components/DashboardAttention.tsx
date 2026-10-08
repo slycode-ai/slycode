@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSyncExternalStore } from 'react';
-import { AlertTriangle, CalendarClock, FlaskConical } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FlaskConical, PauseCircle } from 'lucide-react';
 import type { AttentionItem, UpcomingRun } from '@/lib/types';
 import { formatCardNumber } from '@/lib/kanban-numbering';
 import { formatTime } from '@/lib/date-format';
@@ -84,7 +84,7 @@ function More({ n }: { n: number }) {
   return <p className="border-t border-line px-4 py-2 text-[12px] text-ink-3">and {n} more</p>;
 }
 
-export function DashboardAttention({ needsYou, upcoming }: { needsYou: AttentionItem[]; upcoming: UpcomingRun[] }) {
+export function DashboardAttention({ needsYou, upcoming, heldRunsNext24h = 0 }: { needsYou: AttentionItem[]; upcoming: UpcomingRun[]; heldRunsNext24h?: number }) {
   const now = useNow();
 
   return (
@@ -99,13 +99,15 @@ export function DashboardAttention({ needsYou, upcoming }: { needsYou: Attention
                 <Row key={`${item.reason}-${item.cardId}`} href={cardHref(item.projectId, item.cardId)}>
                   {item.reason === 'failed-run' ? (
                     <AlertTriangle aria-hidden className="h-4 w-4 shrink-0 text-danger-text" strokeWidth={1.75} />
+                  ) : item.reason === 'skipped-run' ? (
+                    <PauseCircle aria-hidden className="h-4 w-4 shrink-0 text-warn-text" strokeWidth={1.75} />
                   ) : (
                     <FlaskConical aria-hidden className="h-4 w-4 shrink-0 text-st-test" strokeWidth={1.75} />
                   )}
                   <CardLabel projectName={item.projectName} number={item.number} title={item.title} />
                   <span className="shrink-0 text-right text-[12px] leading-4">
-                    <span className={`block ${item.reason === 'failed-run' ? 'text-danger-text' : 'text-ink-2'}`}>
-                      {item.reason === 'failed-run' ? 'Run failed' : 'Ready to test'}
+                    <span className={`block ${item.reason === 'failed-run' ? 'text-danger-text' : item.reason === 'skipped-run' ? 'text-warn-text' : 'text-ink-2'}`}>
+                      {item.reason === 'failed-run' ? 'Run failed' : item.reason === 'skipped-run' ? 'Skipped while paused' : 'Ready to test'}
                     </span>
                     {now !== null && item.at && <span className="block text-ink-3">{ago(item.at, now)}</span>}
                   </span>
@@ -136,6 +138,11 @@ export function DashboardAttention({ needsYou, upcoming }: { needsYou: Attention
             </ul>
             <More n={upcoming.length - MAX_ROWS} />
           </>
+        )}
+        {heldRunsNext24h > 0 && (
+          <p className="border-t border-line px-4 py-2 text-[12px] text-ink-3">
+            {heldRunsNext24h >= 99 ? '99+' : heldRunsNext24h} run{heldRunsNext24h !== 1 ? 's' : ''} held in paused projects.
+          </p>
         )}
       </Panel>
     </div>

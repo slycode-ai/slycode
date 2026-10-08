@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { loadRegistry } from '@/lib/registry';
+import { projectStatus } from '@/lib/project-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,7 @@ export async function GET() {
 
     const status: Record<string, number> = {};
     for (const project of registry.projects) {
+      if (projectStatus(project) === 'archived') continue; // cold (#0381) — no git spawn
       status[project.id] = getUncommittedCount(project.path);
     }
 

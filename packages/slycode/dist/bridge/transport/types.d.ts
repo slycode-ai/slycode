@@ -70,8 +70,13 @@ export interface SpawnPlan {
  * small: the pty-scrape ladder lives in the manager and is invoked through
  * `performVerifiedDelivery`; detection claims go through `claimDetectedSessionId`.
  */
+/** Per-delivery options (card #0382). */
+export interface DeliverOptions {
+    /** Session just started: wait for a readable, settled input box before pasting. */
+    awaitReadyInput?: boolean;
+}
 export interface TransportHooks {
-    performVerifiedDelivery(sessionName: string, prompt: string): Promise<DeliveryResult>;
+    performVerifiedDelivery(sessionName: string, prompt: string, opts?: DeliverOptions): Promise<DeliveryResult>;
     startDetection(sessionName: string, providerId: string, beforeFiles: string[]): void;
     /** Bind a conversation id learned after spawn (persisted by the manager). */
     claimSessionId(sessionName: string, sessionId: string): Promise<void>;
@@ -83,7 +88,7 @@ export interface SessionTransport {
     /** Called once the PTY is running and the session is registered. */
     afterSpawn(session: Session, plan: SpawnPlan, hooks: TransportHooks): Promise<void>;
     /** Deliver a prompt and report a typed DeliveryResult. Caller holds the submit mutex. */
-    deliver(session: Session, prompt: string, hooks: TransportHooks): Promise<DeliveryResult>;
+    deliver(session: Session, prompt: string, hooks: TransportHooks, opts?: DeliverOptions): Promise<DeliveryResult>;
     /** Whether post-launch detection / recovery by candidate listing applies. */
     supportsDetection(providerConfig: ProviderConfig, cwd: string): boolean;
     /**

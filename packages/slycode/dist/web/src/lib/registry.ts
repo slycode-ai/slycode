@@ -9,6 +9,7 @@ import { promises as fs } from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';
 import { atomicWriteFile } from './atomic-write';
+import { withRegistryLock } from './registry-lock';
 import type {
   AttentionItem,
   UpcomingRun,
@@ -31,6 +32,9 @@ import { getStoreAssets } from './store-scanner';
 import { calculateHealthFromAssets } from './health-score';
 import { getBridgeUrl } from './paths';
 import { ensureProjectSessionKey, sumProjectActivityCounts } from './session-keys';
+import { isProjectActive, projectStatus } from './project-status';
+import { firesBetween, heldSummary } from './project-held';
+import { sortedFolders } from './project-folders';
 
 // Path to the registry file
 // Resolution: SLYCODE_HOME → derive from cwd
@@ -52,11 +56,15 @@ const REPO_ROOT = getRepoRoot();
 const REGISTRY_PATH = path.join(REPO_ROOT, 'projects', 'registry.json');
 
 /**
- * Load the registry JSON file. Self-heals missing sessionKey/sessionKeyAliases
- * on each project by computing them from project.path; persists once via
- * atomic write if anything changed. Safe to run multiple times (idempotent).
+ * The registry exactly as it is on disk right now — no lock, no heal, no
+ * write. For read-only status checks that must not see a stale copy (the
+ * scheduler's last-moment guard, #0381).
  */
-export async function loadRegistry(): Promise<Registry> {
+export async function readRegistrySnapshot(): Promise<Registry> {
+  return readRegistryFile();
+}
+
+async function readRegistryFile(): Promise<Registry> {
   let content: string;
   try {
     content = await fs.readFile(REGISTRY_PATH, 'utf-8');
@@ -64,8 +72,19 @@ export async function loadRegistry(): Promise<Registry> {
     console.error('Failed to load registry:', error);
     throw new Error(`Failed to load registry from ${REGISTRY_PATH}`);
   }
+  return JSON.parse(content) as Registry;
+}
 
-  const registry = JSON.parse(content) as Registry;
+/**
+ * Load the registry JSON file. Self-heals missing sessionKey/sessionKeyAliases
+ * on each project by computing them from project.path; the heal is persisted
+ * through mutateRegistry() (locked, fresh re-read) so it can never overwrite
+ * a concurrent status/folder/order write with this stale snapshot — and the
+ * FRESH healed registry read under the lock is what gets returned.
+ * Safe to run multiple times (idempotent).
+ */
+export async function loadRegistry(): Promise<Registry> {
+  const registry = await readRegistryFile();
 
   // Self-heal: ensure every project has sessionKey + sessionKeyAliases.
   let dirty = false;
@@ -74,14 +93,12 @@ export async function loadRegistry(): Promise<Registry> {
   }
 
   if (dirty) {
-    // Persist the migration. Use a temp-file + rename pattern so a crash
-    // mid-write can't corrupt the registry.
     try {
-      const tmpPath = `${REGISTRY_PATH}.tmp.${process.pid}.${Date.now()}`;
-      const out = JSON.stringify(registry, null, 2) + '\n';
-      await fs.writeFile(tmpPath, out, 'utf-8');
-      await fs.rename(tmpPath, REGISTRY_PATH);
-      console.log(`Registry: backfilled sessionKey on ${registry.projects.length} project(s) and persisted.`);
+      // mutateRegistry heals the FRESH copy it reads under the lock, persists
+      // it if that changed anything, and hands that fresh copy back.
+      const fresh = await mutateRegistry((r) => structuredClone(r));
+      console.log(`Registry: backfilled sessionKey on ${fresh.projects.length} project(s) and persisted.`);
+      return fresh;
     } catch (err) {
       // Persistence failure is non-fatal — the migration will retry next load.
       // We still return the in-memory migrated registry so the current request
@@ -94,11 +111,40 @@ export async function loadRegistry(): Promise<Registry> {
 }
 
 /**
- * Save the registry JSON file
+ * The ONLY way to write projects/registry.json (card #0381 fix loop): under
+ * the registry lock (same advisory lockfile as the board lock, shared with
+ * scripts/kanban.js `withRegistryLock`), re-read the file fresh, apply `fn`,
+ * and atomically write it back — only if something changed. Every writer
+ * (status, folders, reorder, edit, create, delete, session-key heal, CLI)
+ * goes through a fresh read under the lock, so two concurrent writers both
+ * keep their changes instead of the later one saving a stale snapshot.
+ *
+ * `fn` may throw to abort (nothing is written). Keep it fast — no network or
+ * long-running work under the lock. The lock FAILS CLOSED: contention past
+ * the deadline or a lock error throws RegistryLockError (status 503) and
+ * `fn` never runs unlocked (fix loop 2).
+ *
+ * The change check snapshots the file BEFORE the session-key heal, so a
+ * heal-only pass persists too.
  */
-export async function saveRegistry(registry: Registry): Promise<void> {
-  const content = JSON.stringify(registry, null, 2) + '\n';
-  await atomicWriteFile(REGISTRY_PATH, content);
+export async function mutateRegistry<T>(
+  fn: (registry: Registry) => T | Promise<T>,
+  opts: { timeoutMs?: number } = {},
+): Promise<T> {
+  return withRegistryLock(REGISTRY_PATH, async () => {
+    const registry = await readRegistryFile();
+    const before = JSON.stringify(registry);
+    for (const project of registry.projects) ensureProjectSessionKey(project);
+    const result = await fn(registry);
+    if (JSON.stringify(registry) !== before) {
+      registry.lastUpdated = new Date().toISOString();
+      if (registry.version === '2.0.0' && (registry.folders || registry.projects.some(p => p.status || p.folderId))) {
+        registry.version = '2.1.0'; // marker only — readers never branch on it
+      }
+      await atomicWriteFile(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\n');
+    }
+    return result;
+  }, opts);
 }
 
 /**
@@ -207,6 +253,12 @@ async function loadProjectWithBacklog(
 ): Promise<ProjectWithBacklog> {
   const projectPath = project.path;
 
+  // #0381: archived projects are cold — no fs checks, git, asset or platform
+  // scans. The Den shows them as a one-line row from registry data alone.
+  if (projectStatus(project) === 'archived') {
+    return { ...project, backlog: [], designs: [], features: [], accessible: true, cold: true };
+  }
+
   // Check if path exists
   const exists = await directoryExists(projectPath);
   if (!exists) {
@@ -275,16 +327,18 @@ export async function loadDashboardData(): Promise<DashboardData> {
 
   // Collect all rows across providers for per-project health scoring
   const allMatrixRows: import('./types').AssetRow[] = [];
+  // #0381: archived projects are cold — left out of the asset scan entirely.
+  const warmProjects = registry.projects.filter(p => projectStatus(p) !== 'archived');
 
   for (const provider of providers) {
     for (const assetType of assetTypes) {
       const storeByType = storeAssets.filter(a => a.type === assetType);
       const providerProjectAssets = new Map<string, import('./types').AssetInfo[]>();
-      for (const project of registry.projects) {
+      for (const project of warmProjects) {
         const assets = scanProviderAssets(project.path, provider);
         providerProjectAssets.set(project.id, assets.filter(a => a.type === assetType));
       }
-      const rows = buildStoreAssetMatrix(storeByType, providerProjectAssets, registry.projects, assetType);
+      const rows = buildStoreAssetMatrix(storeByType, providerProjectAssets, warmProjects, assetType);
       allMatrixRows.push(...rows);
     }
   }
@@ -297,7 +351,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
 
   // Calculate per-project health scores with per-project outdated counts
   for (const project of projects) {
-    if (!project.accessible) continue;
+    if (!project.accessible || project.cold) continue;
 
     let projectOutdated = 0;
     for (const row of allMatrixRows) {
@@ -322,10 +376,37 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const upcoming: UpcomingRun[] = [];
   const nowMs = Date.now();
   const dayAheadMs = nowMs + 24 * 60 * 60 * 1000;
+  const tz = process.env.TZ || 'UTC'; // same source as the scheduler's CONFIGURED_TIMEZONE
+  let heldRunsNext24h = 0;
   for (const project of projects) {
-    if (!project.accessible) continue;
+    if (!project.accessible || project.cold) continue;
     const kanbanPath = path.join(project.path, 'documentation', 'kanban.json');
     const board = await loadJsonFile<KanbanBoard>(kanbanPath);
+    // #0381: a held project keeps its tile (stage bar) and reports what it is
+    // holding, but stays out of every Den aggregate (hero counts, Needs you,
+    // Next 24 hours) — those are Active-only.
+    if (!isProjectActive(project)) {
+      const atlas = await loadJsonFile<{ enabled?: boolean; schedule?: string | null }>(
+        path.join(project.path, 'documentation', 'atlas', 'config.json'));
+      const since = project.statusChangedAt ? Date.parse(project.statusChangedAt) : NaN;
+      project.held = heldSummary(board, atlas, {
+        sinceMs: Number.isFinite(since) ? since : undefined,
+        nowMs,
+        timezone: tz,
+      });
+      for (const cards of Object.values(board?.stages ?? {})) {
+        for (const c of cards || []) {
+          const a = c.automation;
+          if (!a?.enabled || c.archived || !a.schedule) continue;
+          if (a.scheduleType === 'one-shot') {
+            const t = Date.parse(a.nextRun || a.schedule);
+            if (t > nowMs && t <= dayAheadMs) heldRunsNext24h++;
+          } else {
+            heldRunsNext24h += firesBetween(a.schedule, nowMs, dayAheadMs, tz);
+          }
+        }
+      }
+    }
     if (board?.stages) {
       // Per-project open cards per lane, matching what the board shows
       // (automation cards live outside the lanes).
@@ -338,6 +419,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
         testing: onBoard('testing'),
         done: onBoard('done'),
       };
+      if (!isProjectActive(project)) continue; // tile only — no aggregates (#0381)
       const backlogCards = (board.stages.backlog || []).filter(c => !c.archived);
       totalBacklogItems += backlogCards.length;
       // Count active work (implementation + testing stages)
@@ -353,6 +435,11 @@ export async function loadDashboardData(): Promise<DashboardData> {
       for (const cards of Object.values(board.stages)) {
         for (const c of cards || []) {
           const a = c.automation;
+          if (a && !a.enabled && !c.archived && a.lastResult === 'skipped') {
+            // One-shot skipped by the resume fence (#0381) — owner can Run now.
+            needsYou.push({ ...ref, cardId: c.id, number: c.number, title: c.title, reason: 'skipped-run', detail: a.lastError, at: a.nextRun || a.schedule });
+            continue;
+          }
           if (!a?.enabled || c.archived) continue;
           if (a.lastResult === 'error') {
             needsYou.push({ ...ref, cardId: c.id, number: c.number, title: c.title, reason: 'failed-run', detail: a.lastError, at: a.lastRun });
@@ -368,6 +455,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
 
   // Sum uncommitted across all projects
   const totalUncommitted = projects.reduce((sum, p) => {
+    if (!isProjectActive(p)) return sum; // hero counts Active only (#0381)
     return sum + (p.gitUncommitted && p.gitUncommitted > 0 ? p.gitUncommitted : 0);
   }, 0);
 
@@ -395,14 +483,18 @@ export async function loadDashboardData(): Promise<DashboardData> {
   }
 
   const repoRoot = getRepoRoot();
-  // Failed runs first (something broke), then reviews, newest first within each.
-  needsYou.sort((x, y) => (x.reason === y.reason ? (y.at ?? '').localeCompare(x.at ?? '') : x.reason === 'failed-run' ? -1 : 1));
+  // Failed runs first (something broke), then skipped runs, then reviews,
+  // newest first within each.
+  const reasonRank = { 'failed-run': 0, 'skipped-run': 1, review: 2 } as const;
+  needsYou.sort((x, y) => (x.reason === y.reason ? (y.at ?? '').localeCompare(x.at ?? '') : reasonRank[x.reason] - reasonRank[y.reason]));
   upcoming.sort((x, y) => x.nextRun.localeCompare(y.nextRun));
 
   return {
     projects,
     needsYou,
     upcoming,
+    heldRunsNext24h,
+    folders: sortedFolders(registry.folders),
     totalBacklogItems,
     activeItems,
     totalOutdatedAssets,

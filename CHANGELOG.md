@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-08
+
+### Added
+- **Project status — Active, Paused, Complete and Archived.** Every registered project now has a status (new column in `sly-kanban projects` and in the dashboard). Only Active projects fire anything on a timer — automation cards, scheduled card sends and the atlas refresh are all held for the other three. Resuming a held project skips (never replays) runs that fell due while held; each timer picks up at its next scheduled time. Running sessions are never touched by a status change. New `sly-kanban projects status <project> <active|paused|complete|archived>` command. Kanban skill v1.23.0.
+- **"What's new" splash pages through skipped releases.** If you jump across multiple versions, the splash now walks through each release in order rather than showing only the latest. Each page is dismissible on its own; the whole stack is remembered as seen when you reach the end.
+
+### Changed
+- Den project folder structure plus locked registry writes — concurrent edits to the project registry (automations, dashboard, CLI) no longer race against each other. Groundwork for the Project status feature.
+- Claude Code trust dialog recognised — Claude's new install trust prompt is classified correctly by the terminal-chrome detector, so cross-card submit-verify no longer flags it as an unknown input region.
+
+### Fixed
+- Honest cross-card prompt delivery on Windows — the delivery result reported by `sly-kanban prompt` now reflects what actually happened on ConPTY. Previously it could optimistically mark a prompt delivered when the Windows PTY had not actually accepted it yet.
+- Scheduler waits for the real delivery result before marking a scheduled card send delivered — if the bridge rejects it, the send is retried according to the usual rules instead of being silently marked done.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added

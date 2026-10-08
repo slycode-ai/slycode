@@ -15,7 +15,7 @@ import path from 'path';
 import os from 'os';
 import { Cron } from 'croner';
 import type { KanbanCard, KanbanBoard, AutomationConfig, DeliveryInfo, AutomationLogEntry } from './types';
-import { loadRegistry } from './registry';
+import { loadRegistry, readRegistrySnapshot } from './registry';
 import { cronToHumanReadable } from './cron-utils';
 import { getSlycodeRoot, getBridgeUrl } from './paths';
 import { probeBridge, waitForBridgeReady } from './bridge-readiness';
@@ -31,6 +31,9 @@ import type { ScheduledPrompt } from './types';
 import { SCHEDULED_PROMPT_LIMITS, buildScheduledPromptBody, classifyScheduledPrompt } from './scheduled-prompts';
 import { mutateCardScheduledPrompts } from './scheduled-prompts-store';
 import { formatSessionHeaderLine, planAutomationSession, rankSessionStatus, type SessionProbe } from './automation-freshness';
+import { isProjectActive, projectStatus, firesBeforeResume, resumedAtMs } from './project-status';
+import type { DeliveryGuard } from './delivery-guard';
+import type { Project } from './types';
 
 /**
  * Load env vars from the project root .env file if not already set.
@@ -219,6 +222,69 @@ async function checkSessionAlive(sessionName: string): Promise<LivenessResult> {
   }
 }
 
+/** Card #0382: the bridge's record of a prompt it pastes AFTER answering POST /sessions. */
+interface PromptDeliveryState {
+  state: 'pending' | DeliveryInfo['outcome'];
+  mode?: string;
+  reason?: string;
+  correlationId?: string;
+}
+
+/** Bound on waiting for a Windows deferred paste: startup settle ≤30s + readiness wait ≤45s + verify ladder. */
+const DEFERRED_DELIVERY_WAIT_MS = Number(process.env.SLYCODE_DEFERRED_DELIVERY_WAIT_MS) || 120_000;
+const DEFERRED_DELIVERY_POLL_MS = Math.min(2000, Math.max(50, Math.floor(DEFERRED_DELIVERY_WAIT_MS / 10)));
+
+/**
+ * Card #0382: on Windows a spawn/resume prompt is NOT argv — the bridge
+ * pastes it once the provider has started (delivery.mode 'deferred_paste'),
+ * verifies the submit, and records the outcome on the session as
+ * `promptDelivery`. A live process says nothing about whether that paste
+ * landed (the real failures: an update prompt, the Codex agent-sandbox
+ * dialog, a merged double paste), so wait for the recorded outcome.
+ *
+ * Returns the settled state, `{ state: 'pending' }` when the bound ran out,
+ * or null when the bridge doesn't report promptDelivery at all (older build
+ * — the caller keeps its liveness check). Every request and body read is
+ * bounded by the remaining deadline. Read-only: no POST, so the #0381
+ * DeliveryGuard (checked before every POST) is untouched.
+ */
+async function awaitDeferredDelivery(sessionName: string, fromCreate?: PromptDeliveryState | null): Promise<PromptDeliveryState | null> {
+  let pd: PromptDeliveryState | null = fromCreate ?? null;
+  let reported = !!pd;
+  const deadline = Date.now() + DEFERRED_DELIVERY_WAIT_MS;
+  while ((!pd || pd.state === 'pending') && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, Math.min(DEFERRED_DELIVERY_POLL_MS, Math.max(0, deadline - Date.now()))));
+    const remaining = Math.min(FETCH_TIMEOUT_MS, deadline - Date.now());
+    if (remaining <= 0) break;
+    try {
+      const res = await fetch(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}`, { signal: AbortSignal.timeout(remaining) });
+      const data = await res.json();
+      if (res.ok && data?.promptDelivery) {
+        pd = data.promptDelivery as PromptDeliveryState;
+        reported = true;
+      } else if (res.ok && !reported) {
+        return null; // the bridge answers but has no such field → older build
+      }
+    } catch { /* stalled / unreachable — keep polling until the deadline */ }
+  }
+  if (!reported) return null;
+  return pd ?? { state: 'pending' };
+}
+
+/** Map a settled deferred-paste outcome onto the logged delivery record. */
+function settledDelivery(delivery: DeliveryInfo, pd: PromptDeliveryState): DeliveryInfo {
+  if (pd.state === 'pending') return { ...delivery, outcome: 'ambiguous', verified: false, reason: 'deferred_paste_still_pending' };
+  return { ...delivery, outcome: pd.state, verified: true, ...(pd.reason ? { reason: pd.reason } : {}) };
+}
+
+/** Human error for a non-delivered deferred paste (shared by resume + fresh paths). */
+function deferredFailureMessage(pd: PromptDeliveryState): string {
+  const ref = pd.correlationId ? ` (bridge log id ${pd.correlationId})` : '';
+  if (pd.state === 'pending') return `Prompt delivery still pending after ${Math.round(DEFERRED_DELIVERY_WAIT_MS / 1000)}s — the deferred paste never reported; check the terminal${ref}`;
+  if (pd.state === 'blocked') return `Session started but is blocked by a startup dialog — the prompt was NOT pasted; clear it in the terminal and re-run (${pd.reason || 'blocked'})${ref}`;
+  return `Prompt delivery ${pd.state}: ${pd.reason || 'unknown'} — the prompt may be sitting unsent in the input box; check the terminal before re-running${ref}`;
+}
+
 /**
  * Check whether a freshly-spawned session is sitting behind a startup
  * update/trust dialog (feature 070 phase B). On argv-delivery paths the
@@ -266,6 +332,11 @@ export interface KickoffResult {
   failureKind?: 'hard' | 'soft';
   /** Bridge delivery outcome when the verified submit ran. */
   deliveryOutcome?: DeliveryInfo['outcome'];
+  /**
+   * #0381: a scheduled run aborted before bridge delivery because its project
+   * stopped being active after the claim. The caller un-consumes the timer.
+   */
+  held?: boolean;
 }
 
 interface SchedulerState {
@@ -276,6 +347,11 @@ interface SchedulerState {
   bridgeDown: boolean;
   /** Ticks skipped because the bridge was down — nothing was stamped or claimed. */
   ticksSkippedBridgeDown: number;
+  /**
+   * Card #0381: projects currently held (non-active) → the statusChangedAt we
+   * logged for, so the "holding" line prints once per status change, not per tick.
+   */
+  heldLogged: Map<string, string>;
 }
 
 // Use globalThis to survive HMR reloads — prevents duplicate scheduler intervals.
@@ -300,12 +376,14 @@ if (!g[GLOBAL_KEY]) {
     activeKickoffs: new Set(),
     bridgeDown: false,
     ticksSkippedBridgeDown: 0,
+    heldLogged: new Map(),
   };
 }
 // HMR: a state object created by an older module version may predate the
 // bridge-gate fields.
 if (g[GLOBAL_KEY]!.bridgeDown === undefined) g[GLOBAL_KEY]!.bridgeDown = false;
 if (g[GLOBAL_KEY]!.ticksSkippedBridgeDown === undefined) g[GLOBAL_KEY]!.ticksSkippedBridgeDown = 0;
+if (g[GLOBAL_KEY]!.heldLogged === undefined) g[GLOBAL_KEY]!.heldLogged = new Map();
 if (g[TIMER_KEY] === undefined) {
   g[TIMER_KEY] = null;
 }
@@ -473,6 +551,7 @@ function buildRunHeader(
   trigger: 'scheduled' | 'manual',
   speakerState: SpeakerSnapshot = 'unknown',
   sessionLine: string | null = null,
+  heldStatus: string | null = null,
 ): string {
   const now = new Date();
   const lines: string[] = ['=== AUTOMATION RUN ==='];
@@ -485,6 +564,8 @@ function buildRunHeader(
 
   if (trigger === 'manual') {
     lines.push('Trigger: manual');
+    // #0381: a manual run in a held project executes once; the schedule stays held.
+    if (heldStatus) lines.push(`Project ${heldStatus}: schedule held; this runs once`);
   } else {
     const friendly = cronToHumanReadable(config.schedule, config.scheduleType);
     lines.push(`Trigger: scheduled (${friendly.toLowerCase()})`);
@@ -529,6 +610,12 @@ export interface DeliverToSessionOptions {
    * again later. Stopped sessions ignore the policy (resume is never busy).
    */
   busyPolicy?: 'force' | 'defer';
+  /**
+   * #0381: automatic fires only. Called immediately before every delivery
+   * POST (submit-verified, create/resume, the 409 fallback); a not-ok verdict
+   * returns `held: true` without sending anything.
+   */
+  guard?: DeliveryGuard;
 }
 
 /**
@@ -545,6 +632,8 @@ export interface DeliveryVerdict {
   delivery: AutomationLogEntry['delivery'];
   /** busyPolicy 'defer' only: the live session is mid-generation (or call-locked); nothing was pasted. */
   busy?: boolean;
+  /** #0381: the guard refused at the last moment — nothing was sent. Not a failure. */
+  held?: boolean;
 }
 
 /**
@@ -572,10 +661,20 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
   let bridgeRequest: DeliveryVerdict['bridgeRequest'] = null;
   let livenessCheck: DeliveryVerdict['livenessCheck'] = null;
   let delivery: DeliveryVerdict['delivery'] = null;
+  /** #0382: promptDelivery from the POST /sessions answer (Windows deferred paste). */
+  let createdPromptDelivery: PromptDeliveryState | null = null;
   const fail = (error: string, deliveryOutcome?: DeliveryInfo['outcome']): DeliveryVerdict => ({
     success: false, error, failureKind: 'hard', bridgeRequest, livenessCheck, delivery,
     ...(deliveryOutcome !== undefined ? { deliveryOutcome } : {}),
   });
+  /** #0381: run the guard right before a POST; a verdict means "stop, send nothing". */
+  const heldNow = async (): Promise<DeliveryVerdict | null> => {
+    if (!opts.guard) return null;
+    const g = await opts.guard();
+    if (g.ok) return null;
+    slog(`Delivery to ${sessionName} held for ${label}: ${g.reason}`);
+    return { success: false, held: true, failureKind: 'soft', error: `Held: ${g.reason}`, bridgeRequest, livenessCheck, delivery };
+  };
 
   try {
     slog(`Delivering to session: ${sessionName} (provider: ${provider}, for ${label}, busyPolicy: ${opts.busyPolicy ?? 'force'})`);
@@ -592,6 +691,8 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
         live = false;
       }
       if (live) {
+        const held = await heldNow();
+        if (held) return held;
         const subRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/submit-verified`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -611,6 +712,8 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
       }
     }
 
+    const heldBeforeCreate = await heldNow();
+    if (heldBeforeCreate) return heldBeforeCreate;
     const createRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -631,6 +734,8 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
       // never hand-rolls paste+Enter anymore.
       bridgeRequest = { status: 409 };
       slog(`Session ${sessionName} returned 409, submitting via verified endpoint`);
+      const heldBeforeFallback = await heldNow(); // a retry gets its own last-moment check
+      if (heldBeforeFallback) return heldBeforeFallback;
       const subRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions/${encodeURIComponent(sessionName)}/submit-verified`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -656,6 +761,7 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
       const createData = await createRes.json();
       bridgeRequest = { status: createRes.status, resumed: createData.resumed, pid: createData.pid };
       delivery = createData.delivery ?? null;
+      createdPromptDelivery = createData.promptDelivery ?? null;
       slog(`Session ready: ${sessionName} (status: ${createData.status}, resumed: ${createData.resumed}, pid: ${createData.pid}, delivery: ${delivery ? `${delivery.outcome}/${delivery.mode}` : 'none'})`);
     }
 
@@ -674,9 +780,21 @@ export async function deliverToSession(opts: DeliverToSessionOptions): Promise<D
       return fail('Bridge returned no delivery result — the bridge service is running an old build; restart it (feature 070)');
     }
 
+    if (delivery.mode === 'deferred_paste') {
+      // Windows resume (card #0382): the bridge's verified outcome is the
+      // verdict, not liveness. Older bridge (no promptDelivery) → liveness below.
+      const pd = await awaitDeferredDelivery(sessionName, createdPromptDelivery);
+      if (pd) {
+        delivery = settledDelivery(delivery, pd);
+        livenessCheck = { type: 'deferredPaste', result: pd.state };
+        if (pd.state === 'delivered') return { success: true, deliveryOutcome: 'delivered', bridgeRequest, livenessCheck, delivery };
+        return fail(deferredFailureMessage(pd), delivery.outcome);
+      }
+    }
+
     if (delivery.mode === 'cli_arg' || delivery.mode === 'deferred_paste') {
       // Resume-from-stopped: the prompt rode the spawn (argv on POSIX,
-      // deferred paste on Windows). Same liveness semantics as fresh.
+      // deferred paste on Windows from a bridge that predates #0382).
       const liveness = await checkSessionAlive(sessionName);
       livenessCheck = { type: 'checkSessionAlive', result: liveness.status, delayMs: LIVENESS_CHECK_MS, exitCode: liveness.exitCode, exitedAt: liveness.exitedAt };
       if (liveness.status === 'stopped' && liveness.exitCode !== 0) {
@@ -791,10 +909,21 @@ export async function triggerAutomation(
     swarn(`Session probe failed for ${card.id}; resuming (fresh-session age not checked)`);
   }
 
+  // #0381: note on a manual run in a held project (scheduled runs never get here).
+  let heldStatus: string | null = null;
+  if (options.trigger === 'manual') {
+    try {
+      const project = (await loadRegistry()).projects.find(p => p.id === projectId);
+      if (project && !isProjectActive(project)) heldStatus = projectStatus(project);
+    } catch {
+      // Header nicety only — never block a manual run on a registry read.
+    }
+  }
+
   // Build prompt with run header + card context + description as instruction
   const contextLines: string[] = [
     buildRunHeader(card, config, options.trigger, await fetchSpeakerState(BRIDGE_URL),
-      formatSessionHeaderLine(freshness, config, CONFIGURED_TIMEZONE)),
+      formatSessionHeaderLine(freshness, config, CONFIGURED_TIMEZONE), heldStatus),
     '',
   ];
   if (card.areas.length > 0) {
@@ -846,11 +975,21 @@ export async function triggerAutomation(
     return result;
   };
 
+  // #0381: scheduled runs carry a last-moment guard, checked immediately
+  // before every delivery POST (after all the probes above). A manual Run now
+  // carries none and always executes.
+  const guard = options.trigger === 'scheduled' ? deliveryGuard('automation', projectId, config.nextRun) : undefined;
+  const heldResult = (reason: string): KickoffResult => {
+    slog(`[status] ${projectId}/${card.id}: scheduled run held at delivery — ${reason}; timer not consumed`);
+    return { cardId: card.id, projectId, sessionName, success: false, held: true, error: `Held: ${reason}` };
+  };
+
   if (!isFresh) {
     // Resume / live paths — shared with scheduled card prompts (card #0352).
     // deliverToSession owns the bridge call and the verdict interpretation;
     // this function only maps the verdict onto the automation's KickoffResult.
-    const verdict = await deliverToSession({ sessionName, provider, cwd, prompt: fullPrompt, label: card.id });
+    const verdict = await deliverToSession({ sessionName, provider, cwd, prompt: fullPrompt, label: card.id, guard });
+    if (verdict.held) return heldResult(verdict.error ?? 'project not active');
     bridgeRequestInfo = verdict.bridgeRequest;
     livenessInfo = verdict.livenessCheck;
     deliveryInfo = verdict.delivery;
@@ -868,6 +1007,10 @@ export async function triggerAutomation(
 
     // Fresh session path: the prompt is passed as a CLI arg (argv delivery
     // guarantee). Just verify the session didn't crash during startup.
+    if (guard) {
+      const g = await guard();
+      if (!g.ok) return heldResult(g.reason);
+    }
     const createRes = await fetchWithTimeout(`${BRIDGE_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -898,6 +1041,17 @@ export async function triggerAutomation(
     bridgeRequestInfo = { status: createRes.status, resumed: createData.resumed, pid: createData.pid };
     deliveryInfo = createData.delivery ?? null;
     slog(`Session created: ${sessionName} (status: ${createData.status}, resumed: ${createData.resumed}, pid: ${createData.pid}, delivery: ${deliveryInfo ? `${deliveryInfo.outcome}/${deliveryInfo.mode}` : 'none'})`);
+
+    if (deliveryInfo?.mode === 'deferred_paste') {
+      // Windows fresh spawn (card #0382): wait for the verified paste outcome.
+      const pd = await awaitDeferredDelivery(sessionName, createData.promptDelivery ?? null);
+      if (pd) {
+        deliveryInfo = settledDelivery(deliveryInfo, pd);
+        livenessInfo = { type: 'deferredPaste', result: pd.state };
+        if (pd.state === 'delivered') return logAndReturn({ cardId: card.id, projectId, success: true, sessionName, deliveryOutcome: 'delivered' });
+        return logAndReturn({ cardId: card.id, projectId, success: false, sessionName, deliveryOutcome: deliveryInfo.outcome, failureKind: 'hard', error: deferredFailureMessage(pd) });
+      }
+    }
 
     const liveness = await checkSessionAlive(sessionName);
     livenessInfo = { type: 'checkSessionAlive', result: liveness.status, delayMs: LIVENESS_CHECK_MS, exitCode: liveness.exitCode, exitedAt: liveness.exitedAt };
@@ -1000,6 +1154,137 @@ async function sendErrorNotification(cardTitle: string, error: string, sessionNa
   }
 }
 
+// ---------------------------------------------------------------------------
+// Project status gate (card #0381, feature 089)
+//
+// Only an ACTIVE project fires. Every per-project loop below (automations,
+// scheduled card prompts, atlas refresh) calls holdIfInactive() FIRST — before
+// reading the board — so a held project's board and atlas config are never
+// written while it is held (no lastRun stamp, no nextRun self-heal, no
+// missed-marking). Manual runs (triggerAutomation via Run now / CLI) are NOT
+// gated: explicit actions execute.
+//
+// Resume: the status writers stamp project.resumedAt. Fire times earlier than
+// it are skipped, never replayed — recurring automations get nextRun
+// recomputed, one-shots are disabled with lastResult 'skipped', scheduled
+// prompts go 'missed-paused', atlas uses resumedAt as its last-run floor.
+// ---------------------------------------------------------------------------
+
+/** True when the project is held; logs "holding" once per status change. */
+function holdIfInactive(project: Project): boolean {
+  if (isProjectActive(project)) {
+    state.heldLogged.delete(project.id);
+    return false;
+  }
+  const marker = project.statusChangedAt || '(unknown)';
+  if (state.heldLogged.get(project.id) !== marker) {
+    state.heldLogged.set(project.id, marker);
+    slog(`[status] holding ${project.id} (${projectStatus(project)} since ${marker}) — automations, scheduled prompts and atlas refresh will not fire`);
+  }
+  return true;
+}
+
+const PAUSED_SKIP_ERROR = 'Project was paused at the fire time';
+
+/**
+ * Test seam (#0381 fix loop): lets tests land a status change between the
+ * scan and a claim, or between a claim and bridge delivery. Never set in
+ * production code.
+ */
+export const schedulerTestHooks: {
+  beforeClaim?: (kind: 'automation' | 'scheduled_prompt' | 'atlas', projectId: string) => Promise<void> | void;
+  beforeDeliver?: (kind: 'automation' | 'scheduled_prompt' | 'atlas', projectId: string) => Promise<void> | void;
+} = {};
+
+/**
+ * Fresh status re-check (#0381 fix loop, Codex P1). The scan's registry
+ * snapshot can be seconds old by the time a timer is claimed or delivered, so
+ * every AUTOMATIC fire re-reads the registry immediately before its claim and
+ * again immediately before bridge delivery. Not active (or the fire time now
+ * falls before a newer resumedAt) → don't fire, don't consume the timer.
+ * An unreadable registry also holds (retried next tick) — never spend tokens
+ * on a project we can't confirm is active. Manual runs never call this.
+ */
+async function stillFiresNow(projectId: string, fireIso?: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    // Straight from disk — no lock wait, no heal, never a pre-lock copy.
+    const project = (await readRegistrySnapshot()).projects.find(p => p.id === projectId);
+    if (!project) return { ok: false, reason: 'project is no longer registered' };
+    if (!isProjectActive(project)) return { ok: false, reason: `project is ${projectStatus(project)}` };
+    if (firesBeforeResume(fireIso, project)) return { ok: false, reason: 'fire time fell while the project was paused' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: `registry unreadable (${(err as Error).message})` };
+  }
+}
+
+/**
+ * The last-moment guard for one automatic fire: the beforeDeliver test hook,
+ * then a fresh status re-check. Called by the bridge-facing code immediately
+ * before every delivery POST / retry (see lib/delivery-guard.ts).
+ */
+function deliveryGuard(kind: 'automation' | 'scheduled_prompt' | 'atlas', projectId: string, fireIso?: string): DeliveryGuard {
+  return async () => {
+    await schedulerTestHooks.beforeDeliver?.(kind, projectId);
+    return stillFiresNow(projectId, fireIso);
+  };
+}
+
+/**
+ * Apply the resume fence to one automation whose fire time fell before
+ * project.resumedAt. Never fires. Returns true when it handled the card.
+ */
+async function skipAutomationHeldByPause(project: Project, card: KanbanCard): Promise<boolean> {
+  const auto = card.automation!;
+  const fireIso = auto.nextRun || (auto.scheduleType === 'one-shot' ? auto.schedule : undefined);
+  if (!firesBeforeResume(fireIso, project)) return false;
+
+  if (auto.scheduleType === 'one-shot') {
+    // Disabled exactly like a fired one-shot (config kept), flagged so it
+    // surfaces in the Den's Needs you as "Skipped while paused".
+    await updateCardAutomation(project.path, card.id, {
+      enabled: false,
+      lastResult: 'skipped',
+      lastError: PAUSED_SKIP_ERROR,
+    });
+    await setCardAutoStatus(project.path, card.id, { text: 'Scheduled run skipped: project was paused', tier: 'high' });
+    slog(`[status] ${project.id}/${card.id}: one-shot due ${fireIso} skipped — project was paused at the fire time`);
+    return true;
+  }
+
+  const next = getNextRun(auto.schedule, 'recurring');
+  if (next) {
+    await updateCardAutomation(project.path, card.id, { nextRun: next.toISOString() });
+    card.automation!.nextRun = next.toISOString();
+  }
+  slog(`[status] ${project.id}/${card.id}: skipped runs held while paused (was due ${fireIso}); next ${next?.toISOString() ?? '(none)'}`);
+  return true;
+}
+
+/** Auto-status on a card under the board lock (best-effort). */
+async function setCardAutoStatus(
+  projectPath: string,
+  cardId: string,
+  status: { text: string; tier: 'high' | 'medium' | 'low' },
+): Promise<void> {
+  const kanbanPath = path.join(projectPath, 'documentation', 'kanban.json');
+  try {
+    await withBoardLock(kanbanPath, async () => {
+      const board: KanbanBoard = JSON.parse(await fs.readFile(kanbanPath, 'utf-8'));
+      for (const stageCards of Object.values(board.stages)) {
+        const card = (stageCards as KanbanCard[]).find(c => c.id === cardId);
+        if (card) {
+          tryAutoStatus(card, status);
+          break;
+        }
+      }
+      await atomicWriteFile(kanbanPath, JSON.stringify(board, null, 2) + '\n');
+    });
+  } catch (err) {
+    serr(`Failed to set status on ${cardId}:`, err);
+  }
+}
+
 /**
  * Main check loop — scan all projects for due automations
  */
@@ -1014,6 +1299,7 @@ async function checkAutomations(): Promise<number> {
     // Deferred cards naturally pick up on the next 30s tick.
     scanLoop:
     for (const project of registry.projects) {
+      if (holdIfInactive(project)) continue; // #0381 — before the board read
       const kanbanPath = path.join(project.path, 'documentation', 'kanban.json');
 
       let board: KanbanBoard;
@@ -1029,6 +1315,10 @@ async function checkAutomations(): Promise<number> {
           if (!card.automation || !card.automation.enabled) continue;
           if (card.archived) continue;
           if (state.activeKickoffs.has(card.id)) continue;
+
+          // Resume fence (#0381): a fire time that fell while the project was
+          // held is skipped, never replayed. Before the self-heal and isDue.
+          if (await skipAutomationHeldByPause(project, card)) continue;
 
           // Self-heal: a CLI-created or legacy automation may lack nextRun.
           // Compute and persist it so the frontend NOW badge and isDue() share
@@ -1053,6 +1343,14 @@ async function checkAutomations(): Promise<number> {
               // bugs when many automations unstick at once (e.g. post-deploy).
               break scanLoop;
             }
+            // #0381: fresh status re-check right before the claim (lastRun
+            // stamp). A pause that landed mid-scan leaves the timer untouched.
+            await schedulerTestHooks.beforeClaim?.('automation', project.id);
+            const claimGate = await stillFiresNow(project.id, card.automation.nextRun);
+            if (!claimGate.ok) {
+              slog(`[status] ${project.id}/${card.id}: due but not claimed — ${claimGate.reason}`);
+              continue;
+            }
             kickoffsThisTick++;
             state.activeKickoffs.add(card.id);
 
@@ -1073,6 +1371,7 @@ async function checkAutomations(): Promise<number> {
               `activeKickoffsInThisProcess=${state.activeKickoffs.size}`
             );
 
+            const prevLastRun = auto.lastRun; // restored if delivery is held (#0381)
             // Write lastRun BEFORE kickoff so it survives server restarts.
             // Without this, an HMR restart during the ~14s kickoff window
             // loses the in-memory activeKickoffs guard and re-fires the card.
@@ -1085,6 +1384,15 @@ async function checkAutomations(): Promise<number> {
               try {
                 slog(`Firing automation: ${card.title} (${card.id})`);
                 const result = await triggerAutomation(card, project.id, project.path);
+
+                if (result.held) {
+                  // #0381: the project stopped being active between the claim
+                  // and delivery. Un-consume: restore lastRun, leave nextRun /
+                  // enabled / lastResult exactly as they were, no notification.
+                  // Once resumed, the resume fence decides (skip, never replay).
+                  await updateCardAutomation(project.path, card.id, { lastRun: prevLastRun });
+                  return;
+                }
 
                 const configUpdates: Partial<AutomationConfig> = {
                   lastResult: result.success ? 'success' : 'error',
@@ -1187,6 +1495,18 @@ function logScheduledPromptEvent(projectId: string, cardId: string, detail: stri
   }
 }
 
+/** #0381: a held send goes back to pending, untouched — never recorded as failed. */
+async function unclaimScheduledPrompt(project: { id: string; path: string }, cardId: string, entryId: string, reason: string): Promise<void> {
+  await mutateCardScheduledPrompts(project.path, cardId, (list) => {
+    const e = list.find(x => x.id === entryId);
+    if (e && e.state === 'firing') {
+      e.state = 'pending';
+      delete e.firedAt;
+    }
+  });
+  slog(`[scheduled-prompts] ${entryId}: held at delivery — ${reason}; returned to pending`);
+}
+
 /**
  * Fire one claimed (state 'firing') entry. Exported for tests — the scan loop
  * calls it fire-and-forget. Busy handling (card #0352 problem): a live
@@ -1209,6 +1529,19 @@ export async function fireScheduledPrompt(
   let outcome: DeliveryInfo['outcome'] | undefined;
   let note: ScheduledPrompt['deliveryNote'] | undefined;
 
+  // #0381: re-check before touching the bridge at all (even the existence
+  // probe — a held project's send must not be recorded as failed). Not active
+  // any more → un-claim (back to pending, untouched) and stop; the next tick
+  // holds it and, once resumed, the resume fence marks it missed.
+  // (An early check before the existence probe too, so a held project's send
+  // is never recorded as "session missing". The last-moment guard is inside
+  // deliverToSession.)
+  const early = await stillFiresNow(project.id, entry.fireAt);
+  if (!early.ok) {
+    await unclaimScheduledPrompt(project, card.id, entry.id, early.reason);
+    return;
+  }
+
   try {
     // A scheduled send continues a conversation. If the bridge has no record
     // of the session at all (not even a stopped one), fail loudly instead of
@@ -1224,8 +1557,16 @@ export async function fireScheduledPrompt(
 
     if (!error) {
       const prompt = buildScheduledPromptBody(entry, now, CONFIGURED_TIMEZONE);
-      const base = { sessionName: entry.sessionName, provider: entry.provider, cwd: project.path, prompt, label: entry.id };
+      // #0381: the guard runs inside deliverToSession immediately before each
+      // POST — after the existence probe above and the live probe inside, and
+      // again before the busy-to-force retry.
+      const guard = deliveryGuard('scheduled_prompt', project.id, entry.fireAt);
+      const base = { sessionName: entry.sessionName, provider: entry.provider, cwd: project.path, prompt, label: entry.id, guard };
       let verdict = await deliverToSession({ ...base, busyPolicy: 'defer' });
+      if (verdict.held) {
+        await unclaimScheduledPrompt(project, card.id, entry.id, verdict.error ?? 'project not active');
+        return;
+      }
       if (verdict.busy) {
         const waitedMs = now.getTime() - Date.parse(entry.fireAt);
         if (waitedMs < SCHEDULED_PROMPT_LIMITS.busyWaitMaxMs) {
@@ -1245,6 +1586,10 @@ export async function fireScheduledPrompt(
         }
         swarn(`[scheduled-prompts] ${entry.id}: session still busy ${Math.round(waitedMs / 60_000)}m past fireAt — forcing the paste`);
         verdict = await deliverToSession({ ...base, busyPolicy: 'force' });
+        if (verdict.held) {
+          await unclaimScheduledPrompt(project, card.id, entry.id, verdict.error ?? 'project not active');
+          return;
+        }
         note = 'forced_busy';
       } else if ((entry.deferrals ?? 0) > 0) {
         note = 'after_wait';
@@ -1312,6 +1657,8 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
   }
 
   for (const project of registry.projects) {
+    if (holdIfInactive(project)) continue; // #0381 — before the board read
+    const fenceMs = resumedAtMs(project);
     const kanbanPath = path.join(project.path, 'documentation', 'kanban.json');
     let board: KanbanBoard;
     try {
@@ -1327,12 +1674,14 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
 
         const prune = new Set<string>();
         const missed: ScheduledPrompt[] = [];
+        const missedPaused: ScheduledPrompt[] = [];
         const interrupted: ScheduledPrompt[] = [];
         const due: ScheduledPrompt[] = [];
         for (const entry of list) {
-          switch (classifyScheduledPrompt(entry, nowMs, HOST)) {
+          switch (classifyScheduledPrompt(entry, nowMs, HOST, SCHEDULED_PROMPT_LIMITS, fenceMs)) {
             case 'prune': prune.add(entry.id); break;
             case 'missed': missed.push(entry); break;
+            case 'missed-paused': missedPaused.push(entry); break;
             case 'interrupted': interrupted.push(entry); break;
             case 'fire': due.push(entry); break;
           }
@@ -1340,8 +1689,9 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
 
         // Housekeeping transitions — one locked write per card. Re-check
         // state by id inside the lock so a concurrent write can't be undone.
-        if (prune.size || missed.length || interrupted.length) {
+        if (prune.size || missed.length || missedPaused.length || interrupted.length) {
           const missedIds = new Set(missed.map(e => e.id));
+          const missedPausedIds = new Set(missedPaused.map(e => e.id));
           const interruptedIds = new Set(interrupted.map(e => e.id));
           const finishedAt = new Date().toISOString();
           try {
@@ -1350,6 +1700,9 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
                 if (missedIds.has(e.id) && e.state === 'pending') {
                   Object.assign(e, { state: 'missed', finishedAt, error: 'Fire time passed while the web server or bridge was not running' });
                   tryAutoStatus(liveCard, { text: 'Scheduled prompt missed — web or bridge was down at fire time', tier: 'high' });
+                } else if (missedPausedIds.has(e.id) && e.state === 'pending') {
+                  Object.assign(e, { state: 'missed', finishedAt, error: PAUSED_SKIP_ERROR });
+                  tryAutoStatus(liveCard, { text: 'Scheduled prompt skipped: project was paused', tier: 'high' });
                 } else if (interruptedIds.has(e.id) && e.state === 'firing') {
                   Object.assign(e, { state: 'failed', finishedAt, error: 'Interrupted — the web server restarted mid-fire' });
                   tryAutoStatus(liveCard, { text: 'Scheduled prompt failed — see terminal footer', tier: 'high' });
@@ -1365,6 +1718,11 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
             logScheduledPromptEvent(project.id, card.id, `Scheduled prompt missed (was due ${hhmm(new Date(e.fireAt))}): web or bridge was down`);
             await sendErrorNotification(card.title, `Fire time ${e.fireAt} passed while the web server or bridge was not running`, e.sessionName, 'Scheduled prompt missed');
           }
+          // Owner-caused (they paused the project): logged, no Telegram error.
+          for (const e of missedPaused) {
+            slog(`[scheduled-prompts] skipped ${e.id} on ${card.id} (fireAt ${e.fireAt}) — project was paused at the fire time`);
+            logScheduledPromptEvent(project.id, card.id, `Scheduled prompt skipped (was due ${hhmm(new Date(e.fireAt))}): project was paused`);
+          }
           for (const e of interrupted) {
             swarn(`[scheduled-prompts] interrupted ${e.id} on ${card.id} (firedAt ${e.firedAt})`);
             logScheduledPromptEvent(project.id, card.id, 'Scheduled prompt failed: interrupted by a web restart mid-fire');
@@ -1377,6 +1735,14 @@ async function checkScheduledPrompts(budget: number): Promise<void> {
         for (const entry of due) {
           if (budget <= 0) return; // remaining due entries pick up next tick
           if (state.activeKickoffs.has(spKey(entry.id))) continue;
+
+          // #0381: fresh status re-check right before the claim.
+          await schedulerTestHooks.beforeClaim?.('scheduled_prompt', project.id);
+          const claimGate = await stillFiresNow(project.id, entry.fireAt);
+          if (!claimGate.ok) {
+            slog(`[scheduled-prompts] ${entry.id} due but not claimed — ${claimGate.reason}`);
+            continue;
+          }
 
           // Claim on disk BEFORE the bridge call so an HMR restart mid-fire
           // cannot re-fire it (mirrors the lastRun-before-kickoff rule).
@@ -1435,6 +1801,7 @@ async function checkAtlasRefreshes(): Promise<void> {
     const now = Date.now();
 
     for (const project of registry.projects) {
+      if (holdIfInactive(project)) continue; // #0381
       if (atlasKickoffsInFlight.has(project.id)) continue;
       let config;
       try {
@@ -1450,15 +1817,31 @@ async function checkAtlasRefreshes(): Promise<void> {
         continue;
       }
 
-      const lastRun = config.last_run ? Date.parse(config.last_run) : 0;
+      // Resume fence (#0381): a boundary that passed while the project was
+      // held is not caught up — resumedAt acts as a last-run floor.
+      const lastRun = Math.max(config.last_run ? Date.parse(config.last_run) || 0 : 0, resumedAtMs(project));
       if (!atlasRefreshDue(config.schedule, CONFIGURED_TIMEZONE, lastRun, now)) continue;
       const boundary = latestBoundaryBefore(config.schedule, CONFIGURED_TIMEZONE, now);
 
       atlasKickoffsInFlight.add(project.id);
       void (async () => {
         try {
+          // #0381: atlas has no separate claim (last_run is stamped only on a
+          // successful delivery), so one fresh re-check right before the
+          // kickoff covers both "before claim" and "before delivery".
+          await schedulerTestHooks.beforeClaim?.('atlas', project.id);
+          const gate = await stillFiresNow(project.id, boundary?.toISOString());
+          if (!gate.ok) {
+            slog(`[atlas] refresh for ${project.id} not started — ${gate.reason}`);
+            return;
+          }
           slog(`[atlas] refresh due for ${project.id} (boundary ${boundary?.toISOString() ?? 'unknown'})`);
-          const result = await kickoffAtlasRefresh(project.id, project.path, 'scheduled');
+          // Last-moment guard runs inside deliverAtlasPrompt, after its setup reads.
+          const result = await kickoffAtlasRefresh(project.id, project.path, 'scheduled', deliveryGuard('atlas', project.id, boundary?.toISOString()));
+          if (!result.ok && 'held' in result && result.held) {
+            slog(`[atlas] refresh for ${project.id} held at delivery — ${result.error}; last_run untouched`);
+            return;
+          }
           if (result.ok) slog(`[atlas] refresh kicked off for ${project.id} → ${result.sessionName}`);
           else serr(`[atlas] refresh failed for ${project.id}: ${result.error}`);
         } catch (err) {

@@ -126,6 +126,15 @@ function findRegistryProjectByPath(root, projects = loadRegistryProjects()) {
   return projects.find((p) => p.path === resolved) || null;
 }
 
+// Project status (#0381, feature 089) — LOCKSTEP with
+// web/src/lib/project-status.ts and messaging/src/state.ts: absent or unknown
+// → 'active'. Only an active project fires timers (the web scheduler gates on
+// it); here it gates cross-project prompts and drives `projects status`.
+const PROJECT_STATUSES = ['active', 'paused', 'complete', 'archived'];
+function projectStatus(project) {
+  return project && PROJECT_STATUSES.includes(project.status) ? project.status : 'active';
+}
+
 // Exit code for a refused cross-project prompt — distinct from generic
 // failures (1) so callers and scripts can tell "the target said no" apart.
 const EXIT_CROSS_PROJECT_REFUSED = 3;
@@ -533,15 +542,31 @@ Run 'kanban <command> --help' for command-specific options.
 `;
 
 const PROJECTS_HELP = `
-Usage: kanban projects
+Usage: kanban projects [--json]
+       kanban projects status <ref>                 # print status + what it holds
+       kanban projects status <ref> <status>        # active | paused | complete | archived
+       kanban projects folder <ref> "<folder>"      # put a project in a folder (created if new)
+       kanban projects folder <ref> --none          # take it out of its folder
+       kanban projects folders [--json]             # list folders with project counts
+       kanban projects folders rename "<old>" "<new>"
+       kanban projects folders delete "<folder>"    # its projects become unfiled; nothing deleted
 
 List every project registered in the SlyCode workspace: id, name, session key,
-whether it accepts cross-project prompts, and its path. Any of id / session key /
-name works as a --project ref.
+whether it accepts cross-project prompts, its status, and its path. Active
+projects come first. Any of id / session key / name works as a --project ref.
 
 Cross-project prompts are OFF by default. A project's owner switches them on in
 the SlyCode web UI (that project's header → defaults popover → "Accept
 cross-project prompts"). There is no CLI setter.
+
+Project status: only ACTIVE projects fire anything on a timer (automations,
+scheduled card sends, atlas refresh). Paused / complete / archived projects
+hold them, and refuse cross-project prompts. Resuming skips runs that fell
+due while held (never replays them). Running sessions are never touched.
+Agents: change a project's status only when the owner asks.
+
+Folders group projects in the Den (collapse state is per device, in the
+browser). Folder names are unique (case-insensitive), at most 40 characters.
 `;
 
 const SEARCH_HELP = `
@@ -1031,6 +1056,137 @@ function releaseBoardLock() {
   } catch { /* ignore */ }
 }
 process.on('exit', releaseBoardLock);
+
+// Registry lock (#0381) — FAIL-CLOSED, unlike the advisory board lock above.
+// LOCKSTEP with web/src/lib/registry-lock.ts withRegistryLock(): same lockfile
+// (projects/registry.json.lock = {pid, host, token, ts}), same rules:
+//   - contention → exponential backoff until the deadline
+//     (SLYCODE_REGISTRY_LOCK_TIMEOUT_MS, default 5s);
+//   - a stale lock is recovered only if its owner pid is dead on this host or
+//     it is older than 30s, and only under the serialized `<lock>.recover`
+//     lock with an exact re-check (racing recoverers never delete a live
+//     writer's lock); a stale recovery lock fails closed naming the file;
+//   - deadline or any other lock error → throw RegistryLockError; the
+//     mutation NEVER runs unlocked (a raced status write could re-enable a
+//     paused project's automations).
+const REGISTRY_LOCK_STALE_MS = 30000;
+class RegistryLockError extends Error {}
+
+function registryLockTimeoutMs() {
+  const env = Number(process.env.SLYCODE_REGISTRY_LOCK_TIMEOUT_MS);
+  return Number.isFinite(env) && env > 0 ? env : 5000;
+}
+
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
+}
+
+const RECOVERY_LOCK_STALE_MS = 10000;
+
+function registryLockIsStale(info, mtimeMs) {
+  const deadOwner = !!(info && info.pid) && info.host === os.hostname() && !pidAlive(info.pid);
+  return deadOwner || Date.now() - mtimeMs > REGISTRY_LOCK_STALE_MS;
+}
+
+// Serialized stale-lock recovery — LOCKSTEP with recoverStaleLock() in
+// web/src/lib/registry-lock.ts: take `<lock>.recover` (O_EXCL), re-read the
+// main lock, unlink it ONLY if it is still exactly the stale lock observed
+// (same inode, mtime, content) and still stale, release. A stale recovery lock
+// fails closed naming the file. Returns true when the stale lock is gone.
+function recoverStaleRegistryLock(lockPath, observed) {
+  const recoverPath = `${lockPath}.recover`;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    fs.writeFileSync(recoverPath, JSON.stringify({ pid: process.pid, host: os.hostname(), token, ts: Date.now() }), { flag: 'wx' });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    let rInfo = null;
+    let rMtime = Date.now();
+    try {
+      rMtime = fs.statSync(recoverPath).mtimeMs;
+      rInfo = JSON.parse(fs.readFileSync(recoverPath, 'utf-8'));
+    } catch (e) {
+      if (e.code === 'ENOENT') return false;
+    }
+    const deadOwner = !!(rInfo && rInfo.pid) && rInfo.host === os.hostname() && !pidAlive(rInfo.pid);
+    if (deadOwner || Date.now() - rMtime > RECOVERY_LOCK_STALE_MS) {
+      throw new RegistryLockError(`A stale registry recovery lock is blocking writes. Make sure no SlyCode process is writing projects, then delete ${recoverPath} and try again. Nothing was changed.`);
+    }
+    return false; // live recoverer — contention
+  }
+  try {
+    let st;
+    let raw;
+    try {
+      st = fs.statSync(lockPath);
+      raw = fs.readFileSync(lockPath, 'utf-8');
+    } catch (e) {
+      if (e.code === 'ENOENT') return true;
+      throw e;
+    }
+    let info = null;
+    try { info = JSON.parse(raw); } catch { /* identity check still applies */ }
+    const sameLock = st.ino === observed.ino && st.mtimeMs === observed.mtimeMs && raw === observed.raw;
+    if (!sameLock || !registryLockIsStale(info, st.mtimeMs)) return false;
+    fs.unlinkSync(lockPath);
+    return true;
+  } finally {
+    try {
+      const current = JSON.parse(fs.readFileSync(recoverPath, 'utf-8'));
+      if (current && current.token === token) fs.unlinkSync(recoverPath);
+    } catch { /* already gone */ }
+  }
+}
+
+function withRegistryLock(registryPath, fn) {
+  const lockPath = `${registryPath}.lock`;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const deadline = Date.now() + registryLockTimeoutMs();
+  let backoff = 10;
+  for (;;) {
+    try {
+      fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, host: os.hostname(), token, ts: Date.now() }), { flag: 'wx' });
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') {
+        throw new RegistryLockError(`Could not take the project registry lock (${err.code || 'error'}: ${err.message}). Nothing was changed.`);
+      }
+    }
+    let holder = null;
+    let observed = null;
+    try {
+      const st = fs.statSync(lockPath);
+      const raw = fs.readFileSync(lockPath, 'utf-8');
+      try { holder = JSON.parse(raw); } catch { /* mid-write or corrupt: age only */ }
+      observed = { raw, ino: st.ino, mtimeMs: st.mtimeMs };
+    } catch (err) {
+      if (err.code === 'ENOENT') continue;
+      throw new RegistryLockError(`Could not read the project registry lock (${err.message}). Nothing was changed.`);
+    }
+    if (registryLockIsStale(holder, observed.mtimeMs)) {
+      try {
+        if (recoverStaleRegistryLock(lockPath, observed)) continue;
+      } catch (err) {
+        if (err instanceof RegistryLockError) throw err;
+        throw new RegistryLockError(`Could not recover a stale project registry lock (${err.message}). Nothing was changed.`);
+      }
+    }
+    if (Date.now() >= deadline) {
+      const who = holder && holder.pid ? `pid ${holder.pid}` : 'another writer';
+      throw new RegistryLockError(`The project registry is busy (locked by ${who}). Nothing was changed — try again in a moment.`);
+    }
+    sleepSync(Math.min(backoff, Math.max(1, deadline - Date.now())) + Math.floor(Math.random() * 10));
+    backoff = Math.min(backoff * 2, 200);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      const current = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      if (current && current.token === token) fs.unlinkSync(lockPath);
+    } catch { /* already gone */ }
+  }
+}
 
 function readKanban() {
   try {
@@ -2853,35 +3009,336 @@ function cmdProjects(args) {
     console.error('Error: No SlyCode workspace found (projects/registry.json). Set SLYCODE_HOME or run from inside the workspace.');
     process.exit(1);
   }
+  if (opts._[0] === 'status') {
+    cmdProjectStatus(workspaceRoot, opts._[1], opts._[2], opts);
+    return;
+  }
+  if (opts._[0] === 'folder') {
+    cmdProjectFolder(workspaceRoot, opts._[1], opts._[2], opts);
+    return;
+  }
+  if (opts._[0] === 'folders') {
+    cmdProjectFolders(workspaceRoot, opts._.slice(1), opts);
+    return;
+  }
+  if (opts._[0] !== undefined) {
+    console.error(`Error: Unknown projects subcommand '${opts._[0]}'.`);
+    console.log(PROJECTS_HELP);
+    process.exit(1);
+  }
+  const statusRank = (p) => PROJECT_STATUSES.indexOf(projectStatus(p));
   const projects = loadRegistryProjects(workspaceRoot)
     .slice()
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.id).localeCompare(String(b.id)));
+    .sort((a, b) => statusRank(a) - statusRank(b) || (a.order ?? 0) - (b.order ?? 0) || String(a.id).localeCompare(String(b.id)));
   if (projects.length === 0) {
     console.log('No projects registered.');
     return;
   }
+  const folders = readRegistryFolders(workspaceRoot);
   const rows = projects.map((p) => {
     let cross = 'no board';
     try {
       const board = JSON.parse(fs.readFileSync(path.join(p.path, 'documentation', 'kanban.json'), 'utf-8'));
       cross = allowsCrossProjectPrompts(board) ? 'on' : 'off';
     } catch { /* no board */ }
-    return { id: p.id, name: p.name || '', key: p.sessionKey, cross, path: p.path };
+    const status = projectStatus(p);
+    return {
+      id: p.id, name: p.name || '', key: p.sessionKey,
+      // A held project refuses cross-project prompts whatever its flag says.
+      cross: status === 'active' ? cross : 'held', status, path: p.path,
+      allowFlag: cross === 'on', statusChangedAt: p.statusChangedAt || null, folderId: p.folderId || null,
+      folder: (folders.find((f) => f.id === p.folderId) || {}).name || '-',
+    };
   });
   if (opts.json) {
-    console.log(JSON.stringify(rows.map((r) => ({ ...r, allowCrossProjectPrompts: r.cross === 'on' })), null, 2));
+    console.log(JSON.stringify(rows.map(({ allowFlag, ...r }) => ({ ...r, allowCrossProjectPrompts: allowFlag })), null, 2));
     return;
   }
   const w = (k) => Math.max(k.length, ...rows.map((r) => String(r[k]).length));
-  const cols = [['id', 'ID'], ['name', 'NAME'], ['key', 'SESSION KEY'], ['cross', 'CROSS-PROJECT'], ['path', 'PATH']];
+  const cols = [['id', 'ID'], ['name', 'NAME'], ['key', 'SESSION KEY'], ['cross', 'CROSS-PROJECT'], ['status', 'STATUS'], ['folder', 'FOLDER'], ['path', 'PATH']];
   const widths = cols.map(([k, h]) => Math.max(h.length, w(k)));
   console.log(cols.map(([, h], i) => h.padEnd(widths[i])).join('  ').trimEnd());
   for (const r of rows) {
     console.log(cols.map(([k], i) => String(r[k]).padEnd(widths[i])).join('  ').trimEnd());
   }
   console.log('');
-  console.log('CROSS-PROJECT = accepts prompts from other projects (set in the web UI; off by default).');
+  console.log('CROSS-PROJECT = accepts prompts from other projects (set in the web UI; off by default;');
+  console.log('"held" = the project is not active, so it refuses them).');
+  console.log('STATUS = only active projects fire automations/scheduled sends (kanban projects status --help).');
   console.log('Use ID, SESSION KEY, or NAME as a --project ref.');
+}
+
+// What a project's board holds on a timer (counts only — the web Den adds
+// skipped-run counts). Mirrors heldSummary() in web/src/lib/project-held.ts.
+function projectHeldCounts(projectPath) {
+  const out = { automations: 0, scheduledPrompts: 0, atlas: false };
+  try {
+    const board = JSON.parse(fs.readFileSync(path.join(projectPath, 'documentation', 'kanban.json'), 'utf-8'));
+    for (const cards of Object.values(board.stages || {})) {
+      for (const c of Array.isArray(cards) ? cards : []) {
+        if (!c || c.archived) continue;
+        if (c.automation && c.automation.enabled && c.automation.schedule) out.automations++;
+        for (const sp of Array.isArray(c.scheduled_prompts) ? c.scheduled_prompts : []) {
+          if (sp && sp.state === 'pending') out.scheduledPrompts++;
+        }
+      }
+    }
+  } catch { /* no board */ }
+  try {
+    const atlas = JSON.parse(fs.readFileSync(path.join(projectPath, 'documentation', 'atlas', 'config.json'), 'utf-8'));
+    out.atlas = !!(atlas && atlas.enabled && atlas.schedule);
+  } catch { /* no atlas */ }
+  return out;
+}
+
+function describeHeld(h) {
+  const parts = [];
+  if (h.automations) parts.push(`${h.automations} automation${h.automations !== 1 ? 's' : ''}`);
+  if (h.scheduledPrompts) parts.push(`${h.scheduledPrompts} scheduled send${h.scheduledPrompts !== 1 ? 's' : ''}`);
+  if (h.atlas) parts.push('atlas refresh');
+  return parts.length ? parts.join(', ') : 'nothing on a timer';
+}
+
+// `kanban projects status <ref> [status]` (#0381). Writes go to the raw
+// registry JSON (not the self-healed copy) by read-modify-write + atomic
+// rename, same as the web's saveRegistry. Rules mirror statusChangePatch() in
+// web/src/lib/project-status.ts: unchanged = no-op; resumedAt only on a
+// non-active → active move (the scheduler's skip-never-replay fence).
+function cmdProjectStatus(workspaceRoot, ref, next, opts) {
+  if (!ref) {
+    console.error('Usage: kanban projects status <ref> [active|paused|complete|archived]');
+    process.exit(1);
+  }
+  const project = resolveProjectRef(ref, loadRegistryProjects(workspaceRoot));
+  if (!project) {
+    console.error(`Error: No registered project matches "${ref}". Run 'kanban projects' to list them.`);
+    process.exit(1);
+  }
+  const current = projectStatus(project);
+  if (next === undefined) {
+    const held = projectHeldCounts(project.path);
+    if (opts.json) {
+      console.log(JSON.stringify({ id: project.id, status: current, statusChangedAt: project.statusChangedAt || null, resumedAt: project.resumedAt || null, held }, null, 2));
+      return;
+    }
+    const since = project.statusChangedAt ? ` since ${project.statusChangedAt}` : '';
+    console.log(`${project.name || project.id} (${project.id}): ${current}${since}`);
+    console.log(current === 'active'
+      ? `Timers: ${describeHeld(held)} (running normally).`
+      : `Holding: ${describeHeld(held)}.`);
+    return;
+  }
+  if (!PROJECT_STATUSES.includes(next)) {
+    console.error(`Error: status must be one of ${PROJECT_STATUSES.join(', ')} (got "${next}").`);
+    process.exit(1);
+  }
+  // Decide against the FRESH copy read under the registry lock, not the
+  // snapshot above — a concurrent writer may have changed it meanwhile.
+  const outcome = mutateRegistry(workspaceRoot, (raw) => {
+    const entry = (raw.projects || []).find((p) => p && p.id === project.id);
+    if (!entry) return { err: `project "${project.id}" vanished from the registry while updating.` };
+    const was = projectStatus(entry);
+    if (was === next) return { unchanged: true, was };
+    const now = new Date().toISOString();
+    entry.status = next;
+    entry.statusChangedAt = now;
+    if (next === 'active') entry.resumedAt = now;
+    return { was };
+  });
+  if (outcome.err) {
+    console.error(`Error: ${outcome.err} Nothing changed.`);
+    process.exit(1);
+  }
+  if (outcome.unchanged) {
+    console.log(`${project.name || project.id} is already ${next}. Nothing changed.`);
+    return;
+  }
+  const previous = outcome.was;
+
+  const verb = next === 'active' ? (previous === 'archived' ? 'Restored' : 'Resumed') : `Marked ${next}`;
+  emitEventTo(path.join(workspaceRoot, 'documentation', 'events.json'), 'project_status', project.id, `${verb}: ${project.name || project.id}`);
+  const held = projectHeldCounts(project.path);
+  console.log(`${verb} ${project.name || project.id} (${previous} → ${next}).`);
+  if (next === 'active') {
+    console.log('Runs that fell due while it was held are skipped, not replayed; each timer picks up at its next scheduled time.');
+  } else {
+    console.log(`Holding: ${describeHeld(held)}. Sessions already running finish on their own.`);
+  }
+}
+
+// --- Den folders (#0381 Phase B) — LOCKSTEP with web/src/lib/project-folders.ts:
+// slug ids fixed at creation (rename keeps assignments), unique case-insensitive
+// names ≤ 40 chars, delete unfiles projects, dangling folderId = no folder.
+const FOLDER_NAME_MAX = 40;
+
+function readRegistryFolders(workspaceRoot) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'projects', 'registry.json'), 'utf-8'));
+    return (Array.isArray(raw) ? [] : (raw.folders || []))
+      .filter((f) => f && typeof f.id === 'string' && typeof f.name === 'string')
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeFolderName(raw) {
+  return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+}
+
+function folderIdFor(name, existing) {
+  const slug = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'folder';
+  const taken = new Set(existing.map((f) => f.id));
+  let id = `fld-${slug}`;
+  for (let n = 2; taken.has(id); n++) id = `fld-${slug}-${n}`;
+  return id;
+}
+
+function validateFolderName(name, folders, excludeId) {
+  if (!name) return 'Folder name is required.';
+  if (name.length > FOLDER_NAME_MAX) return `Folder name must be ${FOLDER_NAME_MAX} characters or fewer.`;
+  const clash = folders.find((f) => f.id !== excludeId && f.name.toLowerCase() === name.toLowerCase());
+  return clash ? `A folder called "${clash.name}" already exists.` : null;
+}
+
+// Fresh read-modify-write of the raw registry (not the self-healed copy),
+// under the registry lock, atomic, written only if something changed.
+// `fn` returning an object with `err` aborts without writing.
+function mutateRegistry(workspaceRoot, fn) {
+  const registryPath = path.join(workspaceRoot, 'projects', 'registry.json');
+  try {
+    return withRegistryLock(registryPath, () => mutateRegistryLocked(registryPath, fn));
+  } catch (err) {
+    if (err instanceof RegistryLockError) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
+function mutateRegistryLocked(registryPath, fn) {
+  const raw = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+  if (Array.isArray(raw)) {
+    // Return (not exit) so the registry lock is released by withRegistryLock.
+    return { err: 'this registry predates folders (bare array format). Open the SlyCode web UI once to migrate it.' };
+  }
+  const before = JSON.stringify(raw);
+  const result = fn(raw);
+  if (result && result.err) return result;
+  if (Array.isArray(raw.folders) && raw.folders.length === 0 && !before.includes('"folders"')) delete raw.folders;
+  if (JSON.stringify(raw) !== before) {
+    raw.lastUpdated = new Date().toISOString();
+    if (raw.version === '2.0.0') raw.version = '2.1.0'; // marker only
+    atomicWriteFileSync(registryPath, JSON.stringify(raw, null, 2) + '\n');
+  }
+  return result;
+}
+
+function findFolderByNameIn(folders, name) {
+  const want = normalizeFolderName(name).toLowerCase();
+  return folders.find((f) => f.name.toLowerCase() === want);
+}
+
+function cmdProjectFolder(workspaceRoot, ref, folderName, opts) {
+  if (!ref || (folderName === undefined && !opts.none)) {
+    console.error('Usage: kanban projects folder <ref> "<folder>"   |   kanban projects folder <ref> --none');
+    process.exit(1);
+  }
+  const project = resolveProjectRef(ref, loadRegistryProjects(workspaceRoot));
+  if (!project) {
+    console.error(`Error: No registered project matches "${ref}". Run 'kanban projects' to list them.`);
+    process.exit(1);
+  }
+  const label = project.name || project.id;
+  if (opts.none) {
+    const was = mutateRegistry(workspaceRoot, (raw) => {
+      const entry = raw.projects.find((p) => p && p.id === project.id);
+      const prev = entry && entry.folderId ? ((raw.folders || []).find((f) => f.id === entry.folderId) || {}).name : null;
+      if (entry) delete entry.folderId;
+      return prev;
+    });
+    if (was && was.err) { console.error(`Error: ${was.err} Nothing changed.`); process.exit(1); }
+    console.log(was ? `Moved ${label} out of "${was}" (no folder).` : `${label} was not in a folder. Nothing changed.`);
+    return;
+  }
+  const name = normalizeFolderName(folderName);
+  const outcome = mutateRegistry(workspaceRoot, (raw) => {
+    if (!Array.isArray(raw.folders)) raw.folders = [];
+    let folder = findFolderByNameIn(raw.folders, name);
+    let created = false;
+    if (!folder) {
+      const err = validateFolderName(name, raw.folders);
+      if (err) return { err };
+      const order = raw.folders.reduce((m, f) => Math.max(m, (f.order ?? 0) + 1), 0);
+      folder = { id: folderIdFor(name, raw.folders), name, order };
+      raw.folders.push(folder);
+      created = true;
+    }
+    const entry = raw.projects.find((p) => p && p.id === project.id);
+    entry.folderId = folder.id;
+    return { folder, created };
+  });
+  if (outcome.err) {
+    console.error(`Error: ${outcome.err} Nothing changed.`);
+    process.exit(1);
+  }
+  console.log(`${outcome.created ? `Created folder "${outcome.folder.name}" and moved` : 'Moved'} ${label} into "${outcome.folder.name}".`);
+}
+
+function cmdProjectFolders(workspaceRoot, args, opts) {
+  const [action, a, b] = args;
+  if (action === undefined) {
+    const folders = readRegistryFolders(workspaceRoot);
+    const projects = loadRegistryProjects(workspaceRoot);
+    const rows = folders.map((f) => ({ id: f.id, name: f.name, order: f.order, projects: projects.filter((p) => p.folderId === f.id).map((p) => p.id) }));
+    if (opts.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return;
+    }
+    if (rows.length === 0) {
+      console.log('No folders. Create one with: kanban projects folder <ref> "<folder>"');
+      return;
+    }
+    for (const r of rows) console.log(`${r.name}  (${r.projects.length})${r.projects.length ? `  ${r.projects.join(', ')}` : ''}`);
+    const unfiled = projects.filter((p) => !folders.some((f) => f.id === p.folderId)).map((p) => p.id);
+    if (unfiled.length) console.log(`No folder  (${unfiled.length})  ${unfiled.join(', ')}`);
+    return;
+  }
+  if (action === 'rename') {
+    if (!a || !b) { console.error('Usage: kanban projects folders rename "<old>" "<new>"'); process.exit(1); }
+    const out = mutateRegistry(workspaceRoot, (raw) => {
+      const folder = findFolderByNameIn(raw.folders || [], a);
+      if (!folder) return { err: `No folder called "${a}".` };
+      const name = normalizeFolderName(b);
+      const err = validateFolderName(name, raw.folders, folder.id);
+      if (err) return { err };
+      const old = folder.name;
+      folder.name = name;
+      return { old, name };
+    });
+    if (out.err) { console.error(`Error: ${out.err} Nothing changed.`); process.exit(1); }
+    console.log(`Renamed folder "${out.old}" to "${out.name}".`);
+    return;
+  }
+  if (action === 'delete') {
+    if (!a) { console.error('Usage: kanban projects folders delete "<folder>"'); process.exit(1); }
+    const out = mutateRegistry(workspaceRoot, (raw) => {
+      const idx = (raw.folders || []).findIndex((f) => f.name.toLowerCase() === normalizeFolderName(a).toLowerCase());
+      if (idx === -1) return { err: `No folder called "${a}".` };
+      const [folder] = raw.folders.splice(idx, 1);
+      let unfiled = 0;
+      for (const p of raw.projects) {
+        if (p && p.folderId === folder.id) { delete p.folderId; unfiled++; }
+      }
+      return { name: folder.name, unfiled };
+    });
+    if (out.err) { console.error(`Error: ${out.err} Nothing changed.`); process.exit(1); }
+    console.log(`Deleted folder "${out.name}". ${out.unfiled} project${out.unfiled !== 1 ? 's' : ''} moved to no folder; no projects were removed.`);
+    return;
+  }
+  console.error(`Error: Unknown folders action '${action}'. Use: rename, delete (or no action to list).`);
+  process.exit(1);
 }
 
 // Which invocations may carry --project (#0350). `prompt` is gated by the
@@ -2898,6 +3355,11 @@ function projectFlagAllowed(command, args) {
     case 'board':
     case 'areas':
     case 'projects':
+      // Registry writes (`status <ref> <status>`, `folder …`, `folders rename|delete`)
+      // never go through --project.
+      if (pos[0] === 'status') return pos[2] === undefined;
+      if (pos[0] === 'folder') return false;
+      if (pos[0] === 'folders') return pos[1] === undefined;
       return true;
     case 'notes':
       return pos[1] === undefined || pos[1] === 'list' || pos[1] === 'search';
@@ -4128,6 +4590,18 @@ function cmdPrompt(args) {
     console.error('in projects/registry.json (SlyCode web UI → Projects), then retry. Tell the user.');
     process.exit(EXIT_CROSS_PROJECT_REFUSED);
   }
+  // #0381: a held (non-active) project refuses cross-project prompts whatever
+  // its opt-in flag says — pausing exists to stop agents spending tokens there.
+  const targetStatus = targetEntry ? projectStatus(targetEntry) : 'active';
+  if (crossProject && targetStatus !== 'active') {
+    emitEvent('card_prompt', PROJECT_NAME, `Cross-project prompt from ${callerLabel} refused (project ${targetStatus})`, card.id);
+    console.error(`Refused: project ${targetLabel} is ${targetStatus}.`);
+    console.error(`A ${targetStatus} project holds its automations and accepts no cross-project prompts.`);
+    console.error('Do not work around this — there is no other official route. Tell the user the');
+    console.error('target project is not active; resuming it is their decision (SlyCode Den → project');
+    console.error(`menu → Active, or: sly-kanban projects status ${targetEntry.id} active).`);
+    process.exit(EXIT_CROSS_PROJECT_REFUSED);
+  }
   if (crossProject && !allowsCrossProjectPrompts(kanban)) {
     emitEvent('card_prompt', PROJECT_NAME, `Cross-project prompt from ${callerLabel} refused (setting off)`, card.id);
     console.error(`Refused: project ${targetLabel} does not accept cross-project prompts.`);
@@ -4205,7 +4679,10 @@ function cmdPrompt(args) {
           if (info && info.status) {
             sessionExists = true;
             sessionStatus = info.status;
-            sessionRunning = info.status === 'running';
+            // 'detached' = live PTY with no browser attached. It goes through
+            // /submit like 'running' (card #0382): the create/resume path
+            // used to reuse it and report success without the delivery result.
+            sessionRunning = info.status === 'running' || info.status === 'detached';
           }
         }
       } catch (err) {
@@ -4320,11 +4797,27 @@ Either way, the CLI will print a success line with the byte count and a preview 
         }
       }
 
-      // Helper: release response lock on error (prevents lock leak)
+      // Helper: release response lock on error (prevents lock leak). Bounded
+      // (card #0382): a stalled bridge must not hang the caller on the way out.
       const cleanupResponseLock = async () => {
         if (responseId) {
-          try { await fetch(`${bridgeUrl}/responses/${responseId}/timeout`, { method: 'POST' }); } catch { /* best effort */ }
+          try {
+            const r = await fetch(`${bridgeUrl}/responses/${responseId}/timeout`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+            await r.text();
+          } catch { /* best effort */ }
         }
+      };
+      // GET session info with headers AND body bounded by `deadline` (card
+      // #0382 review): the signal aborts a stalled connect, a stalled header
+      // and a trickling body alike. Returns null when nothing usable arrived.
+      const sessionInfoBefore = async (deadline) => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return null;
+        try {
+          const r = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`, { signal: AbortSignal.timeout(remaining) });
+          const body = await r.json();
+          return r.ok ? body : null;
+        } catch { return null; }
       };
 
       // Handle no running session — resume if stopped, create fresh if none exists
@@ -4377,29 +4870,27 @@ Either way, the CLI will print a success line with the byte count and a preview 
           await cleanupResponseLock();
           process.exit(1);
         }
+        let createdInfo = null;
+        try { createdInfo = await createRes.json(); } catch { /* older bridge */ }
 
         // Wait for session to be alive (liveness check)
         console.log('  Waiting for session to start...');
-        const livenessStart = Date.now();
-        const livenessTimeout = 20000; // 20s
+        const livenessDeadline = Date.now() + 20000; // 20s
         let alive = false;
-        while (Date.now() - livenessStart < livenessTimeout) {
+        let livenessInfo = null;
+        while (Date.now() < livenessDeadline) {
           await new Promise(r => setTimeout(r, 2000));
-          try {
-            const checkRes = await fetch(`${bridgeUrl}/sessions/${encodeURIComponent(sessionName)}`);
-            if (checkRes.ok) {
-              const checkInfo = await checkRes.json();
-              if (checkInfo && checkInfo.status === 'running') {
-                alive = true;
-                break;
-              }
-              if (checkInfo && checkInfo.status === 'stopped') {
-                console.error('Error: Session stopped during startup.');
-                await cleanupResponseLock();
-                process.exit(1);
-              }
-            }
-          } catch { /* retry */ }
+          const checkInfo = await sessionInfoBefore(livenessDeadline);
+          if (checkInfo && checkInfo.status === 'running') {
+            alive = true;
+            livenessInfo = checkInfo;
+            break;
+          }
+          if (checkInfo && checkInfo.status === 'stopped') {
+            console.error('Error: Session stopped during startup.');
+            await cleanupResponseLock();
+            process.exit(1);
+          }
         }
 
         if (!alive) {
@@ -4407,7 +4898,32 @@ Either way, the CLI will print a success line with the byte count and a preview 
           await cleanupResponseLock();
           process.exit(1);
         }
-        console.log('  Session started. Prompt delivered via CLI arg.');
+        // Card #0382: on Windows the prompt is NOT a CLI arg — the bridge
+        // pastes it once startup output settles (up to ~30s), waits for a readable input box and verifies the
+        // submit. That outcome lands on the session as `promptDelivery`
+        // AFTER our POST returned, so wait for it; a stranded paste must fail
+        // loudly here, not read as "delivered".
+        // Either answer can carry it: the POST (createSession's full info) or
+        // the liveness GET (a bridge whose POST answer predates the field).
+        let promptDelivery = createdInfo?.promptDelivery || livenessInfo?.promptDelivery || null;
+        const deliveryWaitMs = parseInt(process.env.SLYCODE_TEST_DELIVERY_WAIT_MS || '', 10) || 120000; // startup settle ≤30s + readiness wait ≤45s + paste/verify ladder
+        if (promptDelivery?.state === 'pending') {
+          console.log('  Waiting for the bridge to paste and verify the prompt...');
+          const deliveryDeadline = Date.now() + deliveryWaitMs;
+          while (promptDelivery?.state === 'pending' && Date.now() < deliveryDeadline) {
+            await new Promise(r => setTimeout(r, Math.min(2000, Math.max(0, deliveryDeadline - Date.now()))));
+            const info = await sessionInfoBefore(deliveryDeadline);
+            if (info?.promptDelivery) promptDelivery = info.promptDelivery;
+          }
+        }
+        if (promptDelivery && promptDelivery.state !== 'delivered') {
+          const how = promptDelivery.state === 'pending' ? `still pending after ${Math.round(deliveryWaitMs / 1000)}s` : promptDelivery.state;
+          console.error(`Error: prompt delivery ${how}${promptDelivery.reason ? ` (${promptDelivery.reason})` : ''}. The prompt may be sitting unsent in ${cardId}'s input box — check its terminal before retrying (a retry can deliver a second copy).${promptDelivery.correlationId ? ` Diagnostics: grep ${promptDelivery.correlationId} in the bridge log.` : ''}`);
+          emitEvent('card_prompt', PROJECT_NAME, `${promptKind} to ${cardId} (${provider}) not delivered: ${how}`, card.id);
+          await cleanupResponseLock();
+          process.exit(1);
+        }
+        console.log(promptDelivery ? '  Session started. Prompt pasted and submit verified.' : '  Session started. Prompt delivered via CLI arg.');
 
         // V2: target card gets a low-tier auto-status that the prompt landed.
         // Fixed text (no excerpt) so prompt fragments don't leak to the board.

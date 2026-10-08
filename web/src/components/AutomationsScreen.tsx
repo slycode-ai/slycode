@@ -13,16 +13,27 @@ interface AutomationsScreenProps {
   onCardClick: (card: KanbanCard) => void;
   onCardContextMenu?: (card: KanbanCard, e: React.MouseEvent) => void;
   onCreateAutomation: () => void;
+  /** #0381: the project is paused/complete/archived — nothing fires on schedule. */
+  held?: boolean;
 }
 
-function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: boolean }) {
+function CountdownTimer({ nextRun, enabled, held }: { nextRun?: string; enabled?: boolean; held?: boolean }) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    if (!nextRun || !enabled) return;
+    if (!nextRun || !enabled || held) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [nextRun, enabled]);
+  }, [nextRun, enabled, held]);
+
+  if (held && enabled) {
+    return (
+      <div className="flex flex-col items-center justify-center">
+        <span className="font-mono text-lg font-medium text-warn-text">Held</span>
+        <span className="text-[11px] text-ink-3">Project paused</span>
+      </div>
+    );
+  }
 
   if (!nextRun || !enabled) {
     return (
@@ -79,7 +90,7 @@ function CountdownTimer({ nextRun, enabled }: { nextRun?: string; enabled?: bool
   );
 }
 
-export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardClick, onCardContextMenu, onCreateAutomation }: AutomationsScreenProps) {
+export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardClick, onCardContextMenu, onCreateAutomation, held = false }: AutomationsScreenProps) {
   const [, setSchedulerRunning] = useState<boolean | null>(null);
   const [timezoneAbbr, setTimezoneAbbr] = useState<string>('');
 
@@ -237,7 +248,7 @@ export function AutomationsScreen({ cards, activeCards, triggeringCards, onCardC
                                     <span className="text-[11px] text-transparent">placeholder</span>
                                   </div>
                                 ) : (
-                                  <CountdownTimer nextRun={card.automation?.nextRun} enabled={card.automation?.enabled} />
+                                  <CountdownTimer nextRun={card.automation?.nextRun} enabled={card.automation?.enabled} held={held} />
                                 )}
                                 <div className="mt-0.5 h-4 text-[11px] text-ink-3">
                                   {card.automation?.lastRun

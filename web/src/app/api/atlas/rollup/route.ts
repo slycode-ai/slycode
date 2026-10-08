@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import { loadRegistry } from '@/lib/registry';
+import { projectStatus } from '@/lib/project-status';
 import { loadAtlasSnapshot } from '@/lib/atlas/store';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,7 @@ export async function GET() {
     const registry = await loadRegistry();
     const projects: ProjectRollup[] = [];
     for (const project of registry.projects) {
+      if (projectStatus(project) === 'archived') continue; // cold (#0381)
       try {
         const snap = await loadAtlasSnapshot(project.path);
         if (!snap.exists || !snap.root) {

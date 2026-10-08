@@ -3,6 +3,7 @@ import { TtsProviderError, VoicesUnavailableError } from './errors.js';
 import { buildSpeechHealth } from './health.js';
 import { encoderStatus } from './audio-encode.js';
 import { customVoiceFix, expiryWarning, recipeKind } from './custom-voices.js';
+import { projectStatus } from '../project-status.js';
 import { createTtsProviders, isTtsProviderId, parseProviderEnv, resolveActiveProvider, resolveVoice, PROVIDER_LABELS, PROVIDER_KEY_ENV, PROVIDER_VOICE_ENV, } from './provider.js';
 export class TtsRuntime {
     config;
@@ -31,6 +32,7 @@ export class TtsRuntime {
             revision: this.revision(),
             storedDefault: (p) => this.state.getDefaultVoice(p),
             projectsWithoutVoice: (p) => this.state.getProjects()
+                .filter((proj) => projectStatus(proj) !== 'archived') // archived = cold (#0381)
                 .filter((proj) => this.state.getProjectVoice(proj.id, p).effective === null)
                 .map((proj) => proj.name || proj.id),
             expiryWarnings: (p) => this.expiryWarnings(p),
@@ -51,6 +53,8 @@ export class TtsRuntime {
             users.set(voice.id, entry);
         };
         for (const proj of this.state.getProjects()) {
+            if (projectStatus(proj) === 'archived')
+                continue; // cold (#0381)
             const slot = this.state.getProjectVoice(proj.id, provider);
             if (slot.source === 'project')
                 note(`'${proj.name || proj.id}'`, slot.effective);
@@ -136,6 +140,8 @@ export class TtsRuntime {
         const envName = PROVIDER_VOICE_ENV[target];
         const envState = env ? await check(env.id) : 'ok';
         for (const project of this.state.getProjects()) {
+            if (projectStatus(project) === 'archived')
+                continue; // cold (#0381)
             const projectName = project.name || project.id;
             const slot = this.state.getProjectVoice(project.id, target);
             let voice = slot.effective;

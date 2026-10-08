@@ -83,19 +83,25 @@ export function validateScheduledPromptInput(input: ScheduledPromptInput, nowMs:
 // Tick classification
 // ---------------------------------------------------------------------------
 
-export type ScheduledPromptAction = 'skip' | 'fire' | 'missed' | 'interrupted' | 'prune';
+export type ScheduledPromptAction = 'skip' | 'fire' | 'missed' | 'missed-paused' | 'interrupted' | 'prune';
 
 /**
  * Decide what the tick does with one entry. Pure; the scheduler applies the
  * result. `host` is os.hostname() of the running web process — an entry
  * scheduled on another machine (kanban.json is committed and pulled) is never
  * fired here, only pruned once it is old.
+ *
+ * `resumedAtMs` (card #0381): when the project was resumed from a held
+ * status, a pending entry whose fireAt is earlier than that is
+ * 'missed-paused' — skipped, never replayed, regardless of the catch-up
+ * window. 0 / omitted = no fence.
  */
 export function classifyScheduledPrompt(
   entry: ScheduledPrompt,
   nowMs: number,
   host: string,
   limits: typeof SCHEDULED_PROMPT_LIMITS = SCHEDULED_PROMPT_LIMITS,
+  resumedAtMs: number = 0,
 ): ScheduledPromptAction {
   if (isTerminal(entry)) {
     const finished = Date.parse(entry.finishedAt || entry.firedAt || entry.createdAt);
@@ -110,6 +116,7 @@ export function classifyScheduledPrompt(
   const fireAt = Date.parse(entry.fireAt);
   if (!Number.isFinite(fireAt)) return 'missed';
   if (fireAt > nowMs) return 'skip';
+  if (resumedAtMs > 0 && fireAt < resumedAtMs) return 'missed-paused';
   return nowMs - fireAt > limits.catchUpWindowMs ? 'missed' : 'fire';
 }
 

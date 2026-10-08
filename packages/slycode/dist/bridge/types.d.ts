@@ -47,6 +47,7 @@ export interface Session {
     exitResolver?: () => void;
     pendingPrompt?: string;
     pendingPromptTimer?: ReturnType<typeof setTimeout>;
+    promptDelivery?: PromptDeliveryState;
     exitCode?: number;
     exitedAt?: string;
     exitOutput?: string;
@@ -98,6 +99,21 @@ export interface SessionInfo {
     exitedAt?: string;
     createdAt?: string;
     conversationStartedAt?: string;
+    promptDelivery?: PromptDeliveryState;
+}
+/**
+ * Card #0382: the result of a prompt createSession delivers on the caller's
+ * behalf — the Windows deferred paste (settles AFTER POST /sessions has
+ * answered) or the reuse path into a live session. Callers that started a
+ * session with a prompt poll GET /sessions/:name until `state` leaves
+ * 'pending'; anything but 'delivered' is a failure to surface.
+ */
+export interface PromptDeliveryState {
+    state: 'pending' | DeliveryOutcome;
+    mode: 'deferred_paste' | 'reuse_paste';
+    reason?: string;
+    correlationId?: string;
+    updatedAt: string;
 }
 export interface PersistedSession {
     claudeSessionId: string | null;
@@ -188,6 +204,10 @@ export interface SubmitRequest {
      *  (the id is embedded in the prompt), so without the exclusion every
      *  --wait prompt to a running session would self-reject. */
     responseId?: string;
+    /** Card #0382: the session just started (deferred / resume paste). Wait for
+     *  a readable, settled input box before pasting, and never press Enter into
+     *  a screen that became unreadable after the paste. */
+    awaitReadyInput?: boolean;
 }
 export interface SubmitResult {
     success: boolean;

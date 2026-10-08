@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  compareVersions, findEntry, formatReleaseDate, latestEntry, pickEntry, resolveContentUrl, shortVersion,
-  splashAllowedOnPath, validateEntry,
+  compareVersions, findEntry, formatReleaseDate, historyEntries, latestEntry, previewEntries, resolveContentUrl,
+  shortVersion, splashAllowedOnPath, stepPage, unseenEntries, validateEntry,
   type WhatsNewEntry,
 } from './whats-new';
 import {
@@ -42,35 +42,66 @@ function scratch(): string {
 // Selection
 // ---------------------------------------------------------------------------
 
-test('pickEntry: nothing to show without entries or when every entry is newer than installed', () => {
-  assert.equal(pickEntry([], '0.5.0', '0.4.10'), null);
-  assert.equal(pickEntry([entry('0.6.0')], '0.5.0', '0.4.10'), null);
+const versions = (list: WhatsNewEntry[] | null) => list?.map(e => e.version) ?? null;
+
+test('unseenEntries: nothing to show without entries or when every entry is newer than installed', () => {
+  assert.deepEqual(versions(unseenEntries([], '0.5.0', '0.4.10')), []);
+  assert.deepEqual(versions(unseenEntries([entry('0.6.0')], '0.5.0', '0.4.10')), []);
 });
 
-test('pickEntry: an update onto a version with content shows it', () => {
-  assert.equal(pickEntry([entry('0.5.0')], '0.5.0', '0.4.10')?.version, '0.5.0');
+test('unseenEntries: an update onto a version with content shows it', () => {
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0')], '0.5.0', '0.4.10')), ['0.5.0']);
 });
 
-test('pickEntry: skipped patch releases still show the minor release notes', () => {
-  assert.equal(pickEntry([entry('0.5.0')], '0.5.2', '0.4.10')?.version, '0.5.0');
+test('unseenEntries: 0.4.10 → 0.5.1 with content for 0.5.0 and 0.5.1 pages through both, newest first', () => {
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0'), entry('0.5.1')], '0.5.1', '0.4.10')), ['0.5.1', '0.5.0']);
 });
 
-test('pickEntry: a later patch without content never repeats seen notes', () => {
-  assert.equal(pickEntry([entry('0.5.0')], '0.5.1', '0.5.1'), null);
-  assert.equal(pickEntry([entry('0.5.0')], '0.5.1', '0.5.0'), null);
+test('unseenEntries: releases without content are skipped, not shown as empty pages', () => {
+  // 0.5.1 and 0.5.3 shipped without a file
+  const all = [entry('0.4.9'), entry('0.5.0'), entry('0.5.2'), entry('0.5.4')];
+  assert.deepEqual(versions(unseenEntries(all, '0.5.3', '0.4.10')), ['0.5.2', '0.5.0'], '0.5.4 is newer than installed, 0.4.9 already seen');
+  assert.deepEqual(versions(unseenEntries(all, '0.5.3', '0.5.0')), ['0.5.2']);
 });
 
-test('pickEntry: missing lastSeen (install from before the feature) shows the newest entry at or below installed', () => {
-  assert.equal(pickEntry([entry('0.4.0'), entry('0.5.0'), entry('0.6.0')], '0.5.3', null)?.version, '0.5.0');
+test('unseenEntries: a later patch without content never repeats seen notes', () => {
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0')], '0.5.1', '0.5.1')), []);
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0')], '0.5.1', '0.5.0')), []);
 });
 
-test('pickEntry: two unseen entries show only the newest', () => {
-  assert.equal(pickEntry([entry('0.5.0'), entry('0.6.0')], '0.6.0', '0.4.10')?.version, '0.6.0');
+test('unseenEntries: missing or unparsable lastSeen (install from before the feature) shows every entry at or below installed', () => {
+  const all = [entry('0.4.0'), entry('0.5.0'), entry('0.6.0')];
+  assert.deepEqual(versions(unseenEntries(all, '0.5.3', null)), ['0.5.0', '0.4.0']);
+  assert.deepEqual(versions(unseenEntries(all, '0.5.3', 'garbage')), ['0.5.0', '0.4.0']);
 });
 
-test('pickEntry: unknown installed version shows nothing; garbage lastSeen reads as missing', () => {
-  assert.equal(pickEntry([entry('0.5.0')], null, null), null);
-  assert.equal(pickEntry([entry('0.5.0')], '0.5.0', 'garbage')?.version, '0.5.0');
+test('unseenEntries: unknown installed version shows nothing', () => {
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0')], null, null)), []);
+  assert.deepEqual(versions(unseenEntries([entry('0.5.0')], 'garbage', null)), []);
+});
+
+test('historyEntries: footer reopen opens on the current release with every earlier one after it', () => {
+  const all = [entry('0.5.0'), entry('0.6.0'), entry('0.4.2'), entry('0.7.0')];
+  assert.deepEqual(versions(historyEntries(all, '0.6.1')), ['0.6.0', '0.5.0', '0.4.2']);
+  assert.deepEqual(versions(historyEntries(all, null)), []);
+});
+
+test('previewEntries: single release, a jump from a version, and a bounded jump', () => {
+  const all = [entry('0.5.0'), entry('0.5.1'), entry('0.6.0')];
+  assert.equal(previewEntries(all, {}), null, 'not asked');
+  assert.deepEqual(versions(previewEntries(all, { version: '0.5' })), ['0.5.0']);
+  assert.deepEqual(versions(previewEntries(all, { version: '0.9.0' })), []);
+  assert.deepEqual(versions(previewEntries(all, { from: '0.4.10' })), ['0.6.0', '0.5.1', '0.5.0'], 'not capped at installed: drafts preview too');
+  assert.deepEqual(versions(previewEntries(all, { from: '0.4.10', version: '0.5.1' })), ['0.5.1', '0.5.0']);
+  assert.deepEqual(versions(previewEntries(all, { from: 'nope' })), []);
+});
+
+test('stepPage: clamps at both ends', () => {
+  assert.equal(stepPage(0, 1, 3), 1);
+  assert.equal(stepPage(2, 1, 3), 2);
+  assert.equal(stepPage(0, -1, 3), 0);
+  assert.equal(stepPage(0, 1, 1), 0);
+  assert.equal(stepPage(0, 1, 0), 0);
 });
 
 test('latestEntry / findEntry / compareVersions / shortVersion', () => {

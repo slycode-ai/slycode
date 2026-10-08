@@ -70,6 +70,20 @@ const DIALOG_MARKERS: RegExp[] = [
   /update available/i,              // CLI update prompts (user-observed on Codex)
   /new version/i,
   /login required|please log ?in/i,
+  // Codex ≥0.160 on Windows, first start after an update (real capture,
+  // card #0382): "Set up the Codex agent sandbox … › 1. Set up default
+  // sandbox (requires Administrator permissions) … enter select · esc back".
+  // An Enter here would pick the admin-sandbox option. Whitespace-tolerant:
+  // older Windows snapshots collapsed spaces.
+  /set\s*up\s*the\s*codex\s*agent\s*sandbox/i,
+  // Claude Code's current trust-folder dialog (real Windows bridge log, card
+  // #0382): "Quick safety check: Is this a project you created or one you
+  // trust? … ❯ No, exit / Yes, I trust this folder / Enter to confirm". It
+  // never says "do you trust", so it read as unrecognized, the deferred
+  // paste went in and its Enter picked the highlighted "No, exit" — the
+  // session quit (outcome_failed session_stopped ×3).
+  /quick\s*safety\s*check/i,
+  /yes,?\s*i\s*trust\s*this\s*folder/i,
 ];
 
 export function hasDialogMarkers(snapshot: string): boolean {
@@ -102,6 +116,45 @@ const CLAUDE_TITLED_SEPARATOR = /^\s*(?:─+\s+)?\S.*\s─+\s*$/;
  * screen read as "no footer" → unrecognized → ambiguous.
  */
 const CODEX_FOOTER = /(·\s*(~|\/|[A-Za-z]:[\\/])|context left|tab to queue)/;
+
+/**
+ * Codex composer markers, by version:
+ *   `›` (U+203A) — ≤0.137 composer; history rows in every version; and the
+ *                  composer AGAIN in 0.155 (live Linux capture 2026-10-07,
+ *                  card #0382: composer and history rows both `›`).
+ *                  The REAL Windows capture (Codex 0.160.1, ConPTY) draws
+ *                  `›` too — the screenshot's ">" was the web font.
+ *   `»` (U+00BB) — 0.147 composer only (card #0336).
+ */
+const CODEX_COMPOSER_MARKER = /^\s*[»›]/;
+/** Upper bound on composer height when walking up from the footer. */
+const CODEX_COMPOSER_MAX_ROWS = 20;
+
+/**
+ * Structural composer anchor: the composer is the contiguous non-blank block
+ * directly above the footer (blank rows between them are skipped), and its
+ * first row carries the composer marker. Returns the TOPMOST marker row in
+ * that block — payload continuation rows that happen to start with `›` sit
+ * below it and can never be mistaken for the composer top, and
+ * transcript rows (separated from the composer by blank rows) are never
+ * reached. The footer is the LAST footer-matching row on screen; rows below
+ * it (e.g. Windows "⚠ 1 warning · f2 to view") are ignored.
+ */
+function findCodexComposer(lines: string[]): { top: number; bottom: number } | null {
+  let footer = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (CODEX_FOOTER.test(lines[i])) { footer = i; break; }
+  }
+  if (footer === -1) return null;
+  let bottom = footer - 1;
+  while (bottom >= 0 && lines[bottom].trim() === '') bottom--;
+  if (bottom < 0) return null;
+  let top = -1;
+  for (let i = bottom; i >= 0 && bottom - i < CODEX_COMPOSER_MAX_ROWS && lines[i].trim() !== ''; i--) {
+    if (CODEX_COMPOSER_MARKER.test(lines[i])) top = i;
+  }
+  return top === -1 ? null : { top, bottom };
+}
 
 /**
  * Claude prompt marker. `❯` (U+276F) everywhere — the REAL Windows capture
@@ -165,6 +218,19 @@ export function extractInputRegion(provider: SubmitProvider, snapshot: string): 
   }
 
   if (provider === 'codex') {
+    // Structural anchor first (card #0382): the block directly above the
+    // footer. Only the leading marker on the composer's first row is
+    // stripped — `>` / `›` / `»` inside payload text survive intact.
+    const composer = findCodexComposer(lines);
+    if (composer) {
+      const rows = lines.slice(composer.top, composer.bottom + 1);
+      rows[0] = rows[0].replace(CODEX_COMPOSER_MARKER, m => m.slice(0, -1));
+      return { found: true, text: rows.join('\n') };
+    }
+
+    // Legacy fallback (»/› only, never ASCII `>`) for screens the structural
+    // anchor cannot read — e.g. a literal paste containing blank rows splits
+    // the composer, so the block above the footer has no marker row.
     // Composer marker drift: Codex ≤0.137 rendered the editable composer AND
     // submitted history rows with `›` (U+203A). Codex 0.147 renders the live
     // composer with `»` (U+00BB) and keeps `›` for history rows (live capture
@@ -224,6 +290,18 @@ export function codePointLength(text: string): number {
   return n;
 }
 
+/**
+ * Allowed gap between a Codex "[Pasted Content N chars]" count and our
+ * payload's code points. Linux renders the exact count; Windows Codex under
+ * ConPTY runs 0–5 short PER 1024-char bridge write chunk (real bridge log,
+ * card #0382: a 9094-char paste rendered as placeholders of 1019–1024
+ * chars). Still far tighter than a merged double paste (2 × 2859 → 5710).
+ * 1024 mirrors CHUNKED_WRITE_SIZE in pty-handler.ts (kept dependency-free).
+ */
+export function codexCharsTolerance(expected: string): number {
+  return 2 + 6 * Math.ceil(codePointLength(expected) / 1024);
+}
+
 /** How many normalized leading characters of the payload we try to find. */
 const PREFIX_LEN = 48;
 /** Minimum normalized region length for the viewport-window (region ⊂ payload) match — short generic text must not claim ownership. */
@@ -249,7 +327,12 @@ function payloadQueued(regionText: string, expected: string): boolean {
       // emoji payload of 1093 UTF-16 units / 1077 code points / 1178 UTF-8
       // bytes rendered "[Pasted Content 1077 chars]"). `String.length` is
       // UTF-16 and over-counts astral characters (emoji) → use code points.
-      return Math.abs(placeholder.count - codePointLength(expected)) <= 2;
+      // Windows (card #0382): one paste can render as SEVERAL placeholders
+      // (one per bridge write chunk) whose counts run a few short — sum
+      // them, and use the chunk-scaled tolerance.
+      let total = 0;
+      for (const m of normalizeForMatch(regionText).toLowerCase().matchAll(/\[pastedcontent(\d+)chars\]/g)) total += parseInt(m[1], 10);
+      return Math.abs(total - codePointLength(expected)) <= codexCharsTolerance(expected);
     }
     // Claude reports payloadLines-1 ("+21 lines" for 22); keep a ±-tolerant
     // window so off-by-one rendering differences never fail verification.
@@ -291,8 +374,9 @@ export function countMatchingPlaceholders(snapshot: string, expected: string): n
   const payloadLines = expected.split('\n').length;
   let count = 0;
   const expectedCodePoints = codePointLength(expected);
+  const tolerance = codexCharsTolerance(expected);
   for (const m of n.matchAll(/\[pastedcontent(\d+)chars\]/g)) {
-    if (Math.abs(parseInt(m[1], 10) - expectedCodePoints) <= 2) count++;
+    if (Math.abs(parseInt(m[1], 10) - expectedCodePoints) <= tolerance) count++;
   }
   for (const m of n.matchAll(/\[pastedtext#?\d*\+(\d+)lines?\]/g)) {
     const c = parseInt(m[1], 10);
@@ -335,6 +419,29 @@ export function classifyInputRegion(
   }
 
   return 'queued_other';
+}
+
+/**
+ * Card #0382: is a JUST-STARTED session's input box ready to paste into?
+ * Fed the classifications of successive polls (expected = null) on the
+ * deferred / resume path, where the provider is still starting up.
+ *
+ * Real Windows sequence: Codex drew "› Ask Codex to do anything" with only a
+ * "? for shortcuts" hint row (no model · path footer yet → unrecognized), the
+ * bridge pasted anyway, and Codex then raised its agent-sandbox dialog over
+ * the paste — the Enter went to the dialog. So: never paste into an
+ * unreadable screen; require the input box to be found on two consecutive
+ * polls (startup chrome settled); a dialog is a hard stop.
+ */
+export type ReadyInputVerdict = 'ready' | 'wait' | 'blocked';
+
+export function readyInputVerdict(polls: Array<InputRegionClassification | null>): ReadyInputVerdict {
+  const last = polls[polls.length - 1];
+  if (last === 'no_input_region') return 'blocked';
+  const found = (c: InputRegionClassification | null | undefined) =>
+    c === 'empty' || c === 'queued_other' || c === 'queued_ours';
+  if (polls.length >= 2 && found(last) && found(polls[polls.length - 2])) return 'ready';
+  return 'wait';
 }
 
 export interface VerifyDecisionInput {

@@ -410,3 +410,158 @@ test('cwd route: setting on lets a foreign session through', async () => {
   assert.doesNotMatch(r.stderr, /Refused/);
   assert.match(r.stderr, /Bridge is not running/);
 });
+
+// ---------------------------------------------------------------------------
+// Project status (#0381): `projects status`, and held targets refuse prompts
+// ---------------------------------------------------------------------------
+
+async function readRegistryEntry(id: string): Promise<Record<string, string | undefined>> {
+  const reg = JSON.parse(await fs.readFile(path.join(workspace, 'projects', 'registry.json'), 'utf-8'));
+  return reg.projects.find((p: { id: string }) => p.id === id);
+}
+
+test('projects status: print, set paused, no-op on unchanged, resumedAt only on → active', async () => {
+  const print = await run(['projects', 'status', 'other-proj']);
+  assert.equal(print.code, 0, print.stderr);
+  assert.match(print.stdout, /Other Project \(other-proj\): active/);
+
+  const bad = await run(['projects', 'status', 'other-proj', 'sleeping']);
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /status must be one of active, paused, complete, archived/);
+
+  const pause = await run(['projects', 'status', 'Other Project', 'paused']);
+  assert.equal(pause.code, 0, pause.stderr);
+  assert.match(pause.stdout, /Marked paused Other Project \(active → paused\)/);
+  assert.match(pause.stdout, /Sessions already running finish on their own/);
+  let e = await readRegistryEntry('other-proj');
+  assert.equal(e.status, 'paused');
+  assert.ok(e.statusChangedAt);
+  assert.equal(e.resumedAt, undefined, 'pausing never stamps resumedAt');
+  const pausedAt = e.statusChangedAt;
+
+  const again = await run(['projects', 'status', 'other-proj', 'paused']);
+  assert.match(again.stdout, /already paused\. Nothing changed/);
+  e = await readRegistryEntry('other-proj');
+  assert.equal(e.statusChangedAt, pausedAt, 'no-op does not move statusChangedAt');
+
+  const list = await run(['projects']);
+  assert.match(list.stdout, /other-proj\s+Other Project\s+other-proj\s+held\s+paused/);
+  const rows = JSON.parse((await run(['projects', '--json'])).stdout) as Array<{ id: string; status: string }>;
+  assert.deepEqual(rows.map(r => [r.id, r.status]), [['ws-main', 'active'], ['other-proj', 'paused']], 'active first');
+
+  const events = await readEvents(workspace);
+  assert.ok(events.some(ev => ev.type === 'project_status' && /Marked paused: Other Project/.test(ev.detail)));
+});
+
+test('prompt --project into a paused project: refused (exit 3) even with the opt-in on', async () => {
+  await writeOtherBoard({ allowCrossProjectPrompts: true });
+  const r = await run(['prompt', '--project', 'other-proj', '1', 'do the thing'], { env: CALLER });
+  assert.equal(r.code, 3, `expected refusal exit 3, got ${r.code}: ${r.stderr}`);
+  assert.match(r.stderr, /Refused: project "Other Project" \(other-proj\) is paused/);
+  assert.match(r.stderr, /sly-kanban projects status other-proj active/);
+  assert.match(r.stderr, /Do not work around this/);
+  assert.doesNotMatch(r.stderr, /Bridge is not running/, 'refused before any bridge call');
+});
+
+test('a held project is still readable cross-project, and its own sessions are not gated', async () => {
+  const show = await run(['show', '--project', 'other-proj', '1']);
+  assert.equal(show.code, 0, show.stderr);
+  // Prompting a paused project from its OWN board is not cross-project → passes to the (dead) bridge.
+  const own = await run(['prompt', '1', 'hi'], { cwd: other, env: { SLYCODE_HOME: workspace, SLYCODE_SESSION: 'other-proj:claude:card:card-2000000000001' } });
+  assert.notEqual(own.code, 3, own.stderr);
+});
+
+test('projects status write is refused through --project', async () => {
+  const r = await run(['projects', 'status', 'other-proj', 'active', '--project', 'other-proj']);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /read-only/);
+});
+
+test('projects status: resume stamps resumedAt; complete/archived also refuse prompts', async () => {
+  const resume = await run(['projects', 'status', 'other-proj', 'active']);
+  assert.equal(resume.code, 0, resume.stderr);
+  assert.match(resume.stdout, /Resumed Other Project \(paused → active\)/);
+  assert.match(resume.stdout, /skipped, not replayed/);
+  const e = await readRegistryEntry('other-proj');
+  assert.equal(e.status, 'active');
+  assert.ok(e.resumedAt);
+  assert.equal(e.resumedAt, e.statusChangedAt);
+
+  for (const st of ['complete', 'archived']) {
+    await run(['projects', 'status', 'other-proj', st]);
+    const r = await run(['prompt', '--project', 'other-proj', '1', 'x'], { env: CALLER });
+    assert.equal(r.code, 3, `${st}: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`is ${st}`));
+  }
+  const restore = await run(['projects', 'status', 'other-proj', 'active']);
+  assert.match(restore.stdout, /Restored Other Project \(archived → active\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Den folders (#0381 Phase B): `projects folder` / `projects folders`
+// ---------------------------------------------------------------------------
+
+async function readRegistry(): Promise<{ folders?: Array<{ id: string; name: string; order: number }>; projects: Array<Record<string, string | undefined>> }> {
+  return JSON.parse(await fs.readFile(path.join(workspace, 'projects', 'registry.json'), 'utf-8'));
+}
+
+test('projects folder: creates on first use, slug id, FOLDER column, case-insensitive reuse', async () => {
+  const empty = await run(['projects', 'folders']);
+  assert.match(empty.stdout, /No folders/);
+
+  const r = await run(['projects', 'folder', 'other-proj', '  Client   Work ']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Created folder "Client Work" and moved Other Project into "Client Work"/);
+  let reg = await readRegistry();
+  assert.deepEqual(reg.folders, [{ id: 'fld-client-work', name: 'Client Work', order: 0 }]);
+  assert.equal(reg.projects.find(p => p.id === 'other-proj')!.folderId, 'fld-client-work');
+
+  const again = await run(['projects', 'folder', 'ws-main', 'client work']);
+  assert.match(again.stdout, /^Moved Main Workspace into "Client Work"/);
+  reg = await readRegistry();
+  assert.equal(reg.folders!.length, 1, 'reused, not duplicated');
+
+  const list = await run(['projects']);
+  assert.match(list.stdout, /ws-main\s+Main Workspace\s+ws-main\s+off\s+active\s+Client Work/);
+
+  const folders = JSON.parse((await run(['projects', 'folders', '--json'])).stdout);
+  assert.deepEqual(folders, [{ id: 'fld-client-work', name: 'Client Work', order: 0, projects: ['ws-main', 'other-proj'] }]);
+});
+
+test('projects folders rename keeps the id; validation errors change nothing', async () => {
+  await run(['projects', 'folder', 'ws-main', 'Personal']);
+  const clash = await run(['projects', 'folders', 'rename', 'Personal', 'CLIENT WORK']);
+  assert.equal(clash.code, 1);
+  assert.match(clash.stderr, /already exists\. Nothing changed/);
+  const tooLong = await run(['projects', 'folder', 'ws-main', 'x'.repeat(41)]);
+  assert.equal(tooLong.code, 1);
+  assert.match(tooLong.stderr, /40 characters or fewer/);
+
+  const ok = await run(['projects', 'folders', 'rename', 'client work', 'Clients']);
+  assert.equal(ok.code, 0, ok.stderr);
+  const reg = await readRegistry();
+  const f = reg.folders!.find(x => x.id === 'fld-client-work')!;
+  assert.equal(f.name, 'Clients');
+  assert.equal(reg.projects.find(p => p.id === 'other-proj')!.folderId, 'fld-client-work', 'assignment survives rename');
+});
+
+test('projects folders delete unfiles projects (nothing removed); folder --none; --project refused', async () => {
+  const del = await run(['projects', 'folders', 'delete', 'Clients']);
+  assert.equal(del.code, 0, del.stderr);
+  assert.match(del.stdout, /Deleted folder "Clients"\. 1 project moved to no folder; no projects were removed/);
+  let reg = await readRegistry();
+  assert.equal(reg.projects.length, 2);
+  assert.equal(reg.projects.find(p => p.id === 'other-proj')!.folderId, undefined);
+
+  const none = await run(['projects', 'folder', 'ws-main', '--none']);
+  assert.match(none.stdout, /Moved Main Workspace out of "Personal"/);
+  reg = await readRegistry();
+  assert.equal(reg.projects.find(p => p.id === 'ws-main')!.folderId, undefined);
+  assert.ok(reg.folders!.some(x => x.name === 'Personal'), 'unfiling never deletes the folder');
+
+  const viaProject = await run(['projects', 'folder', 'ws-main', 'X', '--project', 'other-proj']);
+  assert.equal(viaProject.code, 1);
+  assert.match(viaProject.stderr, /read-only/);
+  const listViaProject = await run(['projects', 'folders', '--project', 'other-proj']);
+  assert.equal(listViaProject.code, 0, listViaProject.stderr);
+});

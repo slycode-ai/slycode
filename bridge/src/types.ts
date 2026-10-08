@@ -65,6 +65,8 @@ export interface Session {
   // Deferred prompt delivery (Windows: CLI args can't carry multi-line prompts through .cmd wrappers)
   pendingPrompt?: string;
   pendingPromptTimer?: ReturnType<typeof setTimeout>;
+  // Outcome of a prompt the bridge delivers AFTER answering the caller (card #0382)
+  promptDelivery?: PromptDeliveryState;
   // Exit info (populated by handlePtyExit, persists until session is deleted from map)
   exitCode?: number;
   exitedAt?: string;
@@ -121,6 +123,22 @@ export interface SessionInfo {
   exitedAt?: string;
   createdAt?: string;
   conversationStartedAt?: string;  // Card #0373 — falls back to createdAt for records that predate it
+  promptDelivery?: PromptDeliveryState;  // Card #0382 — absent when createSession delivered no prompt itself
+}
+
+/**
+ * Card #0382: the result of a prompt createSession delivers on the caller's
+ * behalf — the Windows deferred paste (settles AFTER POST /sessions has
+ * answered) or the reuse path into a live session. Callers that started a
+ * session with a prompt poll GET /sessions/:name until `state` leaves
+ * 'pending'; anything but 'delivered' is a failure to surface.
+ */
+export interface PromptDeliveryState {
+  state: 'pending' | DeliveryOutcome;
+  mode: 'deferred_paste' | 'reuse_paste';
+  reason?: string;
+  correlationId?: string;
+  updatedAt: string;
 }
 
 export interface PersistedSession {
@@ -233,6 +251,10 @@ export interface SubmitRequest {
    *  (the id is embedded in the prompt), so without the exclusion every
    *  --wait prompt to a running session would self-reject. */
   responseId?: string;
+  /** Card #0382: the session just started (deferred / resume paste). Wait for
+   *  a readable, settled input box before pasting, and never press Enter into
+   *  a screen that became unreadable after the paste. */
+  awaitReadyInput?: boolean;
 }
 
 export interface SubmitResult {

@@ -62,6 +62,15 @@ export declare function parsePastePlaceholder(text: string): PastePlaceholder | 
 /** Unicode code-point length (Codex's placeholder count unit; String.length is UTF-16). */
 export declare function codePointLength(text: string): number;
 /**
+ * Allowed gap between a Codex "[Pasted Content N chars]" count and our
+ * payload's code points. Linux renders the exact count; Windows Codex under
+ * ConPTY runs 0–5 short PER 1024-char bridge write chunk (real bridge log,
+ * card #0382: a 9094-char paste rendered as placeholders of 1019–1024
+ * chars). Still far tighter than a merged double paste (2 × 2859 → 5710).
+ * 1024 mirrors CHUNKED_WRITE_SIZE in pty-handler.ts (kept dependency-free).
+ */
+export declare function codexCharsTolerance(expected: string): number;
+/**
  * Count paste placeholders ANYWHERE in a snapshot whose count corroborates
  * `expected` (same tolerance rules as payloadQueued). Layout-independent —
  * used as a TEMPORAL signal only: the caller compares pre-paste vs post-paste
@@ -78,6 +87,20 @@ export declare function countMatchingPlaceholders(snapshot: string, expected: st
  * pre-paste check where we only care about empty / non-empty / blocked.
  */
 export declare function classifyInputRegion(provider: SubmitProvider, snapshot: string, expected: string | null): InputRegionClassification;
+/**
+ * Card #0382: is a JUST-STARTED session's input box ready to paste into?
+ * Fed the classifications of successive polls (expected = null) on the
+ * deferred / resume path, where the provider is still starting up.
+ *
+ * Real Windows sequence: Codex drew "› Ask Codex to do anything" with only a
+ * "? for shortcuts" hint row (no model · path footer yet → unrecognized), the
+ * bridge pasted anyway, and Codex then raised its agent-sandbox dialog over
+ * the paste — the Enter went to the dialog. So: never paste into an
+ * unreadable screen; require the input box to be found on two consecutive
+ * polls (startup chrome settled); a dialog is a hard stop.
+ */
+export type ReadyInputVerdict = 'ready' | 'wait' | 'blocked';
+export declare function readyInputVerdict(polls: Array<InputRegionClassification | null>): ReadyInputVerdict;
 export interface VerifyDecisionInput {
     /** Classifications observed in the CURRENT post-Enter poll ladder, in order. */
     polls: InputRegionClassification[];

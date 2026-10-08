@@ -17,6 +17,7 @@ import { createVoiceCommands } from './tts/telegram-voice.js';
 import { PROVIDER_LABELS as TTS_PROVIDER_LABELS } from './tts/provider.js';
 import * as audioArchive from './audio-archive.js';
 import type { Channel, InlineButton, ServiceConfig, VoiceConfig, NavigationTarget, SlyActionConfig, ResponseMode, BridgeSessionInfo, Project } from './types.js';
+import { pickerProjects, heldCount, statusSuffix, projectStatus } from './project-status.js';
 import { projectSessionKeys, escapeRegex, resolveCanonicalProjectId } from './session-keys.js';
 import { loadAllShortcuts as loadAllShortcutsList, resolveToken as resolveShortcutToken } from './shortcuts.js';
 import { preflightFile, resolveSendKind, FileSendError } from './file-send.js';
@@ -313,7 +314,7 @@ async function getBreadcrumb(target: NavigationTarget, state: StateManager, kanb
       break;
     case 'project': {
       const project = state.getSelectedProject();
-      crumb = `📍 ${project?.name || target.projectId} · Project Terminal`;
+      crumb = `📍 ${project?.name || target.projectId}${project ? statusSuffix(project) : ''} · Project Terminal`;
       break;
     }
     case 'card': {
@@ -324,7 +325,7 @@ async function getBreadcrumb(target: NavigationTarget, state: StateManager, kanb
       const stage = cardInfo?.stage || target.stage || '?';
       const title = cardInfo?.card.title || target.cardId || '?';
       const truncTitle = title.length > 55 ? title.slice(0, 52) + '...' : title;
-      crumb = `📍 ${project?.name || target.projectId} · ${stage} · ${truncTitle}`;
+      crumb = `📍 ${project?.name || target.projectId}${project ? statusSuffix(project) : ''} · ${stage} · ${truncTitle}`;
       break;
     }
   }
@@ -377,6 +378,28 @@ function latestDate(...dates: (string | undefined)[]): string {
 
 // --- /switch Rendering ---
 
+/**
+ * Project picker rows (#0381): Active projects; paused + complete behind a
+ * "Show paused & complete (N)" button (sw_held); archived never listed.
+ */
+function projectPickerButtons(state: StateManager, includeHeld: boolean): InlineButton[][] {
+  const all = state.getProjects();
+  const buttons: InlineButton[][] = pickerProjects(all, includeHeld).map(p => [{
+    label: `${p.name}${statusSuffix(p)}`,
+    callbackData: `sw_proj_${p.id}`,
+  }]);
+  const held = heldCount(all);
+  if (!includeHeld && held > 0) {
+    buttons.push([{ label: `Show paused & complete (${held})`, callbackData: 'sw_held' }]);
+  }
+  return buttons;
+}
+
+/** Projects whose cards feed cross-project lists (recent, global search): Active only (#0381). */
+function activeProjectIds(state: StateManager): string[] {
+  return state.getProjects().filter(p => projectStatus(p) === 'active').map(p => p.id);
+}
+
 async function renderSwitchView(
   channel: Channel,
   state: StateManager,
@@ -387,12 +410,8 @@ async function renderSwitchView(
   const breadcrumb = await getBreadcrumb(target, state, kanban, bridge);
 
   if (target.type === 'global') {
-    // Global level: show projects list
-    const projects = state.getProjects();
-    const buttons: InlineButton[][] = projects.map(p => [{
-      label: p.name,
-      callbackData: `sw_proj_${p.id}`,
-    }]);
+    // Global level: show projects list (Active; held ones behind a button — #0381)
+    const buttons = projectPickerButtons(state, false);
 
     // Cross-project recent-cards jump list — last row, global from anywhere.
     buttons.push([{ label: '🕐 Recent', callbackData: 'sw_recent' }]);
@@ -1136,7 +1155,7 @@ function setupChannel(
 
     const isGlobal = !projectId;
     const projectIds = isGlobal
-      ? state.getProjects().map(p => p.id)
+      ? activeProjectIds(state)
       : [projectId!];
 
     const query = args.trim();
@@ -1577,7 +1596,7 @@ function setupChannel(
       // the global level where no project is selected). Show 5; "Show 5 more"
       // re-renders with 10.
       const maxTotal = data === 'sw_recent_more' ? 10 : 5;
-      const allProjectIds = state.getProjects().map(p => p.id);
+      const allProjectIds = activeProjectIds(state);
       await renderQuickAccess(allProjectIds, {
         maxTotal,
         forceGlobal: true,
@@ -1596,15 +1615,14 @@ function setupChannel(
       return;
     }
 
-    if (data === 'sw_projects') {
-      // Show global view (project list)
+    if (data === 'sw_projects' || data === 'sw_held') {
+      // Show global view (project list). sw_held adds paused + complete (#0381).
       currentDrilldownStage = null;
-      const projects = state.getProjects();
-      const buttons: InlineButton[][] = projects.map(p => [{
-        label: p.name,
-        callbackData: `sw_proj_${p.id}`,
-      }]);
-      await channel.sendInlineKeyboard('📍 Select a project:', buttons);
+      const includeHeld = data === 'sw_held';
+      await channel.sendInlineKeyboard(
+        includeHeld ? '📍 Select a project (paused & complete included):' : '📍 Select a project:',
+        projectPickerButtons(state, includeHeld),
+      );
       return;
     }
 

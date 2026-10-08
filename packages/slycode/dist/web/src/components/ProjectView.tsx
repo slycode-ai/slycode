@@ -6,6 +6,8 @@ import { computeSessionKey, sessionBelongsToProject } from '@/lib/session-keys';
 import { ProjectHeader } from './ProjectHeader';
 import { ProjectKanban } from './ProjectKanban';
 import { CodeModeView } from './code-mode/CodeModeView';
+import { ProjectStatusStrip } from './ProjectStatusStrip';
+import { projectStatus } from '@/lib/project-status';
 
 interface ProjectViewProps {
   project: ProjectWithBacklog;
@@ -17,6 +19,8 @@ export function ProjectView({ project, projectPath }: ProjectViewProps) {
   const [showAutomations, setShowAutomations] = useState(false);
   const [hasActiveAutomations, setHasActiveAutomations] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
+  // #0381: held projects show a strip; Resume flips this locally.
+  const [status, setStatus] = useState(() => projectStatus(project));
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
   // While in Code Mode, watch for board-side activity (card/global sessions —
@@ -115,6 +119,14 @@ export function ProjectView({ project, projectPath }: ProjectViewProps) {
         onToggleCodeMode={toggleCodeMode}
         boardActive={boardActive}
       />
+      {status !== 'active' && (
+        <ProjectStatusStrip
+          projectId={project.id}
+          status={status}
+          statusChangedAt={project.statusChangedAt}
+          onResumed={() => setStatus('active')}
+        />
+      )}
       {codeMode ? (
         <CodeModeView projectId={project.id} projectName={project.name} projectPath={projectPath} />
       ) : (
@@ -122,6 +134,7 @@ export function ProjectView({ project, projectPath }: ProjectViewProps) {
           <ProjectKanban
             project={project}
             projectPath={projectPath}
+            scheduleHeld={status !== 'active'}
             showArchived={showArchived}
             showAutomations={showAutomations}
             onActiveAutomationsChange={setHasActiveAutomations}

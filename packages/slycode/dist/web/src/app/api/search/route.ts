@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { loadRegistry } from '@/lib/registry';
+import { projectStatus } from '@/lib/project-status';
 import { getBridgeUrl } from '@/lib/paths';
 import type { KanbanBoard, KanbanCard, KanbanStage, SearchResult } from '@/lib/types';
 import { readColdBoard, unionStages } from '@/lib/kanban-cold';
@@ -215,19 +216,23 @@ export async function GET(request: NextRequest) {
     const registry = await loadRegistry();
     const allResults: SearchResult[] = [];
 
-    // If projectId provided, search only that project; otherwise search all
+    // If projectId provided, search only that project; otherwise search all.
+    // #0381: an all-project search leaves archived projects out (they are
+    // cold); searching from inside an archived project's own board still works.
     const projectsToSearch = contextProjectId
       ? registry.projects.filter(p => p.id === contextProjectId)
-      : registry.projects;
+      : registry.projects.filter(p => projectStatus(p) !== 'archived');
 
     for (const project of projectsToSearch) {
       const board = await loadKanbanBoard(project.path);
       if (!board?.stages) continue;
+      const status = projectStatus(project);
 
       const stages = Object.entries(board.stages) as [KanbanStage, KanbanCard[]][];
       for (const [stage, cards] of stages) {
         for (const card of cards) {
           const matches = searchCard(card, query.trim(), stage, project.id, project.name);
+          if (status !== 'active') for (const m of matches) m.projectStatus = status;
           allResults.push(...matches);
         }
       }

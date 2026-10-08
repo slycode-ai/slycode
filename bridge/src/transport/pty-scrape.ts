@@ -18,7 +18,7 @@ import {
 import { supportsSessionDetection } from '../provider-utils.js';
 import type { ProviderConfig } from '../provider-utils.js';
 import type { DeliveryResult, Session } from '../types.js';
-import type { SessionTransport, SpawnPlan, SpawnPlanInput, TransportHooks, SessionCandidate } from './types.js';
+import type { SessionTransport, SpawnPlan, SpawnPlanInput, TransportHooks, SessionCandidate, DeliverOptions } from './types.js';
 
 export class PtyScrapeTransport implements SessionTransport {
   readonly id = 'pty-scrape' as const;
@@ -58,8 +58,8 @@ export class PtyScrapeTransport implements SessionTransport {
     }
   }
 
-  deliver(session: Session, prompt: string, hooks: TransportHooks): Promise<DeliveryResult> {
-    return hooks.performVerifiedDelivery(session.name, prompt);
+  deliver(session: Session, prompt: string, hooks: TransportHooks, opts?: DeliverOptions): Promise<DeliveryResult> {
+    return hooks.performVerifiedDelivery(session.name, prompt, opts);
   }
 
   supportsDetection(providerConfig: ProviderConfig, cwd: string): boolean {

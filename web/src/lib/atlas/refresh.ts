@@ -8,6 +8,7 @@
  * the artifact contract.
  */
 
+import type { DeliveryGuard } from '../delivery-guard';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { atlasPath } from './store';
@@ -43,8 +44,12 @@ export async function writeAtlasConfig(projectRoot: string, config: AtlasConfig)
 
 /** Resolve the Atlas session identity + provider/model/permissions:
  *  atlas config override → global default (feature 073) → provider default. */
+/** Test seam (#0381): lets a test land a status change during the setup reads. */
+export const atlasTestHooks: { duringSetup?: () => Promise<void> | void } = {};
+
 async function resolveAtlasSession(projectId: string, projectRoot: string) {
   const config = await readAtlasConfig(projectRoot);
+  await atlasTestHooks.duringSetup?.();
   let provider = config.provider ?? null;
   let model: string | undefined = config.model ?? undefined;
   let skipPermissions = true;
@@ -81,8 +86,15 @@ export async function deliverAtlasPrompt(
   projectId: string,
   projectRoot: string,
   prompt: string,
-): Promise<{ ok: true; sessionName: string } | { ok: false; error: string }> {
+  guard?: DeliveryGuard,
+): Promise<{ ok: true; sessionName: string } | { ok: false; error: string; held?: boolean }> {
   const { provider, model, skipPermissions, sessionName } = await resolveAtlasSession(projectId, projectRoot);
+  // #0381: scheduled refreshes pass a guard — checked here, AFTER the setup
+  // reads above and immediately before the one POST. Held → nothing sent.
+  if (guard) {
+    const g = await guard();
+    if (!g.ok) return { ok: false, held: true, error: `Held: ${g.reason}` };
+  }
   try {
     const res = await fetch(`${getBridgeUrl()}/sessions`, {
       method: 'POST',
@@ -117,7 +129,8 @@ export async function kickoffAtlasRefresh(
   projectId: string,
   projectRoot: string,
   trigger: 'manual' | 'scheduled',
-): Promise<{ ok: true; sessionName: string } | { ok: false; error: string }> {
+  guard?: DeliveryGuard,
+): Promise<{ ok: true; sessionName: string } | { ok: false; error: string; held?: boolean }> {
   const hasAtlas = await fs.access(atlasPath(projectRoot, 'atlas.json')).then(() => true, () => false);
   // Timestamp in the injected prompt (server-local time, [DD-MM-YYYY HH:mm:ss]
   // like the sly-actions convention) so terminal scrollback shows at a glance
@@ -135,7 +148,7 @@ export async function kickoffAtlasRefresh(
     `All writes are schema-validated by the CLI — on rejection, fix the JSON and retry. Do not edit documentation/atlas/ files directly.`,
   ].join('\n');
 
-  const result = await deliverAtlasPrompt(projectId, projectRoot, prompt);
+  const result = await deliverAtlasPrompt(projectId, projectRoot, prompt, guard);
   if (result.ok) {
     const config = await readAtlasConfig(projectRoot);
     config.last_run = new Date().toISOString();

@@ -2,7 +2,15 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import type { DashboardData, BridgeStats } from '@/lib/types';
+import type { DashboardData, BridgeStats, ProjectFolder, ProjectStatus, ProjectWithBacklog } from '@/lib/types';
+import { projectStatus, PROJECT_STATUSES } from '@/lib/project-status';
+import { workingInActive, canReorder, groupDen, parseShowParam, reorderAfterDrop, serializeShow, shortcutOrder, statusCounts, toggleShown, type DenSection } from '@/lib/den-filter';
+import { folderOf, folderOrderAfterDrop, sortedFolders } from '@/lib/project-folders';
+import { readCollapsedFolders, writeCollapsedFolders } from '@/lib/den-collapse-prefs';
+import { DenFolderHeader, NewFolderInput } from './DenFolder';
+import { DenStatusFilter, ProjectColdRow } from './DenStatus';
+import { ProjectStatusDialog } from './ProjectStatusDialog';
+import { ConfirmDialog } from './ConfirmDialog';
 import { connectionManager } from '@/lib/connection-manager';
 import { usePolling } from '@/hooks/usePolling';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -35,6 +43,36 @@ interface DashboardProps {
 
 type Tab = 'projects' | 'cli-assets' | 'atlas';
 
+/** Collapse key + pseudo-folder for the "No folder" section (#0381 Phase B). */
+const NO_FOLDER_KEY = '__none';
+const NO_FOLDER: ProjectFolder = { id: NO_FOLDER_KEY, name: 'No folder', order: Number.MAX_SAFE_INTEGER };
+function sectionKey(section: { folder: ProjectFolder | null }): string {
+  return section.folder?.id ?? NO_FOLDER_KEY;
+}
+
+/**
+ * Persist a Den reorder (and optional folder move) in one write. Returns an
+ * error message, or null on success. Module-level on purpose: React Compiler
+ * bails on a component whose try/catch contains logical expressions.
+ */
+async function saveProjectOrder(
+  projectIds: string[],
+  move?: { projectId: string; folderId: string | null },
+): Promise<string | null> {
+  try {
+    const res = await fetch('/api/projects/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectIds, ...(move ? { move } : {}) }),
+    });
+    if (res.ok) return null;
+    const body = await res.json().catch(() => ({} as { error?: string }));
+    return body.error || `Saving the new order failed (${res.status})`;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 export function Dashboard({ data: initialData }: DashboardProps) {
   const [data, setData] = useState<DashboardData>(initialData);
   const [isLive, setIsLive] = useState(false);
@@ -48,8 +86,9 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [newOutputOpen, setNewOutputOpen] = useState<{ anchor: HTMLElement; projectId: string | null } | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('projects');
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
+  // Phase B (#0381): drops are per folder section — {section key, index in its visible tiles}.
+  const [dropTarget, setDropTarget] = useState<{ section: string; index: number } | null>(null);
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [slycodeVersion, setSlycodeVersion] = useState<string | null>(null);
   const [showChangelog, setShowChangelog] = useState(false);
   // What's new (#0379): footer reopen link, with a dot until this release's splash is dismissed.
@@ -109,6 +148,51 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const router = useRouter();
 
+  // --- Project status (card #0381) ---
+  // The filter lives in the URL (?show=), never in storage: the Den always
+  // opens on Active. Archived projects render as cold rows, not tiles.
+  const shown = parseShowParam(searchParams.get('show'));
+  const counts = statusCounts(projectsWithBridge);
+  // Phase B: folder sections. No folders → one header-less section (the Den
+  // looks exactly as before). Collapse is device-local (localStorage).
+  const folders = sortedFolders(data.folders);
+  const { grouped, sections } = groupDen(accessibleProjects, folders, shown);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    // Read after mount: localStorage doesn't exist during SSR.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCollapsed(readCollapsedFolders());
+  }, []);
+  const toggleCollapsed = (key: string) => {
+    const next = new Set(collapsed);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setCollapsed(next);
+    writeCollapsedFolders(next, [NO_FOLDER_KEY, ...folders.map((f) => f.id)]);
+  };
+  // Number keys follow the visible tiles, top to bottom, skipping collapsed folders.
+  const visibleTiles = shortcutOrder(sections.map((sec) => ({ ...sec, folder: sec.folder ?? (grouped ? NO_FOLDER : null) })), collapsed);
+  const visibleCount = sections.reduce((n, sec) => n + sec.tiles.length + sec.cold.length, 0);
+  const needYouByProject = new Map<string, number>();
+  for (const item of data.needsYou ?? []) needYouByProject.set(item.projectId, (needYouByProject.get(item.projectId) ?? 0) + 1);
+  const visibleInaccessible = inaccessibleProjects.filter((p) => shown.has(projectStatus(p)));
+  const reorderable = canReorder(shown);
+  const activeProjectCount = counts.active;
+  const hiddenCount = projectsWithBridge.length - activeProjectCount;
+  const setShown = (next: Set<ProjectStatus>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const value = serializeShow(next);
+    if (value) params.set('show', value);
+    else params.delete('show');
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  const [statusRequest, setStatusRequest] = useState<{ project: ProjectWithBacklog; next: Exclude<ProjectStatus, 'active'> } | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [removeCold, setRemoveCold] = useState<ProjectWithBacklog | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<ProjectFolder | null>(null);
+
   // Strip ?openGlobal=1 after first render so a refresh doesn't re-trigger
   // the auto-expand. The `defaultExpanded` prop on GlobalClaudePanel only
   // applies on its initial mount, so the URL strip is safe.
@@ -122,7 +206,7 @@ export function Dashboard({ data: initialData }: DashboardProps) {
   // Number-key shortcuts to jump to projects
   useKeyboardShortcuts({
     onNumberKey: (n) => {
-      const project = accessibleProjects[n - 1];
+      const project = visibleTiles[n - 1];
       if (project) {
         router.push(`/project/${project.id}`);
       }
@@ -217,18 +301,21 @@ export function Dashboard({ data: initialData }: DashboardProps) {
     };
   }, [refreshData]);
 
-  // --- Project drag-and-drop reordering ---
-  const handleProjectDragOver = useCallback((e: React.DragEvent) => {
+  // --- Project drag-and-drop reordering (per folder section, #0381 Phase B) ---
+  // Plain functions (not useCallback): the React Compiler memoizes them, and
+  // manual deps on the derived section arrays can't be preserved.
+  const resetDrag = () => { setDraggedId(null); setDropTarget(null); setDraggedFolderId(null); };
+
+  const handleSectionDragOver = (e: React.DragEvent<HTMLDivElement>, section: DenSection<ProjectWithBacklog>) => {
+    if (!draggedId) return; // folder-header drags are handled by the headers
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    const key = sectionKey(section);
 
-    const grid = gridRef.current;
-    if (!grid) return;
-
-    const cards = Array.from(grid.children).filter(
+    const cards = Array.from(e.currentTarget.children).filter(
       (child) => child.getAttribute('data-project-card') !== null
     );
-    if (cards.length === 0) { setDropIndex(0); return; }
+    if (cards.length === 0) { setDropTarget({ section: key, index: 0 }); return; }
 
     // Group cards into rows by matching top position (within 10px tolerance)
     const rows: { indices: number[]; rects: DOMRect[]; top: number; bottom: number }[] = [];
@@ -247,7 +334,6 @@ export function Dashboard({ data: initialData }: DashboardProps) {
     // Find which row the cursor is in (or closest to)
     let targetRow = rows[rows.length - 1];
     for (const row of rows) {
-      // Use midpoint between this row's bottom and next row's top as the boundary
       const rowIdx = rows.indexOf(row);
       const nextRow = rows[rowIdx + 1];
       const boundary = nextRow ? (row.bottom + nextRow.top) / 2 : Infinity;
@@ -267,75 +353,122 @@ export function Dashboard({ data: initialData }: DashboardProps) {
       }
     }
 
-    // Suppress indicator adjacent to the dragged card (would be a no-op drop)
-    const dragIdx = accessibleProjects.findIndex((p) => p.id === draggedId);
+    // Suppress the indicator next to the dragged card in its own section (no-op drop)
+    const dragIdx = section.tiles.findIndex((p) => p.id === draggedId);
     if (dragIdx !== -1 && (newDropIndex === dragIdx || newDropIndex === dragIdx + 1)) {
-      setDropIndex(null);
+      setDropTarget(null);
     } else {
-      setDropIndex(newDropIndex);
+      setDropTarget({ section: key, index: newDropIndex });
     }
-  }, [draggedId, accessibleProjects]);
+  };
 
-  const handleProjectDragLeave = useCallback((e: React.DragEvent) => {
+  const handleSectionDragLeave = (e: React.DragEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX;
     const y = e.clientY;
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-      setDropIndex(null);
+      setDropTarget(null);
     }
-  }, []);
+  };
 
-  const handleProjectDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedId = e.dataTransfer.getData('text/plain');
-    if (!droppedId || dropIndex === null) {
-      setDropIndex(null);
-      setDraggedId(null);
-      return;
+  /**
+   * Drop the dragged project at `index` among a section's visible tiles. One
+   * write: the full registry order, plus a folder move when it changed folder.
+   */
+  const dropProject = async (section: DenSection<ProjectWithBacklog>, index: number) => {
+    const id = draggedId;
+    resetDrag();
+    if (!id) return;
+    const order = reorderAfterDrop(data.projects, section.tiles, id, index);
+    const dragged = data.projects.find((p) => p.id === id);
+    if (!dragged) return;
+    const targetFolder = section.folder?.id ?? null;
+    const move = grouped && targetFolder !== (folderOf(dragged, folders)?.id ?? null)
+      ? { projectId: id, folderId: targetFolder }
+      : undefined;
+
+    // Optimistic update
+    const byId = new Map(data.projects.map((p) => [p.id, p]));
+    const next = order
+      .map((pid) => byId.get(pid))
+      .filter((p): p is typeof data.projects[number] => p !== undefined)
+      .map((p) => (move && p.id === id ? { ...p, folderId: targetFolder ?? undefined } : p));
+    setData((prev) => ({ ...prev, projects: next }));
+
+    const error = await saveProjectOrder(order, move);
+    if (error) {
+      setStatusError(`${dragged.name}: ${error}`);
+      await refreshData();
     }
+  };
 
-    // Compute new order
-    const currentIds = accessibleProjects.map((p) => p.id);
-    const fromIndex = currentIds.indexOf(droppedId);
-    if (fromIndex === -1) {
-      setDropIndex(null);
-      setDraggedId(null);
-      return;
+  // --- Folder writes (#0381 Phase B) — every failure is shown, never swallowed ---
+  const folderApi = async (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => {
+    const res = await fetch(`/api/projects/folders${query}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({} as { error?: string }));
+      throw new Error(b.error || `Folder change failed (${res.status})`);
     }
+    await refreshData();
+  };
+  const folderMenuFor = (project: ProjectWithBacklog) => ({
+    folders,
+    onFolder: (folderId: string | null) => {
+      setStatusError(null);
+      folderApi('PATCH', { projectId: project.id, folderId }).catch((e: Error) => setStatusError(`${project.name}: ${e.message}`));
+    },
+    onNewFolder: (name: string) => folderApi('POST', { name, projectId: project.id }),
+  });
+  const dropFolderOn = (target: ProjectFolder, position: 'before' | 'after') => {
+    const dragged = draggedFolderId;
+    resetDrag();
+    if (!dragged || dragged === target.id) return;
+    const ids = folderOrderAfterDrop(folders.map((f) => f.id), dragged, target.id, position);
+    folderApi('PATCH', { order: ids }).catch((e: Error) => setStatusError(e.message));
+  };
 
-    // Remove from old position and insert at new
-    const reordered = [...currentIds];
-    reordered.splice(fromIndex, 1);
-    const insertAt = dropIndex > fromIndex ? dropIndex - 1 : dropIndex;
-    reordered.splice(insertAt, 0, droppedId);
-
-    // Append inaccessible projects at the end (preserve their relative order)
-    const inaccessibleIds = inaccessibleProjects.map((p) => p.id);
-    const allIds = [...reordered, ...inaccessibleIds];
-
-    setDropIndex(null);
-    setDraggedId(null);
-
-    // Optimistic update: reorder projects in local state
-    const projectMap = new Map(data.projects.map((p) => [p.id, p]));
-    const reorderedProjects = allIds
-      .map((id) => projectMap.get(id))
-      .filter((p): p is typeof data.projects[number] => p !== undefined);
-    setData((prev) => ({ ...prev, projects: reorderedProjects }));
-
-    // Persist to server
-    try {
-      await fetch('/api/projects/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectIds: allIds }),
-      });
-    } catch (error) {
-      console.error('Failed to persist project order:', error);
+  // Status writes (#0381). Resume/restore goes straight through; the held
+  // statuses go through the dialog first. Failures are shown, never swallowed.
+  const postStatus = useCallback(async (projectId: string, next: ProjectStatus) => {
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: next }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as { error?: string }));
+      throw new Error(body.error || `Status change failed (${res.status})`);
     }
-  }, [dropIndex, accessibleProjects, inaccessibleProjects, data.projects]);
+    await refreshData();
+  }, [refreshData]);
+  const requestStatus = (project: ProjectWithBacklog, next: ProjectStatus) => {
+    setStatusError(null);
+    if (next === 'active') {
+      postStatus(project.id, 'active').catch((e: Error) => setStatusError(`${project.name}: ${e.message}`));
+    } else {
+      setStatusRequest({ project, next });
+    }
+  };
 
-  const workingNow = data.projects.reduce((n, p) => n + (p.activeSessions ?? 0), 0);
+  const addProjectTile = (
+    <button
+      onClick={() => setShowAddModal(true)}
+      className="flex h-full min-h-[140px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong p-4 text-[13px] text-ink-3 transition-colors hover:border-ink-3 hover:text-ink-1"
+    >
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
+      </svg>
+      Add a project
+    </button>
+  );
+
+  // Hero line counts Active projects only (#0381) — a session still finishing
+  // in a paused project shows on that project's tile, not in the headline.
+  const workingNow = workingInActive(data.projects);
   const newOutput = Object.values(unseenCounts).reduce((n, c) => n + c, 0);
 
   // Unseen output is a nice-to-know, not the headline: a quiet chip in the
@@ -469,9 +602,18 @@ export function Dashboard({ data: initialData }: DashboardProps) {
               </h1>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] leading-5 text-ink-2">
                 <span>
-                  {data.projects.length} project{data.projects.length !== 1 ? 's' : ''}, {data.totalBacklogItems} card{data.totalBacklogItems !== 1 ? 's' : ''} in backlog
+                  {activeProjectCount} {hiddenCount > 0 ? 'active ' : ''}project{activeProjectCount !== 1 ? 's' : ''}, {data.totalBacklogItems} card{data.totalBacklogItems !== 1 ? 's' : ''} in backlog
                   {(data.totalUncommitted ?? 0) > 0 && `, ${data.totalUncommitted} uncommitted file${data.totalUncommitted !== 1 ? 's' : ''}`}.
                 </span>
+                {hiddenCount > 0 && shown.size < PROJECT_STATUSES.length && (
+                  <button
+                    type="button"
+                    onClick={() => setShown(new Set(PROJECT_STATUSES))}
+                    className="text-ink-2 underline decoration-line-strong underline-offset-[3px] hover:text-ink-1 hover:decoration-ink-3"
+                  >
+                    {hiddenCount} more paused, complete or archived
+                  </button>
+                )}
                 {newOutput > 0 && (
                   <button
                     type="button"
@@ -488,63 +630,155 @@ export function Dashboard({ data: initialData }: DashboardProps) {
             </section>
 
             {/* What's waiting on the owner, and what runs next */}
-            <DashboardAttention needsYou={data.needsYou ?? []} upcoming={data.upcoming ?? []} />
+            <DashboardAttention needsYou={data.needsYou ?? []} upcoming={data.upcoming ?? []} heldRunsNext24h={data.heldRunsNext24h ?? 0} />
 
             {/* Projects */}
             <section className="mb-10">
-              <div className="mb-4 flex items-center gap-3">
-                <h2 className="text-base font-semibold text-ink-1">Projects</h2>
-                <span className="font-mono text-[12px] text-ink-3">{accessibleProjects.length}</span>
-              </div>
-              <div
-                ref={gridRef}
-                className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-                onDragOver={handleProjectDragOver}
-                onDragLeave={handleProjectDragLeave}
-                onDrop={handleProjectDrop}
-              >
-                {accessibleProjects.map((project, i) => (
-                  <div key={project.id} data-project-card className="relative">
-                    {draggedId && dropIndex === i && (
-                      <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
-                    )}
-                    <ProjectCard
-                      project={project}
-                      onDeleted={refreshData}
-                      unseenCount={unseenCounts[project.id] ?? 0}
-                      onUnseenClick={(anchor) => openNewOutput(anchor, project.id)}
-                      shortcutKey={i < 10 ? (i === 9 ? 0 : i + 1) : undefined}
-                      onDragStart={() => setDraggedId(project.id)}
-                      onDragEnd={() => { setDraggedId(null); setDropIndex(null); }}
+              <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold text-ink-1">Projects</h2>
+                  <span className="font-mono text-[12px] text-ink-3">{visibleCount}</span>
+                </div>
+                <DenStatusFilter shown={shown} counts={counts} onToggle={(s) => setShown(toggleShown(shown, s))} />
+                <div className="ml-auto">
+                  {creatingFolder ? (
+                    <NewFolderInput
+                      onCreate={async (name) => { await folderApi('POST', { name }); setCreatingFolder(false); }}
+                      onCancel={() => setCreatingFolder(false)}
                     />
-                  </div>
-                ))}
-                <div className="relative">
-                  {draggedId && dropIndex === accessibleProjects.length && (
-                    <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setCreatingFolder(true)}
+                      className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-surface-1 px-2.5 text-[12px] text-ink-2 transition-colors hover:border-line-strong hover:bg-surface-2 hover:text-ink-1"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                        <path strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                        <path strokeLinecap="round" d="M12 11v5M9.5 13.5h5" />
+                      </svg>
+                      New folder
+                    </button>
                   )}
-                  <button
-                    onClick={() => setShowAddModal(true)}
-                    className="flex h-full min-h-[140px] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong p-4 text-[13px] text-ink-3 transition-colors hover:border-ink-3 hover:text-ink-1"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
-                    </svg>
-                    Add a project
-                  </button>
                 </div>
               </div>
+              {statusError && (
+                <div role="alert" className="mb-4 flex items-center gap-3 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger-text">
+                  <span className="min-w-0 flex-1">{statusError}</span>
+                  <button type="button" onClick={() => setStatusError(null)} className="text-[12px] underline underline-offset-2">Dismiss</button>
+                </div>
+              )}
+              {sections.map((section) => {
+                const key = sectionKey(section);
+                const isCollapsed = grouped && collapsed.has(key);
+                const lastIdx = section.tiles.length - 1;
+                const indicatorAt = draggedId && dropTarget?.section === key ? dropTarget.index : null;
+                return (
+                  <div key={key} className={grouped ? 'mb-7' : ''}>
+                    {grouped && (
+                      <DenFolderHeader
+                        folder={section.folder}
+                        count={section.members.length}
+                        collapsed={isCollapsed}
+                        onToggle={() => toggleCollapsed(key)}
+                        working={section.members.reduce((n, p) => n + (p.activeSessions ?? 0), 0)}
+                        needYou={section.members.reduce((n, p) => n + (needYouByProject.get(p.id) ?? 0), 0)}
+                        paused={section.members.filter((p) => projectStatus(p) === 'paused').length}
+                        onRename={section.folder ? (name) => folderApi('PATCH', { id: section.folder!.id, name }) : undefined}
+                        onDelete={section.folder ? () => setDeleteFolderTarget(section.folder) : undefined}
+                        tileDragActive={reorderable && !!draggedId}
+                        onTileDrop={() => void dropProject(section, section.tiles.length)}
+                        draggableFolder={reorderable && !!section.folder}
+                        onFolderDragStart={() => section.folder && setDraggedFolderId(section.folder.id)}
+                        onFolderDragEnd={resetDrag}
+                        folderDropActive={!!draggedFolderId && !!section.folder && draggedFolderId !== section.folder.id}
+                        onFolderDrop={(pos) => section.folder && dropFolderOn(section.folder, pos)}
+                      />
+                    )}
+                    {!isCollapsed && (
+                      <>
+                        <div
+                          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+                          onDragOver={reorderable ? (e) => handleSectionDragOver(e, section) : undefined}
+                          onDragLeave={reorderable ? handleSectionDragLeave : undefined}
+                          onDrop={reorderable ? (e) => {
+                            e.preventDefault();
+                            if (dropTarget?.section === key) void dropProject(section, dropTarget.index);
+                            else resetDrag();
+                          } : undefined}
+                        >
+                          {section.tiles.map((project, i) => {
+                            const si = visibleTiles.indexOf(project);
+                            return (
+                              <div key={project.id} data-project-card className="relative">
+                                {indicatorAt === i && (
+                                  <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
+                                )}
+                                {indicatorAt === section.tiles.length && i === lastIdx && grouped && (
+                                  <div className="pointer-events-none absolute -right-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
+                                )}
+                                <ProjectCard
+                                  project={project}
+                                  onDeleted={refreshData}
+                                  unseenCount={unseenCounts[project.id] ?? 0}
+                                  onUnseenClick={(anchor) => openNewOutput(anchor, project.id)}
+                                  shortcutKey={si >= 0 && si < 10 ? (si === 9 ? 0 : si + 1) : undefined}
+                                  draggable={reorderable}
+                                  onDragStart={() => setDraggedId(project.id)}
+                                  onDragEnd={resetDrag}
+                                  onStatusRequest={(next) => requestStatus(project, next)}
+                                  folderMenu={folderMenuFor(project)}
+                                />
+                              </div>
+                            );
+                          })}
+                          {grouped && section.folder && section.members.length === 0 && (
+                            <div className={`flex min-h-[88px] items-center justify-center rounded-xl border border-dashed px-4 text-center text-[13px] text-ink-3 ${indicatorAt === 0 ? 'border-accent bg-accent/5' : 'border-line-strong'}`}>
+                              Empty. Drag a project here, or use a project&apos;s ⋯ menu.
+                            </div>
+                          )}
+                          {!grouped && (
+                            <div className="relative">
+                              {indicatorAt === section.tiles.length && (
+                                <div className="pointer-events-none absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-accent" />
+                              )}
+                              {addProjectTile}
+                            </div>
+                          )}
+                        </div>
+                        {section.cold.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {section.cold.map((project) => (
+                              <ProjectColdRow
+                                key={project.id}
+                                project={project}
+                                onStatusRequest={(next) => requestStatus(project, next)}
+                                onRemove={() => setRemoveCold(project)}
+                                folderMenu={folderMenuFor(project)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+              {grouped && (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>{addProjectTile}</div>
+                </div>
+              )}
             </section>
 
             {/* Inaccessible Projects */}
-            {inaccessibleProjects.length > 0 && (
+            {visibleInaccessible.length > 0 && (
               <section className="mb-8">
                 <h2 className="mb-4 text-base font-semibold text-ink-3">
                   Unavailable
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {inaccessibleProjects.map((project) => (
-                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} unseenCount={unseenCounts[project.id] ?? 0} onUnseenClick={(anchor) => openNewOutput(anchor, project.id)} />
+                  {visibleInaccessible.map((project) => (
+                    <ProjectCard key={project.id} project={project} onDeleted={refreshData} unseenCount={unseenCounts[project.id] ?? 0} onUnseenClick={(anchor) => openNewOutput(anchor, project.id)} onStatusRequest={(next) => requestStatus(project, next)} draggable={false} />
                   ))}
                 </div>
               </section>
@@ -629,6 +863,49 @@ export function Dashboard({ data: initialData }: DashboardProps) {
           onClose={closeNewOutput}
         />
       )}
+
+      {statusRequest && (
+        <ProjectStatusDialog
+          projectId={statusRequest.project.id}
+          projectName={statusRequest.project.name}
+          next={statusRequest.next}
+          onCancel={() => setStatusRequest(null)}
+          onConfirm={async () => {
+            await postStatus(statusRequest.project.id, statusRequest.next);
+            setStatusRequest(null);
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={removeCold !== null}
+        onClose={() => setRemoveCold(null)}
+        onConfirm={async () => {
+          const target = removeCold;
+          setRemoveCold(null);
+          if (!target) return;
+          const res = await fetch(`/api/projects/${encodeURIComponent(target.id)}`, { method: 'DELETE' }).catch(() => null);
+          if (!res?.ok) setStatusError(`${target.name}: removing the project failed`);
+          await refreshData();
+        }}
+        title="Remove project"
+        message={<>This removes <strong className="text-ink-1">{removeCold?.name}</strong> from SlyCode. Project files are not deleted.</>}
+        confirmLabel="Remove"
+      />
+
+      <ConfirmDialog
+        open={deleteFolderTarget !== null}
+        onClose={() => setDeleteFolderTarget(null)}
+        onConfirm={() => {
+          const target = deleteFolderTarget;
+          setDeleteFolderTarget(null);
+          if (!target) return;
+          folderApi('DELETE', undefined, `?id=${encodeURIComponent(target.id)}`).catch((e: Error) => setStatusError(e.message));
+        }}
+        title="Delete folder"
+        message={<>Delete the <strong className="text-ink-1">{deleteFolderTarget?.name}</strong> folder? Its projects move to No folder. No projects are removed.</>}
+        confirmLabel="Delete folder"
+      />
 
       {/* Global Terminal */}
       <GlobalClaudePanel

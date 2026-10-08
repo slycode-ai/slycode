@@ -169,34 +169,65 @@ export function validateEntry(raw: unknown): ValidateResult {
   };
 }
 
-function newest(entries: WhatsNewEntry[]): WhatsNewEntry | null {
-  let best: WhatsNewEntry | null = null;
-  for (const e of entries) {
-    if (!best || (compareVersions(e.version, best.version) ?? 0) > 0) best = e;
+/** Newest first. Unparsable versions never reach here (validateEntry rejects them). */
+function newestFirst(entries: WhatsNewEntry[]): WhatsNewEntry[] {
+  return [...entries].sort((a, b) => compareVersions(b.version, a.version) ?? 0);
+}
+
+/** True when lo < version <= hi; a null bound is open on that side. */
+function inRange(version: string, lo: string | null, hi: string | null): boolean {
+  if (lo !== null && (compareVersions(version, lo) ?? 0) <= 0) return false;
+  if (hi !== null) {
+    const c = compareVersions(version, hi);
+    if (c === null || c > 0) return false;
   }
-  return best;
+  return true;
+}
+
+/**
+ * Every release with content at or below the installed version, newest first.
+ * The footer reopen opens on the first (the current release) and pages back
+ * through the rest. Empty when installed is unknown.
+ */
+export function historyEntries(entries: WhatsNewEntry[], installed: string | null): WhatsNewEntry[] {
+  if (!installed || !parseSemver(installed)) return [];
+  return newestFirst(entries.filter(e => inRange(e.version, null, installed)));
 }
 
 /** Newest entry at or below the installed version (the footer reopen target). */
 export function latestEntry(entries: WhatsNewEntry[], installed: string | null): WhatsNewEntry | null {
-  return newest(entries.filter(e => {
-    const c = compareVersions(e.version, installed);
-    return c !== null && c <= 0;
-  }));
+  return historyEntries(entries, installed)[0] ?? null;
 }
 
 /**
- * The splash to show on load: the newest entry with lastSeen < version <= installed.
- * lastSeen null means an install from before this feature, so the newest entry
- * at or below installed shows. Only ever one splash, never a stack.
+ * The splash pages to show on load: every release with content where
+ * lastSeen < version <= installed, newest first, so someone who jumps several
+ * releases pages through all of them in one splash. Releases without a content
+ * file simply aren't there. lastSeen null (an install from before this feature,
+ * or an unparsable state file) means every entry at or below installed.
  */
-export function pickEntry(entries: WhatsNewEntry[], installed: string | null, lastSeen: string | null): WhatsNewEntry | null {
-  const latest = latestEntry(entries, installed);
-  if (!latest) return null;
-  if (lastSeen === null) return latest;
-  const c = compareVersions(latest.version, lastSeen);
-  // An unparsable lastSeen is treated like a missing one.
-  return c === null || c > 0 ? latest : null;
+export function unseenEntries(entries: WhatsNewEntry[], installed: string | null, lastSeen: string | null): WhatsNewEntry[] {
+  const seen = lastSeen && parseSemver(lastSeen) ? lastSeen : null;
+  return historyEntries(entries, installed).filter(e => inRange(e.version, seen, null));
+}
+
+/**
+ * Authoring preview, independent of installed version and seen state:
+ *   ?whatsnew=<v>                 → that one release
+ *   ?whatsnew-from=<a>            → every release newer than a (a multi-page jump from a)
+ *   ?whatsnew-from=<a>&whatsnew=<b> → releases in (a, b], like updating from a to b
+ * Null when neither is given; an empty list when nothing matches.
+ */
+export function previewEntries(entries: WhatsNewEntry[], opts: { version?: string | null; from?: string | null }): WhatsNewEntry[] | null {
+  const version = opts.version?.trim() || null;
+  const from = opts.from?.trim() || null;
+  if (!version && !from) return null;
+  if (!from) {
+    const one = findEntry(entries, version!);
+    return one ? [one] : [];
+  }
+  if (!parseSemver(from) || (version && !parseSemver(version))) return [];
+  return newestFirst(entries.filter(e => inRange(e.version, from, version)));
 }
 
 /** Entry for the ?whatsnew=<version> preview; "0.5" matches "0.5.0". */
@@ -224,4 +255,9 @@ export function formatReleaseDate(date: string): string {
   const [y, m, d] = date.split('-');
   const month = new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-GB', { month: 'long' });
   return d === 'xx' ? `${month} ${y}` : `${Number(d)} ${month} ${y}`;
+}
+
+/** Splash paging: move by delta, clamped to [0, count-1]. Page 0 is the newest release. */
+export function stepPage(index: number, delta: number, count: number): number {
+  return Math.min(Math.max(index + delta, 0), Math.max(count - 1, 0));
 }

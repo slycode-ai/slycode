@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { loadRegistry } from '@/lib/registry';
+import { projectStatus } from '@/lib/project-status';
 import {
   scanProviderAssets,
   buildStoreAssetMatrix,
@@ -47,7 +48,8 @@ export async function GET(request: NextRequest) {
     const activeProvider = (provider && PROVIDERS.includes(provider)) ? provider : 'claude';
 
     // All projects scanned with provider-specific paths
-    const allProjects = registry.projects;
+    // Archived projects are cold (#0381) — left out of the asset matrix.
+    const allProjects = registry.projects.filter(p => projectStatus(p) !== 'archived');
     const providerAssetsByType = new Map<AssetType, Map<string, AssetInfo[]>>();
     for (const type of ASSET_TYPES) {
       providerAssetsByType.set(type, new Map());
